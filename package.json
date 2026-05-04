@@ -6,14 +6,13 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "@netlify/functions": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@netlify/functions": "latest"
-  },
-  "devDependencies": {}
+    "@vitejs/plugin-react": "^5.1.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "^7.1.12"
+  }
 }
