@@ -17,6 +17,8 @@ type Usage = {
   notes: string[];
 };
 
+type JsonObject = Record<string, unknown>;
+
 function warningLevel(percentUsed: number): WarningLevel {
   if (percentUsed >= 100) return 'over';
   if (percentUsed >= 90) return 'hot';
@@ -27,6 +29,57 @@ function warningLevel(percentUsed: number): WarningLevel {
 function nextMonthReset(): string {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
+}
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readNumber(input: JsonObject, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function readString(input: JsonObject, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value;
+  }
+
+  return undefined;
+}
+
+function readMode(input: JsonObject): Mode {
+  const modeText = readString(input, 'mode', 'metric', 'kind');
+  if (!modeText) return 'premium_requests';
+
+  return modeText.toLowerCase().includes('credit') ? 'ai_credits' : 'premium_requests';
+}
+
+function resolveCopilotApiUrl(): string {
+  const configured = process.env.COPILOT_API_URL || 'http://127.0.0.1:4141';
+  let parsed: URL;
+
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error('COPILOT_API_URL must be a valid URL');
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
+    throw new Error('COPILOT_API_URL must point to localhost/loopback only');
+  }
+
+  return parsed.toString();
 }
 
 function normaliseUsage(input: {
@@ -65,6 +118,70 @@ async function getMockUsage(): Promise<Usage> {
     notes: [
       'Mock provider active. Replace with GitHub billing/usage provider when API access is confirmed.'
     ]
+  });
+}
+
+async function getCopilotLocalUsage(): Promise<Usage> {
+  const login = process.env.GITHUB_LOGIN || 'goldjg';
+  const usageUrl = new URL('/usage', resolveCopilotApiUrl()).toString();
+  const response = await fetch(usageUrl, { headers: { accept: 'application/json' } });
+
+  if (!response.ok) {
+    throw new Error(`copilot-api usage endpoint returned HTTP ${response.status}`);
+  }
+
+  const payload: unknown = await response.json();
+  if (!isObject(payload)) {
+    throw new Error('copilot-api usage endpoint did not return a JSON object');
+  }
+
+  const knownFields = new Set([
+    'used',
+    'usage',
+    'usedCount',
+    'consumed',
+    'quota',
+    'limit',
+    'total',
+    'resetAt',
+    'reset_at',
+    'periodEndsAt',
+    'billingEntity',
+    'billing_entity',
+    'login',
+    'username',
+    'mode',
+    'metric',
+    'kind'
+  ]);
+  const unknownFields = Object.keys(payload).filter((key) => !knownFields.has(key));
+  const notes = [
+    'copilot-local provider active via local copilot-api proxy. This is unofficial and local-only.',
+    'CopeLimit only reads /usage and never reads or returns /token.'
+  ];
+
+  if (unknownFields.length > 0) {
+    notes.push(`copilot-api response included additional fields not mapped: ${unknownFields.join(', ')}`);
+  }
+
+  const used = readNumber(payload, 'used', 'usage', 'usedCount', 'consumed') ?? 0;
+  const quota = readNumber(payload, 'quota', 'limit', 'total') ?? 0;
+  const resetAt = readString(payload, 'resetAt', 'reset_at', 'periodEndsAt') ?? nextMonthReset();
+  const billingEntity = readString(payload, 'billingEntity', 'billing_entity', 'login', 'username') ?? login;
+  const mode = readMode(payload);
+
+  if (used === 0 && quota === 0) {
+    notes.push('copilot-api response did not include clear numeric usage/quota fields; defaulted to 0 values.');
+  }
+
+  return normaliseUsage({
+    mode,
+    used,
+    quota,
+    resetAt,
+    billingEntity,
+    source: 'copilot-local',
+    notes
   });
 }
 
@@ -107,7 +224,12 @@ async function getGitHubUsage(): Promise<Usage> {
 export const handler: Handler = async () => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
-    const usage = provider === 'github' ? await getGitHubUsage() : await getMockUsage();
+    const usage =
+      provider === 'github'
+        ? await getGitHubUsage()
+        : provider === 'copilot-local'
+          ? await getCopilotLocalUsage()
+          : await getMockUsage();
 
     return {
       statusCode: 200,

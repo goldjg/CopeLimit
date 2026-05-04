@@ -12,6 +12,7 @@ So CopeLimit is deliberately designed around a provider abstraction:
 
 - `mock` provider for development and UI work
 - `github` provider placeholder for authenticated billing/usage API integration where available
+- `copilot-local` provider that reads usage from a local `copilot-api` proxy (`http://127.0.0.1:4141`)
 - a stable public JSON shape for Scriptable, Shortcuts, widgets, and the PWA
 
 ## MVP shape
@@ -48,6 +49,20 @@ COPELIMIT_PROVIDER=github
 GITHUB_TOKEN=...
 GITHUB_LOGIN=goldjg
 ```
+
+For local Copilot usage via the reverse-engineered `copilot-api` proxy:
+
+```bash
+npx copilot-api
+# In another shell:
+COPELIMIT_PROVIDER=copilot-local
+COPILOT_API_URL=http://127.0.0.1:4141
+```
+
+Notes:
+- `copilot-local` is optional and local-only.
+- CopeLimit reads `GET /usage` only and never reads or exposes `GET /token`.
+- Do not run `copilot-local` in a publicly exposed deployment without strict network/access controls.
 
 ## Deploy
 
