@@ -16,6 +16,12 @@ type Usage = {
   notes: string[];
 };
 
+type User = {
+  authenticated: boolean;
+  login?: string;
+  avatar_url?: string;
+};
+
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
   const now = Date.now();
@@ -26,9 +32,29 @@ function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
 }
 
+function sourceBadge(source: string): { label: string; className: string } {
+  if (source === 'copilot-local') return { label: 'Live (local)', className: 'badge badge-live' };
+  if (source === 'unsupported' || source === 'github-placeholder') return { label: 'Unavailable', className: 'badge badge-unavailable' };
+  return { label: 'Mock data', className: 'badge badge-mock' };
+}
+
+function authErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  if (code === 'auth_state_mismatch') return 'Login failed: security state mismatch. Please try again.';
+  if (code === 'auth_unavailable') return 'GitHub login is not available. GITHUB_CLIENT_ID may not be configured.';
+  if (code === 'auth_failed') return 'GitHub login failed. Please try again.';
+  return 'An authentication error occurred. Please try again.';
+}
+
 function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+
+  const authError = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return authErrorMessage(params.get('error'));
+  }, []);
 
   async function refresh() {
     setError(null);
@@ -43,8 +69,21 @@ function App() {
     }
   }
 
+  async function fetchUser() {
+    try {
+      const response = await fetch('/api/me', { cache: 'no-store' });
+      if (response.ok) {
+        setUser(await response.json());
+      }
+    } catch {
+      // non-fatal — show anonymous state
+      setUser({ authenticated: false });
+    }
+  }
+
   useEffect(() => {
     refresh();
+    fetchUser();
   }, []);
 
   const statusText = useMemo(() => {
@@ -54,6 +93,8 @@ function App() {
     if (usage.warningLevel === 'warm') return 'Getting spicy';
     return 'Comfortable';
   }, [usage]);
+
+  const isUnsupported = usage?.source === 'unsupported' || usage?.source === 'github-placeholder';
 
   return (
     <main className="shell">
@@ -65,12 +106,40 @@ function App() {
             <p>Your Copilot usage panic meter.</p>
           </div>
         </div>
-        <button onClick={refresh}>Refresh</button>
+        <div className="heroActions">
+          {user?.authenticated ? (
+            <div className="userChip">
+              {user.avatar_url && (
+                <img src={user.avatar_url} alt={user.login} width={24} height={24} />
+              )}
+              <span>{user.login}</span>
+              <a href="/api/auth/logout">Sign out</a>
+            </div>
+          ) : (
+            <a
+              className="loginButton"
+              href="/api/auth/start"
+            >
+              Sign in with GitHub
+            </a>
+          )}
+          <button onClick={refresh}>Refresh</button>
+        </div>
       </section>
 
+      {authError && <section className="card error">{authError}</section>}
       {error && <section className="card error">Could not load usage: {error}</section>}
 
-      {usage && (
+      {usage && isUnsupported && (
+        <section className="card notice">
+          <strong>Real quota unavailable in hosted mode.</strong>
+          <p>
+            {"GitHub's API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy."}
+          </p>
+        </section>
+      )}
+
+      {usage && !isUnsupported && (
         <>
           <section className={`card meter ${usage.warningLevel}`}>
             <div className="meterHeader">
@@ -108,10 +177,13 @@ function App() {
               <p>{daysUntil(usage.resetAt)} days remaining in this quota window.</p>
             </div>
 
-            <div className="card">
+            <div className="card billingCard">
               <span className="label">Billing entity</span>
               <strong>{usage.billingEntity}</strong>
-              <p>Source: {usage.source}. Updated {new Date(usage.updatedAt).toLocaleString()}.</p>
+              <p>Updated {new Date(usage.updatedAt).toLocaleString()}.</p>
+              <span className={sourceBadge(usage.source).className}>
+                {sourceBadge(usage.source).label}
+              </span>
             </div>
           </section>
 
@@ -130,3 +202,4 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+

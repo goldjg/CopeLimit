@@ -9,3 +9,23 @@
   from = "/api/usage"
   to = "/.netlify/functions/usage"
   status = 200
+
+[[redirects]]
+  from = "/api/auth/start"
+  to = "/.netlify/functions/auth-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/callback"
+  to = "/.netlify/functions/auth-callback"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/logout"
+  to = "/.netlify/functions/auth-logout"
+  status = 200
+
+[[redirects]]
+  from = "/api/me"
+  to = "/.netlify/functions/me"
+  status = 200

@@ -65,7 +65,7 @@ function readMode(input: JsonObject): Mode {
 }
 
 function resolveCopilotApiUrl(): string {
-  const configured = process.env.COPILOT_API_URL || 'http://127.0.0.1:4141';
+  const configured = process.env.COPELIMIT_COPILOT_API_URL || process.env.COPILOT_API_URL || 'http://127.0.0.1:4141';
   let parsed: URL;
 
   try {
@@ -122,8 +122,9 @@ async function getMockUsage(): Promise<Usage> {
 }
 
 async function getCopilotLocalUsage(): Promise<Usage> {
-  const login = process.env.GITHUB_LOGIN || 'goldjg';
-  const usageUrl = new URL('/usage', resolveCopilotApiUrl()).toString();
+  const fallbackLogin = process.env.GITHUB_LOGIN || 'unknown';
+  const baseUrl = resolveCopilotApiUrl();
+  const usageUrl = new URL('/usage', baseUrl).toString();
   const response = await fetch(usageUrl, { headers: { accept: 'application/json' } });
 
   if (!response.ok) {
@@ -135,44 +136,49 @@ async function getCopilotLocalUsage(): Promise<Usage> {
     throw new Error('copilot-api usage endpoint did not return a JSON object');
   }
 
-  const knownFields = new Set([
-    'used',
-    'usage',
-    'usedCount',
-    'consumed',
-    'quota',
-    'limit',
-    'total',
-    'resetAt',
-    'reset_at',
-    'periodEndsAt',
-    'billingEntity',
-    'billing_entity',
-    'login',
-    'username',
-    'mode',
-    'metric',
-    'kind'
-  ]);
-  const unknownFields = Object.keys(payload).filter((key) => !knownFields.has(key));
   const notes = [
     'copilot-local provider active via local copilot-api proxy. This is unofficial and local-only.',
     'CopeLimit only reads /usage and never reads or returns /token.'
   ];
 
-  if (unknownFields.length > 0) {
-    notes.push(`copilot-api response included additional fields not mapped: ${unknownFields.join(', ')}`);
+  // Parse the copilot-api response shape:
+  // quota_snapshots.premium_interactions.entitlement → quota
+  // quota_snapshots.premium_interactions.remaining   → remaining
+  // quota_reset_date_utc                             → resetAt
+  // login / copilot_plan                             → billingEntity
+  const snapshots = payload['quota_snapshots'];
+  const premiumInteractions = isObject(snapshots) ? snapshots['premium_interactions'] : undefined;
+  const pi = isObject(premiumInteractions) ? premiumInteractions : undefined;
+
+  let quota = 0;
+  let remaining = 0;
+  let usedFromSnapshot = false;
+
+  if (pi) {
+    const entitlement = readNumber(pi, 'entitlement');
+    const rem = readNumber(pi, 'remaining');
+    if (entitlement !== undefined) {
+      quota = entitlement;
+      usedFromSnapshot = true;
+    }
+    if (rem !== undefined) {
+      remaining = rem;
+    }
   }
 
-  const used = readNumber(payload, 'used', 'usage', 'usedCount', 'consumed') ?? 0;
-  const quota = readNumber(payload, 'quota', 'limit', 'total') ?? 0;
-  const resetAt = readString(payload, 'resetAt', 'reset_at', 'periodEndsAt') ?? nextMonthReset();
-  const billingEntity = readString(payload, 'billingEntity', 'billing_entity', 'login', 'username') ?? login;
+  // Fall back to legacy flat fields if snapshot not present
+  if (!usedFromSnapshot) {
+    quota = readNumber(payload, 'quota', 'limit', 'total') ?? 0;
+    remaining = readNumber(payload, 'remaining') ?? Math.max(0, quota - (readNumber(payload, 'used', 'usage', 'usedCount', 'consumed') ?? 0));
+    if (quota === 0) {
+      notes.push('copilot-api response did not include quota_snapshots; fell back to legacy fields and got 0 values.');
+    }
+  }
+
+  const used = Math.max(0, quota - remaining);
+  const resetAt = readString(payload, 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ?? nextMonthReset();
+  const billingEntity = readString(payload, 'login', 'username', 'billingEntity', 'billing_entity', 'copilot_plan') ?? fallbackLogin;
   const mode = readMode(payload);
-
-  if (used === 0 && quota === 0) {
-    notes.push('copilot-api response did not include clear numeric usage/quota fields; defaulted to 0 values.');
-  }
 
   return normaliseUsage({
     mode,
@@ -185,38 +191,18 @@ async function getCopilotLocalUsage(): Promise<Usage> {
   });
 }
 
-async function getGitHubUsage(): Promise<Usage> {
-  const token = process.env.GITHUB_TOKEN;
-  const login = process.env.GITHUB_LOGIN || 'goldjg';
-
-  if (!token) {
-    throw new Error('GITHUB_TOKEN is required when COPELIMIT_PROVIDER=github');
-  }
-
-  /*
-    GitHub Copilot usage APIs are plan, role, and billing-model sensitive.
-
-    This placeholder keeps the MVP honest:
-    - the UI and widget contract are stable
-    - the backend can be swapped once the correct endpoint is confirmed
-    - tokens are never exposed to the browser or iOS widget
-
-    Candidate implementation paths to validate:
-    - GitHub billing/usage endpoints for Copilot seats/usage
-    - enterprise/org Copilot metrics endpoints, if the user has suitable permissions
-    - authenticated scrape/export only as a last resort, preferably not at all
-  */
-
+async function getUnsupportedUsage(): Promise<Usage> {
+  const login = process.env.GITHUB_LOGIN || 'unknown';
   return normaliseUsage({
     mode: 'premium_requests',
     used: 0,
     quota: 0,
     resetAt: nextMonthReset(),
     billingEntity: login,
-    source: 'github-placeholder',
+    source: 'unsupported',
     notes: [
-      'GitHub provider is a placeholder until a reliable user-level Copilot quota endpoint is confirmed for this account type.',
-      'Do not expose GitHub tokens to the browser or Scriptable widget.'
+      'Real Copilot quota is not available in hosted mode.',
+      "GitHub's API does not expose personal Copilot usage. To see real data, run CopeLimit locally with the copilot-api proxy."
     ]
   });
 }
@@ -225,10 +211,10 @@ export const handler: Handler = async () => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
     const usage =
-      provider === 'github'
-        ? await getGitHubUsage()
-        : provider === 'copilot-local'
-          ? await getCopilotLocalUsage()
+      provider === 'copilot-local'
+        ? await getCopilotLocalUsage()
+        : provider === 'unsupported' || provider === 'github'
+          ? await getUnsupportedUsage()
           : await getMockUsage();
 
     return {
