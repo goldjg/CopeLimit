@@ -134,7 +134,7 @@ function App() {
         <section className="card notice">
           <strong>Real quota unavailable in hosted mode.</strong>
           <p>
-            {"GitHub's API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy."}
+            GitHub's API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy.
           </p>
         </section>
       )}

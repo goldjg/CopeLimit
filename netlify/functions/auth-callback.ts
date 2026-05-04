@@ -120,10 +120,8 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 302,
-      headers: {
-        location: '/',
-        'set-cookie': [sessionCookie, clearStateCookie] as unknown as string
-      },
+      headers: { location: '/' },
+      multiValueHeaders: { 'set-cookie': [sessionCookie, clearStateCookie] },
       body: ''
     };
   } catch (err) {

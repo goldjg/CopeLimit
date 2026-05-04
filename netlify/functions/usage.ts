@@ -122,7 +122,7 @@ async function getMockUsage(): Promise<Usage> {
 }
 
 async function getCopilotLocalUsage(): Promise<Usage> {
-  const fallbackLogin = process.env.GITHUB_LOGIN || 'unknown';
+  const fallbackBillingEntity = process.env.GITHUB_LOGIN || 'unknown';
   const baseUrl = resolveCopilotApiUrl();
   const usageUrl = new URL('/usage', baseUrl).toString();
   const response = await fetch(usageUrl, { headers: { accept: 'application/json' } });
@@ -177,7 +177,7 @@ async function getCopilotLocalUsage(): Promise<Usage> {
 
   const used = Math.max(0, quota - remaining);
   const resetAt = readString(payload, 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ?? nextMonthReset();
-  const billingEntity = readString(payload, 'login', 'username', 'billingEntity', 'billing_entity', 'copilot_plan') ?? fallbackLogin;
+  const billingEntity = readString(payload, 'login', 'username', 'billingEntity', 'billing_entity', 'copilot_plan') ?? fallbackBillingEntity;
   const mode = readMode(payload);
 
   return normaliseUsage({
