@@ -9,7 +9,7 @@ import {
   readString,
   getUnsupportedUsage
 } from './lib/copilot';
-import { resolveWidgetToken } from './lib/widget-store';
+import { isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
 
 function extractToken(event: HandlerEvent): string | undefined {
   const auth = event.headers['authorization'];
@@ -108,16 +108,16 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const record = await resolveWidgetToken(raw);
-  if (!record) {
-    return {
-      statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ error: 'Unauthorized' })
-    };
-  }
-
   try {
+    const record = await resolveWidgetToken(raw);
+    if (!record) {
+      return {
+        statusCode: 401,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ error: 'Unauthorized' })
+      };
+    }
+
     const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
     return {
@@ -129,6 +129,13 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify(usage)
     };
   } catch (error) {
+    if (isWidgetStoreUnavailableError(error)) {
+      return {
+        statusCode: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ error: 'Widget token storage is unavailable' })
+      };
+    }
     const errorType = error instanceof Error ? error.name : typeof error;
     console.error('[widget-usage] unexpected error while resolving widget usage', errorType);
     return {
