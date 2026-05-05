@@ -22,6 +22,20 @@ type User = {
   avatar_url?: string;
 };
 
+type WidgetTokenResult = {
+  token: string;
+  expiresAt: string;
+  ttlDays: number;
+  login: string;
+  replacedExisting: boolean;
+};
+
+type WidgetTokenStatus = {
+  ttlDays: number;
+  hasActiveToken: boolean;
+  expiresAt?: string;
+};
+
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
   const now = Date.now();
@@ -45,6 +59,132 @@ function authErrorMessage(code: string | null): string | null {
   if (code === 'auth_unavailable') return 'GitHub login is not available. GITHUB_CLIENT_ID may not be configured.';
   if (code === 'auth_failed') return 'GitHub login failed. Please try again.';
   return 'An authentication error occurred. Please try again.';
+}
+
+function WidgetTokenSection() {
+  const [result, setResult] = useState<WidgetTokenResult | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<WidgetTokenStatus | null>(null);
+
+  async function refreshStatus() {
+    const response = await fetch('/api/widget-token', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    setStatus(await response.json() as WidgetTokenStatus);
+  }
+
+  useEffect(() => {
+    refreshStatus().catch(() => setStatus(null));
+  }, []);
+
+  async function generate() {
+    setGenerating(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await fetch('/api/widget-token', { method: 'POST', cache: 'no-store' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+      }
+      const generated = await response.json() as WidgetTokenResult;
+      setResult(generated);
+      setStatus({
+        ttlDays: generated.ttlDays,
+        hasActiveToken: true,
+        expiresAt: generated.expiresAt
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate token');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function revoke() {
+    setRevoking(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/widget-token', { method: 'DELETE', cache: 'no-store' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+      }
+      setResult(null);
+      await refreshStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke token');
+    } finally {
+      setRevoking(false);
+    }
+  }
+
+  async function copy() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard write failed — user can still select and copy manually
+    }
+  }
+
+  return (
+    <section className="card widgetTokenCard">
+      <span className="label">iOS Widget Token</span>
+      <p>
+        Generate a personal token to use with the Scriptable iOS widget. The token is tied
+        to your GitHub session and expires after {result?.ttlDays ?? status?.ttlDays ?? '…'} days.
+      </p>
+      {status?.hasActiveToken && !result && (
+        <p className="widgetTokenMeta">
+          You already have an active token
+          {status.expiresAt ? ` (expires ${new Date(status.expiresAt).toLocaleDateString()})` : ''}.
+          {' '}
+          The token value is not stored client-side and cannot be shown again. Generate a new token to rotate it.
+        </p>
+      )}
+      {error && <p className="widgetTokenError">{error}</p>}
+      {result ? (
+        <div className="widgetTokenResult">
+          <div className="tokenDisplay">
+            <code className="tokenValue">{result.token}</code>
+            <button type="button" className="copyButton" onClick={copy}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <p className="widgetTokenMeta">
+            Expires {new Date(result.expiresAt).toLocaleDateString()} ({daysUntil(result.expiresAt)} days).
+            This token is shown only once. Save it now in your widget configuration.
+          </p>
+          <div className="widgetTokenActions">
+            <button type="button" onClick={generate} disabled={generating}>
+              Regenerate
+            </button>
+            <button type="button" onClick={revoke} disabled={revoking}>
+              {revoking ? 'Revoking…' : 'Revoke'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="widgetTokenActions">
+          <button type="button" onClick={generate} disabled={generating}>
+            {generating ? 'Generating…' : status?.hasActiveToken ? 'Regenerate widget token' : 'Generate widget token'}
+          </button>
+          {status?.hasActiveToken && (
+            <button type="button" onClick={revoke} disabled={revoking}>
+              {revoking ? 'Revoking…' : 'Revoke token'}
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function App() {
@@ -198,6 +338,8 @@ function App() {
           )}
         </>
       )}
+
+      {user?.authenticated && <WidgetTokenSection />}
     </main>
   );
 }
