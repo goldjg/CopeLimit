@@ -245,6 +245,7 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
 
   const { accessToken, login } = payload;
   const response = await fetch('https://api.github.com/copilot_internal/user', {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       authorization: `Bearer ${accessToken}`,
       accept: 'application/json',
