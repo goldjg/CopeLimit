@@ -103,7 +103,7 @@ export async function issueWidgetTokenForUser(session: SessionPayload): Promise<
     expiresAt
   });
 
-  if (existing?.activeTokenHash && existing.activeTokenHash !== tokenHash) {
+  if (existing?.activeTokenHash) {
     await deleteTokenRecord(existing.activeTokenHash);
   }
 

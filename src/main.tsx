@@ -143,7 +143,10 @@ function WidgetTokenSection() {
       </p>
       {status?.hasActiveToken && !result && (
         <p className="widgetTokenMeta">
-          You already have an active token{status.expiresAt ? ` (expires ${new Date(status.expiresAt).toLocaleDateString()})` : ''}. The token value is not stored client-side and cannot be shown again. Generate a new token to rotate it.
+          You already have an active token
+          {status.expiresAt ? ` (expires ${new Date(status.expiresAt).toLocaleDateString()})` : ''}.
+          {' '}
+          The token value is not stored client-side and cannot be shown again. Generate a new token to rotate it.
         </p>
       )}
       {error && <p className="widgetTokenError">{error}</p>}

@@ -17,8 +17,8 @@ export function generateOpaqueWidgetToken(): string {
 }
 
 /**
- * Hashes a widget bearer token for storage/lookup. If WIDGET_TOKEN_HASH_SECRET
- * is configured, we use HMAC-SHA256. Otherwise we use SHA-256.
+ * Hashes a widget bearer token for storage/lookup using HMAC-SHA256.
+ * Requires WIDGET_TOKEN_HASH_SECRET or SESSION_SECRET to be configured.
  */
 export function hashWidgetToken(token: string): string {
   const hashSecret = process.env.WIDGET_TOKEN_HASH_SECRET || process.env.SESSION_SECRET;

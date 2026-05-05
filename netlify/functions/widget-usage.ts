@@ -129,7 +129,8 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify(usage)
     };
   } catch (error) {
-    console.error('[widget-usage] unexpected error while resolving widget usage');
+    const errorType = error instanceof Error ? error.name : typeof error;
+    console.error('[widget-usage] unexpected error while resolving widget usage', errorType);
     return {
       statusCode: 500,
       headers: { 'content-type': 'application/json; charset=utf-8' },
