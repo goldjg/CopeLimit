@@ -8,7 +8,7 @@ export type SessionPayload = {
 };
 
 function readEncryptionKey(keyHex: string): Buffer {
-  if (!/^[0-9a-f]{64}$/i.test(keyHex)) {
+  if (!/^[0-9a-f]{64}$/.test(keyHex)) {
     throw new Error('SESSION_ENCRYPTION_KEY must be a 64-character hex string');
   }
   return Buffer.from(keyHex, 'hex');
