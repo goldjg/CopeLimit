@@ -1,18 +1,46 @@
 // CopeLimit Scriptable widget for iOS.
-// Paste into Scriptable and set COPELIMIT_URL to your deployed usage endpoint.
+// Generate a widget token in the CopeLimit web app, then paste it below.
+// Do not use your GitHub token here.
 
-const COPELIMIT_URL = "https://your-site.netlify.app/.netlify/functions/usage";
+const COPELIMIT_URL = "https://copelimit.netlify.app/.netlify/functions/widget-usage";
+const WIDGET_TOKEN = "paste-your-copelimit-widget-token-here";
 
 async function getUsage() {
   const request = new Request(COPELIMIT_URL);
-  request.headers = { "accept": "application/json" };
-  return await request.loadJSON();
+  request.headers = {
+    accept: "application/json",
+    authorization: `Bearer ${WIDGET_TOKEN}`
+  };
+
+  const response = await request.loadJSON();
+
+  if (response.error) {
+    throw new Error(response.error);
+  }
+
+  return response;
 }
 
-function colourFor(level) {
-  if (level === "over" || level === "hot") return new Color("#ef4444");
-  if (level === "warm") return new Color("#f59e0b");
+function colourFor(usage) {
+  if (usage.source === "unsupported") return new Color("#f59e0b");
+  if (usage.warningLevel === "over" || usage.warningLevel === "hot") return new Color("#ef4444");
+  if (usage.warningLevel === "warm") return new Color("#f59e0b");
+  if (usage.source === "github-copilot-internal") return new Color("#22c55e");
+  if (usage.source === "copilot-local") return new Color("#60a5fa");
   return new Color("#60a5fa");
+}
+
+function sourceLabel(source) {
+  if (source === "github-copilot-internal") return "live";
+  if (source === "copilot-local") return "local";
+  if (source === "mock") return "mock";
+  if (source === "unsupported") return "unsupported";
+  return source || "unknown";
+}
+
+function formatDate(value) {
+  if (!value) return "unknown";
+  return new Date(value).toLocaleDateString("en-GB");
 }
 
 function addLine(widget, left, right, muted = false) {
@@ -25,16 +53,34 @@ function addLine(widget, left, right, muted = false) {
 
   row.addSpacer();
 
-  const r = row.addText(right);
+  const r = row.addText(String(right));
   r.font = Font.semiboldSystemFont(11);
   r.textColor = muted ? Color.gray() : Color.white();
+  r.minimumScaleFactor = 0.65;
+  r.lineLimit = 1;
 }
 
-const usage = await getUsage();
+let usage;
+
+try {
+  usage = await getUsage();
+} catch (error) {
+  usage = {
+    remaining: "?",
+    quota: "?",
+    used: "?",
+    percentUsed: "?",
+    resetAt: null,
+    source: "error",
+    warningLevel: "hot",
+    error: error instanceof Error ? error.message : "Unknown error"
+  };
+}
 
 const widget = new ListWidget();
 widget.backgroundColor = new Color("#111827");
 widget.setPadding(14, 14, 14, 14);
+widget.url = "https://copelimit.netlify.app";
 
 const title = widget.addText("CopeLimit");
 title.font = Font.boldSystemFont(16);
@@ -44,18 +90,25 @@ widget.addSpacer(6);
 
 const remaining = widget.addText(String(usage.remaining));
 remaining.font = Font.heavySystemFont(42);
-remaining.textColor = colourFor(usage.warningLevel);
-remaining.minimumScaleFactor = 0.6;
+remaining.textColor = colourFor(usage);
+remaining.minimumScaleFactor = 0.55;
+remaining.lineLimit = 1;
 
 const caption = widget.addText(`remaining of ${usage.quota}`);
 caption.font = Font.mediumSystemFont(12);
 caption.textColor = Color.gray();
+caption.minimumScaleFactor = 0.7;
+caption.lineLimit = 1;
 
 widget.addSpacer(10);
 
-addLine(widget, "Used", `${usage.used} (${usage.percentUsed}%)`);
-addLine(widget, "Reset", new Date(usage.resetAt).toLocaleDateString());
-addLine(widget, "Source", usage.source, true);
+if (usage.error) {
+  addLine(widget, "Error", usage.error, false);
+} else {
+  addLine(widget, "Used", `${usage.used} (${usage.percentUsed}%)`);
+  addLine(widget, "Reset", formatDate(usage.resetAt));
+  addLine(widget, "Source", sourceLabel(usage.source), true);
+}
 
 Script.setWidget(widget);
 Script.complete();
