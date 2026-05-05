@@ -54,7 +54,8 @@ GITHUB_CLIENT_SECRET=...
 ```
 
 Notes:
-- `SESSION_ENCRYPTION_KEY` is strongly recommended in production to encrypt the signed session payload containing OAuth access tokens.
+- `SESSION_ENCRYPTION_KEY` is required in production to encrypt the signed session payload containing OAuth access tokens.
+- The key must be 64 lowercase hex characters (32 bytes). Generate with `openssl rand -hex 32`.
 - After enabling `copilot` OAuth scope, existing users must sign out and sign in again to refresh token scopes.
 
 When a reliable public GitHub API source is available for your account type, switch to:

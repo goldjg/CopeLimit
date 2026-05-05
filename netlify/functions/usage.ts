@@ -291,7 +291,7 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
     readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'remaining']) ??
     readNumber(body, 'remaining');
 
-  if ((!quota || quota <= 0) && (!remaining || remaining <= 0)) {
+  if (quota === undefined && remaining === undefined) {
     console.warn('[usage] copilot_internal user payload missing quota fields', Object.keys(body));
     return getUnsupportedUsage(login, [
       'Copilot API responded but did not include quota data. The response shape may have changed.'
