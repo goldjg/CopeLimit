@@ -6,6 +6,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.4",
     "@netlify/functions": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

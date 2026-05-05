@@ -1,33 +1,22 @@
 import type { Handler } from '@netlify/functions';
 import { parseCookies, verifySession } from './lib/session';
-import { signWidgetToken, widgetTokenTtlSeconds } from './lib/widget-token';
+import { widgetTokenTtlDays } from './lib/widget-token';
+import {
+  getWidgetTokenStatusForUser,
+  issueWidgetTokenForUser,
+  revokeWidgetTokenForUser
+} from './lib/widget-store';
 
-export const handler: Handler = async (event) => {
-  // GET: return configured TTL so the UI can display it before generating
-  if (event.httpMethod === 'GET') {
-    return {
-      statusCode: 200,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ ttlDays: Math.round(widgetTokenTtlSeconds() / 86400) })
-    };
-  }
-
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: { 'content-type': 'application/json; charset=utf-8', allow: 'POST' },
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
-  }
-
+async function requireSession(event: Parameters<Handler>[0]) {
   const sessionSecret = process.env.SESSION_SECRET;
   const encKey = process.env.SESSION_ENCRYPTION_KEY;
 
   if (!sessionSecret) {
     return {
-      statusCode: 503,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ error: 'Session secret not configured' })
+      error: {
+        statusCode: 503,
+        body: JSON.stringify({ error: 'Session secret not configured' })
+      }
     };
   }
 
@@ -35,39 +24,83 @@ export const handler: Handler = async (event) => {
   const rawSession = cookies['session'];
   if (!rawSession) {
     return {
-      statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ error: 'Not authenticated' })
+      error: {
+        statusCode: 401,
+        body: JSON.stringify({ error: 'Not authenticated' })
+      }
     };
   }
 
   const session = verifySession(rawSession, sessionSecret, encKey || undefined);
   if (!session) {
     return {
-      statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ error: 'Session invalid or expired' })
+      error: {
+        statusCode: 401,
+        body: JSON.stringify({ error: 'Session invalid or expired' })
+      }
     };
   }
 
-  const widgetSecret = process.env.WIDGET_TOKEN_SECRET || sessionSecret;
-  const widgetEncKey = process.env.WIDGET_TOKEN_ENCRYPTION_KEY || encKey || undefined;
+  return { session };
+}
 
-  const ttl = widgetTokenTtlSeconds();
-  const exp = Math.floor(Date.now() / 1000) + ttl;
+export const handler: Handler = async (event) => {
+  const baseHeaders = { 'content-type': 'application/json; charset=utf-8' };
 
-  const token = signWidgetToken(
-    { login: session.login, accessToken: session.accessToken, exp },
-    widgetSecret,
-    widgetEncKey
-  );
+  if (event.httpMethod === 'GET') {
+    const auth = await requireSession(event);
+    if ('error' in auth) {
+      return { ...auth.error, headers: baseHeaders };
+    }
 
-  const expiresAt = new Date(exp * 1000).toISOString();
-  const ttlDays = Math.round(ttl / 86400);
+    const status = await getWidgetTokenStatusForUser(auth.session.id);
+
+    return {
+      statusCode: 200,
+      headers: baseHeaders,
+      body: JSON.stringify({ ttlDays: widgetTokenTtlDays(), ...status })
+    };
+  }
+
+  if (event.httpMethod === 'DELETE') {
+    const auth = await requireSession(event);
+    if ('error' in auth) {
+      return { ...auth.error, headers: baseHeaders };
+    }
+
+    const revoked = await revokeWidgetTokenForUser(auth.session.id);
+
+    return {
+      statusCode: 200,
+      headers: baseHeaders,
+      body: JSON.stringify({ revoked })
+    };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { ...baseHeaders, allow: 'GET, POST, DELETE' },
+      body: JSON.stringify({ error: 'Method not allowed' })
+    };
+  }
+
+  const auth = await requireSession(event);
+  if ('error' in auth) {
+    return { ...auth.error, headers: baseHeaders };
+  }
+
+  const issued = await issueWidgetTokenForUser(auth.session);
 
   return {
     statusCode: 200,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
-    body: JSON.stringify({ token, expiresAt, ttlDays, login: session.login })
+    headers: baseHeaders,
+    body: JSON.stringify({
+      token: issued.token,
+      expiresAt: issued.record.expiresAt,
+      ttlDays: widgetTokenTtlDays(),
+      login: auth.session.login,
+      replacedExisting: issued.replacedExisting
+    })
   };
 };

@@ -27,6 +27,13 @@ type WidgetTokenResult = {
   expiresAt: string;
   ttlDays: number;
   login: string;
+  replacedExisting: boolean;
+};
+
+type WidgetTokenStatus = {
+  ttlDays: number;
+  hasActiveToken: boolean;
+  expiresAt?: string;
 };
 
 function daysUntil(dateText: string): number {
@@ -57,15 +64,21 @@ function authErrorMessage(code: string | null): string | null {
 function WidgetTokenSection() {
   const [result, setResult] = useState<WidgetTokenResult | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [revoking, setRevoking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [defaultTtlDays, setDefaultTtlDays] = useState<number | null>(null);
+  const [status, setStatus] = useState<WidgetTokenStatus | null>(null);
+
+  async function refreshStatus() {
+    const response = await fetch('/api/widget-token', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    setStatus(await response.json() as WidgetTokenStatus);
+  }
 
   useEffect(() => {
-    fetch('/api/widget-token', { cache: 'no-store' })
-      .then((r) => r.ok ? r.json() as Promise<{ ttlDays: number }> : Promise.reject())
-      .then((data) => setDefaultTtlDays(data.ttlDays))
-      .catch(() => setDefaultTtlDays(90));
+    refreshStatus().catch(() => setStatus({ ttlDays: 90, hasActiveToken: false }));
   }, []);
 
   async function generate() {
@@ -78,11 +91,35 @@ function WidgetTokenSection() {
         const body = await response.json().catch(() => ({})) as Record<string, unknown>;
         throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
       }
-      setResult(await response.json() as WidgetTokenResult);
+      const generated = await response.json() as WidgetTokenResult;
+      setResult(generated);
+      setStatus({
+        ttlDays: generated.ttlDays,
+        hasActiveToken: true,
+        expiresAt: generated.expiresAt
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate token');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function revoke() {
+    setRevoking(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/widget-token', { method: 'DELETE', cache: 'no-store' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+      }
+      setResult(null);
+      await refreshStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke token');
+    } finally {
+      setRevoking(false);
     }
   }
 
@@ -102,8 +139,13 @@ function WidgetTokenSection() {
       <span className="label">iOS Widget Token</span>
       <p>
         Generate a personal token to use with the Scriptable iOS widget. The token is tied
-        to your GitHub session and expires after {result?.ttlDays ?? defaultTtlDays ?? '…'} days.
+        to your GitHub session and expires after {result?.ttlDays ?? status?.ttlDays ?? '…'} days.
       </p>
+      {status?.hasActiveToken && !result && (
+        <p className="widgetTokenMeta">
+          You already have an active token{status.expiresAt ? ` (expires ${new Date(status.expiresAt).toLocaleDateString()})` : ''}. The token value is not stored client-side and cannot be shown again. Generate a new token to rotate it.
+        </p>
+      )}
       {error && <p className="widgetTokenError">{error}</p>}
       {result ? (
         <div className="widgetTokenResult">
@@ -115,16 +157,28 @@ function WidgetTokenSection() {
           </div>
           <p className="widgetTokenMeta">
             Expires {new Date(result.expiresAt).toLocaleDateString()} ({daysUntil(result.expiresAt)} days).
-            Store this token securely — it contains your GitHub access token.
+            This token is shown only once. Save it now in your widget configuration.
           </p>
-          <button type="button" onClick={generate} disabled={generating}>
-            Regenerate
-          </button>
+          <div className="widgetTokenActions">
+            <button type="button" onClick={generate} disabled={generating}>
+              Regenerate
+            </button>
+            <button type="button" onClick={revoke} disabled={revoking}>
+              {revoking ? 'Revoking…' : 'Revoke'}
+            </button>
+          </div>
         </div>
       ) : (
-        <button type="button" onClick={generate} disabled={generating}>
-          {generating ? 'Generating…' : 'Generate widget token'}
-        </button>
+        <div className="widgetTokenActions">
+          <button type="button" onClick={generate} disabled={generating}>
+            {generating ? 'Generating…' : status?.hasActiveToken ? 'Regenerate widget token' : 'Generate widget token'}
+          </button>
+          {status?.hasActiveToken && (
+            <button type="button" onClick={revoke} disabled={revoking}>
+              {revoking ? 'Revoking…' : 'Revoke token'}
+            </button>
+          )}
+        </div>
       )}
     </section>
   );

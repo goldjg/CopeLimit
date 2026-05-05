@@ -9,14 +9,11 @@ import {
   readString,
   getUnsupportedUsage
 } from './lib/copilot';
-import { verifyWidgetToken } from './lib/widget-token';
+import { resolveWidgetToken } from './lib/widget-store';
 
 function extractToken(event: HandlerEvent): string | undefined {
   const auth = event.headers['authorization'];
-  return (
-    event.headers['x-widget-token'] ??
-    (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined)
-  );
+  return event.headers['x-widget-token'] ?? (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
 }
 
 async function getWidgetCopilotInternalUsage(githubToken: string, login: string): Promise<Usage> {
@@ -35,12 +32,12 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
   if (!response.ok) {
     if (response.status === 401) {
       return getUnsupportedUsage(login, [
-        'GitHub token has expired or been revoked. Generate a new widget token by signing in to CopeLimit.'
+        'Stored GitHub token has expired or been revoked. Re-generate your widget token in CopeLimit.'
       ]);
     }
     if (response.status === 403) {
       return getUnsupportedUsage(login, [
-        'GitHub token does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
+        'Stored GitHub token does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
       ]);
     }
     if (response.status === 404) {
@@ -94,17 +91,6 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
 }
 
 export const handler: Handler = async (event) => {
-  const widgetSecret = process.env.WIDGET_TOKEN_SECRET || process.env.SESSION_SECRET;
-  if (!widgetSecret) {
-    return {
-      statusCode: 503,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ error: 'Service not configured' })
-    };
-  }
-
-  const widgetEncKey = process.env.WIDGET_TOKEN_ENCRYPTION_KEY || process.env.SESSION_ENCRYPTION_KEY || undefined;
-
   const raw = extractToken(event);
   if (!raw) {
     return {
@@ -114,8 +100,8 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const tokenPayload = verifyWidgetToken(raw, widgetSecret, widgetEncKey);
-  if (!tokenPayload) {
+  const record = await resolveWidgetToken(raw);
+  if (!record) {
     return {
       statusCode: 401,
       headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -124,7 +110,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const usage = await getWidgetCopilotInternalUsage(tokenPayload.accessToken, tokenPayload.login);
+    const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
     return {
       statusCode: 200,

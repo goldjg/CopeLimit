@@ -266,6 +266,12 @@ button {
   gap: 12px;
 }
 
+.widgetTokenActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .tokenDisplay {
   display: flex;
   gap: 10px;
