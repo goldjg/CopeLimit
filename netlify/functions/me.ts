@@ -3,6 +3,7 @@ import { verifySession, parseCookies } from './lib/session';
 
 export const handler: Handler = async (event) => {
   const secret = process.env.SESSION_SECRET;
+  const encKey = process.env.SESSION_ENCRYPTION_KEY;
   if (!secret) {
     console.warn('[me] SESSION_SECRET is not set; all sessions are unauthenticated');
     return {
@@ -23,7 +24,7 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const payload = verifySession(raw, secret);
+  const payload = verifySession(raw, secret, encKey || undefined);
   if (!payload) {
     return {
       statusCode: 200,

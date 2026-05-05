@@ -1,4 +1,5 @@
-import type { Handler } from '@netlify/functions';
+import type { Handler, HandlerEvent } from '@netlify/functions';
+import { parseCookies, verifySession } from './lib/session';
 
 type Mode = 'premium_requests' | 'ai_credits';
 type WarningLevel = 'normal' | 'warm' | 'hot' | 'over';
@@ -62,6 +63,22 @@ function readMode(input: JsonObject): Mode {
   if (!modeText) return 'premium_requests';
 
   return modeText.toLowerCase().includes('credit') ? 'ai_credits' : 'premium_requests';
+}
+
+function readNumberAtPath(input: JsonObject, path: string[]): number | undefined {
+  let cursor: unknown = input;
+  for (const segment of path) {
+    if (!isObject(cursor)) return undefined;
+    cursor = cursor[segment];
+  }
+
+  if (typeof cursor === 'number' && Number.isFinite(cursor)) return cursor;
+  if (typeof cursor === 'string') {
+    const parsed = Number(cursor);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return undefined;
 }
 
 function resolveCopilotApiUrl(): string {
@@ -191,28 +208,122 @@ async function getCopilotLocalUsage(): Promise<Usage> {
   });
 }
 
-async function getUnsupportedUsage(): Promise<Usage> {
-  const login = process.env.GITHUB_LOGIN || 'unknown';
+async function getUnsupportedUsage(login?: string, extraNotes: string[] = []): Promise<Usage> {
+  const billingLogin = login || process.env.GITHUB_LOGIN || 'unknown';
   return normaliseUsage({
     mode: 'premium_requests',
     used: 0,
     quota: 0,
     resetAt: nextMonthReset(),
-    billingEntity: login,
+    billingEntity: billingLogin,
     source: 'unsupported',
     notes: [
       'Real Copilot quota is not available in hosted mode.',
-      "GitHub's API does not expose personal Copilot usage. To see real data, run CopeLimit locally with the copilot-api proxy."
+      "GitHub's API does not expose personal Copilot usage. To see real data, run CopeLimit locally with the copilot-api proxy.",
+      ...extraNotes
     ]
   });
 }
 
-export const handler: Handler = async () => {
+async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    return getUnsupportedUsage(undefined, ['Session secret not configured; cannot authenticate.']);
+  }
+
+  const cookies = parseCookies(event.headers['cookie']);
+  const rawSession = cookies['session'];
+  if (!rawSession) {
+    return getUnsupportedUsage(undefined, ['No session cookie present. Please sign in.']);
+  }
+
+  const encKey = process.env.SESSION_ENCRYPTION_KEY;
+  const payload = verifySession(rawSession, sessionSecret, encKey || undefined);
+  if (!payload) {
+    return getUnsupportedUsage(undefined, ['Session invalid or expired. Please sign in again.']);
+  }
+
+  const { accessToken, login } = payload;
+  const response = await fetch('https://api.github.com/copilot_internal/user', {
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: 'application/json',
+      'x-github-api-version': '2022-11-28',
+      'editor-version': 'vscode/1.95.0',
+      'copilot-integration-id': 'vscode-chat',
+      'user-agent': 'CopeLimit/1.0'
+    }
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      return getUnsupportedUsage(login, [
+        'GitHub token is not valid or has expired. Please sign out and sign in again.'
+      ]);
+    }
+    if (response.status === 403) {
+      return getUnsupportedUsage(login, [
+        'This GitHub account does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
+      ]);
+    }
+    if (response.status === 404) {
+      return getUnsupportedUsage(login, ['No Copilot subscription found for this account.']);
+    }
+    throw new Error(`Copilot internal API returned HTTP ${response.status}`);
+  }
+
+  const body: unknown = await response.json();
+  if (!isObject(body)) {
+    return getUnsupportedUsage(login, [
+      'Copilot API responded but did not include quota data. The response shape may have changed.'
+    ]);
+  }
+
+  const quota =
+    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'entitlement']) ??
+    readNumberAtPath(body, ['premium_requests', 'entitlement']) ??
+    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'entitlement']) ??
+    readNumber(body, 'entitlement', 'quota', 'limit', 'total');
+
+  const remaining =
+    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'remaining']) ??
+    readNumberAtPath(body, ['premium_requests', 'remaining']) ??
+    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'remaining']) ??
+    readNumber(body, 'remaining');
+
+  if ((!quota || quota <= 0) && (!remaining || remaining <= 0)) {
+    console.warn('[usage] copilot_internal user payload missing quota fields', Object.keys(body));
+    return getUnsupportedUsage(login, [
+      'Copilot API responded but did not include quota data. The response shape may have changed.'
+    ]);
+  }
+
+  const safeQuota = Math.max(0, quota ?? 0);
+  const safeRemaining = Math.max(0, remaining ?? 0);
+  const used = Math.max(0, safeQuota - safeRemaining);
+  const resetAt =
+    readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
+    nextMonthReset();
+
+  return normaliseUsage({
+    mode: 'premium_requests',
+    used,
+    quota: safeQuota,
+    resetAt,
+    billingEntity: login,
+    source: 'github-copilot-internal',
+    notes: ['Live data via GitHub Copilot internal API.']
+  });
+}
+
+export const handler: Handler = async (event) => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
     const usage =
       provider === 'copilot-local'
         ? await getCopilotLocalUsage()
+        : provider === 'github-copilot-internal'
+          ? await getCopilotInternalUsage(event)
         : provider === 'unsupported' || provider === 'github'
           ? await getUnsupportedUsage()
           : await getMockUsage();

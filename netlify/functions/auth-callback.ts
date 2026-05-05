@@ -26,6 +26,7 @@ export const handler: Handler = async (event) => {
   const clientId = process.env.GITHUB_CLIENT_ID;
   const clientSecret = process.env.GITHUB_CLIENT_SECRET;
   const sessionSecret = process.env.SESSION_SECRET;
+  const encKey = process.env.SESSION_ENCRYPTION_KEY;
 
   const code = event.queryStringParameters?.['code'];
   const state = event.queryStringParameters?.['state'];
@@ -107,7 +108,8 @@ export const handler: Handler = async (event) => {
 
     const sessionToken = signSession(
       { login: user.login, id: user.id, avatar_url: user.avatar_url, accessToken },
-      sessionSecret
+      sessionSecret,
+      encKey || undefined
     );
 
     const secure = isSecureContext();

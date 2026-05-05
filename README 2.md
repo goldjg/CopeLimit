@@ -12,6 +12,7 @@ So CopeLimit is deliberately designed around a provider abstraction:
 
 - `mock` provider for development and UI work
 - `github` provider placeholder for authenticated billing/usage API integration where available
+- `github-copilot-internal` provider for hosted Netlify usage via `https://api.github.com/copilot_internal/user`
 - `copilot-local` provider that reads usage from a local `copilot-api` proxy (`http://127.0.0.1:4141`)
 - a stable public JSON shape for Scriptable, Shortcuts, widgets, and the PWA
 
@@ -36,13 +37,27 @@ npm run dev
 
 By default the app uses mock data.
 
-Create `.env` from `.env.example` and set:
+Set:
 
 ```bash
 COPELIMIT_PROVIDER=mock
 ```
 
-When a reliable GitHub API source is available for your account type, switch to:
+For hosted Copilot usage on Netlify, set:
+
+```bash
+COPELIMIT_PROVIDER=github-copilot-internal
+SESSION_SECRET=...                 # strong random string
+SESSION_ENCRYPTION_KEY=...         # 64-char hex (openssl rand -hex 32)
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
+
+Notes:
+- `SESSION_ENCRYPTION_KEY` is strongly recommended in production to encrypt the signed session payload containing OAuth access tokens.
+- After enabling `copilot` OAuth scope, existing users must sign out and sign in again to refresh token scopes.
+
+When a reliable public GitHub API source is available for your account type, switch to:
 
 ```bash
 COPELIMIT_PROVIDER=github
