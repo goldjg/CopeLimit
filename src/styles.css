@@ -36,6 +36,7 @@ body {
 .brand img {
   width: 72px;
   height: 72px;
+  object-fit: cover;
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(96, 165, 250, 0.2);
 }
