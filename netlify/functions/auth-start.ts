@@ -12,7 +12,7 @@ export const handler: Handler = async () => {
     const state = generateState();
     const params = new URLSearchParams({
       client_id: clientId,
-      scope: 'read:user',
+      scope: 'read:user copilot',
       state
     });
 

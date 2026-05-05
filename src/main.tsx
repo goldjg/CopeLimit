@@ -34,6 +34,7 @@ function labelForMode(mode: Usage['mode']): string {
 
 function sourceBadge(source: string): { label: string; className: string } {
   if (source === 'copilot-local') return { label: 'Live (local)', className: 'badge badge-live' };
+  if (source === 'github-copilot-internal') return { label: 'Live (hosted)', className: 'badge badge-live' };
   if (source === 'unsupported' || source === 'github-placeholder') return { label: 'Unavailable', className: 'badge badge-unavailable' };
   return { label: 'Mock data', className: 'badge badge-mock' };
 }
@@ -202,4 +203,3 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-

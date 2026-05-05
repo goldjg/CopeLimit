@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 export type SessionPayload = {
   login: string;
@@ -6,6 +6,48 @@ export type SessionPayload = {
   avatar_url: string;
   accessToken: string;
 };
+
+function readEncryptionKey(keyHex: string): Buffer {
+  if (!/^[0-9a-f]{64}$/.test(keyHex)) {
+    throw new Error('SESSION_ENCRYPTION_KEY must be a 64-character hex string');
+  }
+  return Buffer.from(keyHex, 'hex');
+}
+
+function encryptPayload(json: string, keyHex: string): string {
+  const key = readEncryptionKey(keyHex);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${ciphertext.toString('hex')}:${tag.toString('hex')}`;
+}
+
+function decryptPayload(encrypted: string, keyHex: string): string | null {
+  const parts = encrypted.split(':');
+  if (parts.length !== 3) return null;
+
+  const [ivHex, ciphertextHex, tagHex] = parts;
+  if (!ivHex || !ciphertextHex || !tagHex) return null;
+
+  try {
+    const key = readEncryptionKey(keyHex);
+    const iv = Buffer.from(ivHex, 'hex');
+    const ciphertext = Buffer.from(ciphertextHex, 'hex');
+    const tag = Buffer.from(tagHex, 'hex');
+
+    if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) {
+      return null;
+    }
+
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return plain.toString('utf8');
+  } catch {
+    return null;
+  }
+}
 
 export type CookieOptions = {
   httpOnly?: boolean;
@@ -15,13 +57,15 @@ export type CookieOptions = {
   path?: string;
 };
 
-export function signSession(payload: SessionPayload, secret: string): string {
-  const data = Buffer.from(JSON.stringify(payload)).toString('base64');
+export function signSession(payload: SessionPayload, secret: string, encryptionKey?: string): string {
+  const json = JSON.stringify(payload);
+  const content = encryptionKey ? `e:${encryptPayload(json, encryptionKey)}` : json;
+  const data = Buffer.from(content, 'utf8').toString('base64');
   const sig = createHmac('sha256', secret).update(data).digest('hex');
   return `${data}.${sig}`;
 }
 
-export function verifySession(cookie: string, secret: string): SessionPayload | null {
+export function verifySession(cookie: string, secret: string, encryptionKey?: string): SessionPayload | null {
   const dot = cookie.lastIndexOf('.');
   if (dot === -1) return null;
 
@@ -40,7 +84,17 @@ export function verifySession(cookie: string, secret: string): SessionPayload | 
   if (!match) return null;
 
   try {
-    return JSON.parse(Buffer.from(data, 'base64').toString('utf8')) as SessionPayload;
+    const inner = Buffer.from(data, 'base64').toString('utf8');
+    let json = inner;
+
+    if (inner.startsWith('e:')) {
+      if (!encryptionKey) return null;
+      const decrypted = decryptPayload(inner.slice(2), encryptionKey);
+      if (!decrypted) return null;
+      json = decrypted;
+    }
+
+    return JSON.parse(json) as SessionPayload;
   } catch {
     return null;
   }
