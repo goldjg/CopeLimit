@@ -34,3 +34,8 @@
   from = "/api/widget-usage"
   to = "/.netlify/functions/widget-usage"
   status = 200
+
+[[redirects]]
+  from = "/api/widget-token"
+  to = "/.netlify/functions/widget-token"
+  status = 200

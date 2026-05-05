@@ -1,5 +1,4 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
-import { timingSafeEqual } from 'crypto';
 import {
   type Usage,
   isObject,
@@ -10,40 +9,17 @@ import {
   readString,
   getUnsupportedUsage
 } from './lib/copilot';
+import { verifyWidgetToken } from './lib/widget-token';
 
-function verifyWidgetToken(event: HandlerEvent): boolean {
-  const configuredToken = process.env.WIDGET_TOKEN;
-  if (!configuredToken) return false;
-
+function extractToken(event: HandlerEvent): string | undefined {
   const auth = event.headers['authorization'];
-  const provided =
+  return (
     event.headers['x-widget-token'] ??
-    (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined);
-
-  if (!provided) return false;
-
-  try {
-    const a = Buffer.from(provided, 'utf8');
-    const b = Buffer.from(configuredToken, 'utf8');
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
+    (auth?.startsWith('Bearer ') ? auth.slice(7) : undefined)
+  );
 }
 
-async function getWidgetCopilotInternalUsage(): Promise<Usage> {
-  const githubToken = process.env.WIDGET_GITHUB_TOKEN;
-  if (!githubToken) {
-    return getUnsupportedUsage(undefined, [
-      'WIDGET_GITHUB_TOKEN is not configured. Set this environment variable to a GitHub OAuth token with the copilot scope.'
-    ]);
-  }
-
-  if (!/^[\x20-\x7E]+$/.test(githubToken)) {
-    return getUnsupportedUsage(undefined, ['WIDGET_GITHUB_TOKEN contains invalid characters.']);
-  }
-
+async function getWidgetCopilotInternalUsage(githubToken: string, login: string): Promise<Usage> {
   const response = await fetch('https://api.github.com/copilot_internal/user', {
     signal: AbortSignal.timeout(10_000),
     headers: {
@@ -58,29 +34,27 @@ async function getWidgetCopilotInternalUsage(): Promise<Usage> {
 
   if (!response.ok) {
     if (response.status === 401) {
-      return getUnsupportedUsage(undefined, [
-        'WIDGET_GITHUB_TOKEN is not valid or has expired. Update the environment variable.'
+      return getUnsupportedUsage(login, [
+        'GitHub token has expired or been revoked. Generate a new widget token by signing in to CopeLimit.'
       ]);
     }
     if (response.status === 403) {
-      return getUnsupportedUsage(undefined, [
-        'WIDGET_GITHUB_TOKEN does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
+      return getUnsupportedUsage(login, [
+        'GitHub token does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
       ]);
     }
     if (response.status === 404) {
-      return getUnsupportedUsage(undefined, ['No Copilot subscription found for the widget GitHub token.']);
+      return getUnsupportedUsage(login, ['No Copilot subscription found for this account.']);
     }
     throw new Error(`Copilot internal API returned HTTP ${response.status}`);
   }
 
   const body: unknown = await response.json();
   if (!isObject(body)) {
-    return getUnsupportedUsage(undefined, [
+    return getUnsupportedUsage(login, [
       'Copilot API responded but did not include quota data. The response shape may have changed.'
     ]);
   }
-
-  const login = readString(body, 'login') ?? (process.env.GITHUB_LOGIN || 'unknown');
 
   const quota =
     readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'entitlement']) ??
@@ -120,7 +94,28 @@ async function getWidgetCopilotInternalUsage(): Promise<Usage> {
 }
 
 export const handler: Handler = async (event) => {
-  if (!verifyWidgetToken(event)) {
+  const widgetSecret = process.env.WIDGET_TOKEN_SECRET || process.env.SESSION_SECRET;
+  if (!widgetSecret) {
+    return {
+      statusCode: 503,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ error: 'Service not configured' })
+    };
+  }
+
+  const widgetEncKey = process.env.WIDGET_TOKEN_ENCRYPTION_KEY || process.env.SESSION_ENCRYPTION_KEY || undefined;
+
+  const raw = extractToken(event);
+  if (!raw) {
+    return {
+      statusCode: 401,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ error: 'Unauthorized' })
+    };
+  }
+
+  const tokenPayload = verifyWidgetToken(raw, widgetSecret, widgetEncKey);
+  if (!tokenPayload) {
     return {
       statusCode: 401,
       headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -129,16 +124,7 @@ export const handler: Handler = async (event) => {
   }
 
   try {
-    const provider = process.env.COPELIMIT_PROVIDER || 'mock';
-    let usage: Usage;
-
-    if (provider === 'github-copilot-internal') {
-      usage = await getWidgetCopilotInternalUsage();
-    } else {
-      usage = await getUnsupportedUsage(undefined, [
-        'Widget usage only supports the github-copilot-internal provider. Set COPELIMIT_PROVIDER=github-copilot-internal.'
-      ]);
-    }
+    const usage = await getWidgetCopilotInternalUsage(tokenPayload.accessToken, tokenPayload.login);
 
     return {
       statusCode: 200,

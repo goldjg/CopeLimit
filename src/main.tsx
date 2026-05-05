@@ -22,6 +22,13 @@ type User = {
   avatar_url?: string;
 };
 
+type WidgetTokenResult = {
+  token: string;
+  expiresAt: string;
+  ttlDays: number;
+  login: string;
+};
+
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
   const now = Date.now();
@@ -45,6 +52,82 @@ function authErrorMessage(code: string | null): string | null {
   if (code === 'auth_unavailable') return 'GitHub login is not available. GITHUB_CLIENT_ID may not be configured.';
   if (code === 'auth_failed') return 'GitHub login failed. Please try again.';
   return 'An authentication error occurred. Please try again.';
+}
+
+function WidgetTokenSection() {
+  const [result, setResult] = useState<WidgetTokenResult | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [defaultTtlDays, setDefaultTtlDays] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('/api/widget-token', { cache: 'no-store' })
+      .then((r) => r.ok ? r.json() as Promise<{ ttlDays: number }> : Promise.reject())
+      .then((data) => setDefaultTtlDays(data.ttlDays))
+      .catch(() => setDefaultTtlDays(90));
+  }, []);
+
+  async function generate() {
+    setGenerating(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await fetch('/api/widget-token', { method: 'POST', cache: 'no-store' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+      }
+      setResult(await response.json() as WidgetTokenResult);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate token');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function copy() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard write failed — user can still select and copy manually
+    }
+  }
+
+  return (
+    <section className="card widgetTokenCard">
+      <span className="label">iOS Widget Token</span>
+      <p>
+        Generate a personal token to use with the Scriptable iOS widget. The token is tied
+        to your GitHub session and expires after {result?.ttlDays ?? defaultTtlDays ?? '…'} days.
+      </p>
+      {error && <p className="widgetTokenError">{error}</p>}
+      {result ? (
+        <div className="widgetTokenResult">
+          <div className="tokenDisplay">
+            <code className="tokenValue">{result.token}</code>
+            <button type="button" className="copyButton" onClick={copy}>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <p className="widgetTokenMeta">
+            Expires {new Date(result.expiresAt).toLocaleDateString()} ({daysUntil(result.expiresAt)} days).
+            Store this token securely — it contains your GitHub access token.
+          </p>
+          <button type="button" onClick={generate} disabled={generating}>
+            Regenerate
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={generate} disabled={generating}>
+          {generating ? 'Generating…' : 'Generate widget token'}
+        </button>
+      )}
+    </section>
+  );
 }
 
 function App() {
@@ -198,6 +281,8 @@ function App() {
           )}
         </>
       )}
+
+      {user?.authenticated && <WidgetTokenSection />}
     </main>
   );
 }

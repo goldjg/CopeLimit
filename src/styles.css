@@ -246,6 +246,57 @@ button {
   margin-bottom: 0;
 }
 
+.widgetTokenCard {
+  margin-top: 20px;
+}
+
+.widgetTokenCard p {
+  margin-top: 6px;
+  margin-bottom: 14px;
+}
+
+.widgetTokenError {
+  color: #ef4444;
+  margin-bottom: 12px;
+}
+
+.widgetTokenResult {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tokenDisplay {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.tokenValue {
+  flex: 1;
+  display: block;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: #d1d5db;
+}
+
+.copyButton {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  font-size: 0.875rem;
+}
+
+.widgetTokenMeta {
+  color: #a1a1aa;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
 @media (max-width: 680px) {
   .hero {
     align-items: flex-start;
