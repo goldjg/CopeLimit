@@ -3,6 +3,7 @@ import { parseCookies, verifySession } from './lib/session';
 import { widgetTokenTtlDays } from './lib/widget-token';
 import {
   getWidgetTokenStatusForUser,
+  isWidgetStoreUnavailableError,
   issueWidgetTokenForUser,
   revokeWidgetTokenForUser
 } from './lib/widget-store';
@@ -46,6 +47,11 @@ async function requireSession(event: Parameters<Handler>[0]) {
 
 export const handler: Handler = async (event) => {
   const baseHeaders = { 'content-type': 'application/json; charset=utf-8' };
+  const storeUnavailable = () => ({
+    statusCode: 503,
+    headers: baseHeaders,
+    body: JSON.stringify({ error: 'Widget token storage is unavailable' })
+  });
 
   if (event.httpMethod === 'GET') {
     const auth = await requireSession(event);
@@ -53,7 +59,19 @@ export const handler: Handler = async (event) => {
       return { ...auth.error, headers: baseHeaders };
     }
 
-    const status = await getWidgetTokenStatusForUser(auth.session.id);
+    let status;
+    try {
+      status = await getWidgetTokenStatusForUser(auth.session.id);
+    } catch (error) {
+      if (isWidgetStoreUnavailableError(error)) {
+        return storeUnavailable();
+      }
+      return {
+        statusCode: 500,
+        headers: baseHeaders,
+        body: JSON.stringify({ error: 'Internal server error' })
+      };
+    }
 
     return {
       statusCode: 200,
@@ -68,7 +86,19 @@ export const handler: Handler = async (event) => {
       return { ...auth.error, headers: baseHeaders };
     }
 
-    const revoked = await revokeWidgetTokenForUser(auth.session.id);
+    let revoked;
+    try {
+      revoked = await revokeWidgetTokenForUser(auth.session.id);
+    } catch (error) {
+      if (isWidgetStoreUnavailableError(error)) {
+        return storeUnavailable();
+      }
+      return {
+        statusCode: 500,
+        headers: baseHeaders,
+        body: JSON.stringify({ error: 'Internal server error' })
+      };
+    }
 
     return {
       statusCode: 200,
@@ -90,7 +120,19 @@ export const handler: Handler = async (event) => {
     return { ...auth.error, headers: baseHeaders };
   }
 
-  const issued = await issueWidgetTokenForUser(auth.session);
+  let issued;
+  try {
+    issued = await issueWidgetTokenForUser(auth.session);
+  } catch (error) {
+    if (isWidgetStoreUnavailableError(error)) {
+      return storeUnavailable();
+    }
+    return {
+      statusCode: 500,
+      headers: baseHeaders,
+      body: JSON.stringify({ error: 'Internal server error' })
+    };
+  }
 
   return {
     statusCode: 200,

@@ -26,6 +26,7 @@ type IssueResult = {
 };
 
 const STORE_NAME = 'widget-tokens';
+const STORE_UNAVAILABLE_ERROR = 'Widget token store unavailable';
 
 function tokenKey(tokenHash: string): string {
   return `token/${tokenHash}`;
@@ -36,7 +37,22 @@ function userKey(userId: number): string {
 }
 
 function getWidgetStore() {
-  return getStore({ name: STORE_NAME });
+  try {
+    const siteID = process.env.NETLIFY_SITE_ID;
+    const token = process.env.NETLIFY_AUTH_TOKEN;
+
+    if (siteID && token) {
+      return getStore({ name: STORE_NAME, siteID, token });
+    }
+
+    return getStore({ name: STORE_NAME });
+  } catch (error) {
+    throw new Error(STORE_UNAVAILABLE_ERROR, { cause: error });
+  }
+}
+
+export function isWidgetStoreUnavailableError(error: unknown): boolean {
+  return error instanceof Error && error.message === STORE_UNAVAILABLE_ERROR;
 }
 
 async function getUserIndex(userId: number): Promise<WidgetUserIndex | null> {
