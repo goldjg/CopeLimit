@@ -78,7 +78,7 @@ function WidgetTokenSection() {
   }
 
   useEffect(() => {
-    refreshStatus().catch(() => setStatus({ ttlDays: 90, hasActiveToken: false }));
+    refreshStatus().catch(() => setStatus(null));
   }, []);
 
   async function generate() {

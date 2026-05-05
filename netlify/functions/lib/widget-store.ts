@@ -78,10 +78,6 @@ export async function getWidgetTokenStatusForUser(userId: number): Promise<{ has
 export async function issueWidgetTokenForUser(session: SessionPayload): Promise<IssueResult> {
   const existing = await getUserIndex(session.id);
 
-  if (existing?.activeTokenHash) {
-    await deleteTokenRecord(existing.activeTokenHash);
-  }
-
   const ttlSeconds = widgetTokenTtlSeconds();
   const now = Date.now();
   const expiresAt = new Date(now + ttlSeconds * 1000).toISOString();
@@ -106,6 +102,10 @@ export async function issueWidgetTokenForUser(session: SessionPayload): Promise<
     updatedAt: new Date(now).toISOString(),
     expiresAt
   });
+
+  if (existing?.activeTokenHash && existing.activeTokenHash !== tokenHash) {
+    await deleteTokenRecord(existing.activeTokenHash);
+  }
 
   return {
     token,
@@ -134,10 +134,6 @@ export async function resolveWidgetToken(token: string): Promise<WidgetTokenReco
   const record = (await store.get(tokenKey(tokenHash), { type: 'json' })) as WidgetTokenRecord | null;
 
   if (!record) return null;
-
-  if (record.tokenHash !== tokenHash) {
-    return null;
-  }
 
   if (isExpired(record.expiresAt)) {
     await deleteTokenRecord(record.tokenHash);

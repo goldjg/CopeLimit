@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 
 const DEFAULT_TTL_DAYS = 90;
 
@@ -21,11 +21,10 @@ export function generateOpaqueWidgetToken(): string {
  * is configured, we use HMAC-SHA256. Otherwise we use SHA-256.
  */
 export function hashWidgetToken(token: string): string {
-  const pepper = process.env.WIDGET_TOKEN_HASH_SECRET || process.env.SESSION_SECRET;
-
-  if (pepper) {
-    return createHmac('sha256', pepper).update(token, 'utf8').digest('hex');
+  const hashSecret = process.env.WIDGET_TOKEN_HASH_SECRET || process.env.SESSION_SECRET;
+  if (!hashSecret) {
+    throw new Error('WIDGET_TOKEN_HASH_SECRET or SESSION_SECRET must be configured');
   }
 
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+  return createHmac('sha256', hashSecret).update(token, 'utf8').digest('hex');
 }

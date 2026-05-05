@@ -91,6 +91,14 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
 }
 
 export const handler: Handler = async (event) => {
+  if (!process.env.WIDGET_TOKEN_HASH_SECRET && !process.env.SESSION_SECRET) {
+    return {
+      statusCode: 503,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ error: 'Service not configured' })
+    };
+  }
+
   const raw = extractToken(event);
   if (!raw) {
     return {
@@ -121,7 +129,7 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify(usage)
     };
   } catch (error) {
-    console.error('[widget-usage] unexpected error:', error instanceof Error ? error.message : String(error));
+    console.error('[widget-usage] unexpected error while resolving widget usage');
     return {
       statusCode: 500,
       headers: { 'content-type': 'application/json; charset=utf-8' },
