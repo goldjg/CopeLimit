@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
 import type { SessionPayload } from './session';
 import { generateOpaqueWidgetToken, hashWidgetToken, widgetTokenTtlSeconds } from './widget-token';
 
@@ -27,6 +28,7 @@ type IssueResult = {
 
 const STORE_NAME = 'widget-tokens';
 const STORE_UNAVAILABLE_ERROR = 'Widget token store unavailable';
+const STORE_NOT_CONFIGURED_ERROR = 'Widget token store not configured';
 
 function tokenKey(tokenHash: string): string {
   return `token/${tokenHash}`;
@@ -55,19 +57,86 @@ export function isWidgetStoreUnavailableError(error: unknown): boolean {
   return error instanceof Error && error.message === STORE_UNAVAILABLE_ERROR;
 }
 
-async function getUserIndex(userId: number): Promise<WidgetUserIndex | null> {
+export function isWidgetStoreNotConfiguredError(error: unknown): boolean {
+  return error instanceof Error && error.message === STORE_NOT_CONFIGURED_ERROR;
+}
+
+function getBlobEncryptionKey() {
+  try {
+    return readBlobEncryptionKey();
+  } catch (error) {
+    throw new Error(STORE_NOT_CONFIGURED_ERROR, { cause: error });
+  }
+}
+
+function looksEncryptedBlobRecord(raw: string): boolean {
+  const parts = raw.split(':');
+  if (parts.length !== 3) return false;
+  const [ivHex, ciphertextHex, tagHex] = parts;
+  return (
+    Boolean(ivHex) &&
+    Boolean(ciphertextHex) &&
+    Boolean(tagHex) &&
+    /^[0-9a-f]+$/.test(ivHex) &&
+    /^[0-9a-f]+$/.test(ciphertextHex) &&
+    /^[0-9a-f]+$/.test(tagHex)
+  );
+}
+
+function keyKind(key: string): 'token' | 'user' | 'unknown' {
+  if (key.startsWith('token/')) return 'token';
+  if (key.startsWith('user/')) return 'user';
+  return 'unknown';
+}
+
+async function readStoredRecord<T>(key: string): Promise<T | null> {
   const store = getWidgetStore();
-  return (await store.get(userKey(userId), { type: 'json' })) as WidgetUserIndex | null;
+  const encryptionKey = getBlobEncryptionKey();
+  const raw = (await store.get(key, { type: 'text' })) as string | null;
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+
+  const decrypted = decryptBlob(raw, encryptionKey);
+  if (decrypted !== null) {
+    try {
+      return JSON.parse(decrypted) as T;
+    } catch {
+      console.warn('[widget-store] failed to parse decrypted blob record', { kind: keyKind(key) });
+      return null;
+    }
+  }
+
+  if (looksEncryptedBlobRecord(raw)) {
+    console.warn('[widget-store] encrypted blob record failed integrity/decryption checks', { kind: keyKind(key) });
+    return null;
+  }
+
+  try {
+    const legacyRecord = JSON.parse(raw) as T;
+    console.warn('[widget-store] migrated plaintext blob record to encrypted format');
+    await store.set(key, encryptBlob(JSON.stringify(legacyRecord), encryptionKey));
+    return legacyRecord;
+  } catch {
+    console.warn('[widget-store] failed to parse blob record as encrypted or legacy plaintext JSON');
+    return null;
+  }
+}
+
+async function writeStoredRecord<T>(key: string, record: T): Promise<void> {
+  const store = getWidgetStore();
+  const encryptionKey = getBlobEncryptionKey();
+  await store.set(key, encryptBlob(JSON.stringify(record), encryptionKey));
+}
+
+async function getUserIndex(userId: number): Promise<WidgetUserIndex | null> {
+  return readStoredRecord<WidgetUserIndex>(userKey(userId));
 }
 
 async function setUserIndex(index: WidgetUserIndex): Promise<void> {
-  const store = getWidgetStore();
-  await store.setJSON(userKey(index.userId), index);
+  await writeStoredRecord(userKey(index.userId), index);
 }
 
 async function setTokenRecord(record: WidgetTokenRecord): Promise<void> {
-  const store = getWidgetStore();
-  await store.setJSON(tokenKey(record.tokenHash), record);
+  await writeStoredRecord(tokenKey(record.tokenHash), record);
 }
 
 async function deleteTokenRecord(tokenHash: string): Promise<void> {
@@ -147,7 +216,7 @@ export async function revokeWidgetTokenForUser(userId: number): Promise<boolean>
 export async function resolveWidgetToken(token: string): Promise<WidgetTokenRecord | null> {
   const store = getWidgetStore();
   const tokenHash = hashWidgetToken(token);
-  const record = (await store.get(tokenKey(tokenHash), { type: 'json' })) as WidgetTokenRecord | null;
+  const record = await readStoredRecord<WidgetTokenRecord>(tokenKey(tokenHash));
 
   if (!record) return null;
 

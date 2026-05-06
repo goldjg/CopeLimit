@@ -3,6 +3,7 @@ import { parseCookies, verifySession } from './lib/session';
 import { widgetTokenTtlDays } from './lib/widget-token';
 import {
   getWidgetTokenStatusForUser,
+  isWidgetStoreNotConfiguredError,
   isWidgetStoreUnavailableError,
   issueWidgetTokenForUser,
   revokeWidgetTokenForUser
@@ -52,6 +53,11 @@ export const handler: Handler = async (event) => {
     headers: baseHeaders,
     body: JSON.stringify({ error: 'Widget token storage is unavailable' })
   });
+  const serviceNotConfigured = () => ({
+    statusCode: 503,
+    headers: baseHeaders,
+    body: JSON.stringify({ error: 'Service not configured' })
+  });
 
   if (event.httpMethod === 'GET') {
     const auth = await requireSession(event);
@@ -63,6 +69,9 @@ export const handler: Handler = async (event) => {
     try {
       status = await getWidgetTokenStatusForUser(auth.session.id);
     } catch (error) {
+      if (isWidgetStoreNotConfiguredError(error)) {
+        return serviceNotConfigured();
+      }
       if (isWidgetStoreUnavailableError(error)) {
         return storeUnavailable();
       }
@@ -90,6 +99,9 @@ export const handler: Handler = async (event) => {
     try {
       revoked = await revokeWidgetTokenForUser(auth.session.id);
     } catch (error) {
+      if (isWidgetStoreNotConfiguredError(error)) {
+        return serviceNotConfigured();
+      }
       if (isWidgetStoreUnavailableError(error)) {
         return storeUnavailable();
       }
@@ -124,6 +136,9 @@ export const handler: Handler = async (event) => {
   try {
     issued = await issueWidgetTokenForUser(auth.session);
   } catch (error) {
+    if (isWidgetStoreNotConfiguredError(error)) {
+      return serviceNotConfigured();
+    }
     if (isWidgetStoreUnavailableError(error)) {
       return storeUnavailable();
     }
