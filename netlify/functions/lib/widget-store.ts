@@ -69,6 +69,20 @@ function getBlobEncryptionKey() {
   }
 }
 
+function looksEncryptedBlobRecord(raw: string): boolean {
+  const parts = raw.split(':');
+  if (parts.length !== 3) return false;
+  const [ivHex, ciphertextHex, tagHex] = parts;
+  return (
+    Boolean(ivHex) &&
+    Boolean(ciphertextHex) &&
+    Boolean(tagHex) &&
+    /^[0-9a-f]+$/.test(ivHex) &&
+    /^[0-9a-f]+$/.test(ciphertextHex) &&
+    /^[0-9a-f]+$/.test(tagHex)
+  );
+}
+
 async function readStoredRecord<T>(key: string): Promise<T | null> {
   const store = getWidgetStore();
   const encryptionKey = getBlobEncryptionKey();
@@ -83,6 +97,11 @@ async function readStoredRecord<T>(key: string): Promise<T | null> {
       console.warn('[widget-store] failed to parse decrypted blob record', key);
       return null;
     }
+  }
+
+  if (looksEncryptedBlobRecord(raw)) {
+    console.warn('[widget-store] encrypted-looking blob record failed decryption and will not be migrated', key);
+    return null;
   }
 
   try {
