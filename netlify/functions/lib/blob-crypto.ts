@@ -36,6 +36,10 @@ export function decryptBlob(encrypted: string, keyHex: string): string | null {
 
   const [ivHex, ciphertextHex, tagHex] = parts;
   if (!ivHex || !ciphertextHex || !tagHex) return null;
+  if (!/^[0-9a-f]+$/.test(ivHex) || !/^[0-9a-f]+$/.test(ciphertextHex) || !/^[0-9a-f]+$/.test(tagHex)) return null;
+  if (ivHex.length !== 24 || tagHex.length !== 32 || ciphertextHex.length === 0 || ciphertextHex.length % 2 !== 0) {
+    return null;
+  }
 
   try {
     const key = readEncryptionKey(keyHex);

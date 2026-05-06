@@ -83,6 +83,12 @@ function looksEncryptedBlobRecord(raw: string): boolean {
   );
 }
 
+function keyKind(key: string): 'token' | 'user' | 'unknown' {
+  if (key.startsWith('token/')) return 'token';
+  if (key.startsWith('user/')) return 'user';
+  return 'unknown';
+}
+
 async function readStoredRecord<T>(key: string): Promise<T | null> {
   const store = getWidgetStore();
   const encryptionKey = getBlobEncryptionKey();
@@ -94,15 +100,13 @@ async function readStoredRecord<T>(key: string): Promise<T | null> {
     try {
       return JSON.parse(decrypted) as T;
     } catch {
-      console.warn('[widget-store] failed to parse decrypted blob record');
+      console.warn('[widget-store] failed to parse decrypted blob record', { kind: keyKind(key) });
       return null;
     }
   }
 
   if (looksEncryptedBlobRecord(raw)) {
-    console.warn(
-      '[widget-store] encrypted-looking blob record failed decryption (possible key mismatch, key rotation, or tampered data)'
-    );
+    console.warn('[widget-store] encrypted blob record failed integrity/decryption checks', { kind: keyKind(key) });
     return null;
   }
 
