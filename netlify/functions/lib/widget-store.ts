@@ -100,7 +100,9 @@ async function readStoredRecord<T>(key: string): Promise<T | null> {
   }
 
   if (looksEncryptedBlobRecord(raw)) {
-    console.warn('[widget-store] encrypted-looking blob record failed decryption and will not be migrated');
+    console.warn(
+      '[widget-store] encrypted-looking blob record failed decryption (possible key mismatch, key rotation, or tampered data)'
+    );
     return null;
   }
 

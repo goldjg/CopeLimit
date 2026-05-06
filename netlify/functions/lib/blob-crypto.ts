@@ -1,9 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const BLOB_ENCRYPTION_KEY_ENV = 'BLOB_ENCRYPTION_KEY';
+const HEX_256_KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 function readEncryptionKey(keyHex: string): Buffer {
-  if (!/^[0-9a-f]{64}$/.test(keyHex)) {
+  if (!HEX_256_KEY_PATTERN.test(keyHex)) {
     throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} must be a 64-character lowercase hex string`);
   }
   return Buffer.from(keyHex, 'hex');
@@ -14,7 +15,7 @@ export function readBlobEncryptionKey(): string {
   if (!key) {
     throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} is not configured`);
   }
-  if (!/^[0-9a-f]{64}$/.test(key)) {
+  if (!HEX_256_KEY_PATTERN.test(key)) {
     throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} must be a 64-character lowercase hex string`);
   }
   return key;
