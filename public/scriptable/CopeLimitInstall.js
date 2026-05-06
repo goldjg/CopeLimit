@@ -1,0 +1,43 @@
+// CopeLimit Scriptable onboarding installer.
+// Imported and run from CopeLimit iPhone onboarding.
+
+const BASE_URL = "https://copelimit.netlify.app";
+
+async function main() {
+  const bootstrapToken = args.queryParameters.bt || Script.parameter();
+
+  if (!bootstrapToken) {
+    const alert = new Alert();
+    alert.title = "CopeLimit setup failed";
+    alert.message = "Missing setup token. Return to CopeLimit and try setup again.";
+    alert.addAction("OK");
+    await alert.present();
+    Safari.open(`${BASE_URL}/?onboarding=error&reason=missing_token`);
+    return;
+  }
+
+  try {
+    const request = new Request(`${BASE_URL}/api/onboarding/exchange`);
+    request.method = "POST";
+    request.headers = {
+      "content-type": "application/json",
+      accept: "application/json"
+    };
+    request.body = JSON.stringify({ bootstrapToken });
+
+    const response = await request.loadJSON();
+    if (!response || typeof response.widgetToken !== "string") {
+      const reason = encodeURIComponent((response && response.error) || "exchange_failed");
+      Safari.open(`${BASE_URL}/?onboarding=error&reason=${reason}`);
+      return;
+    }
+
+    Keychain.set("copelimit_widget_token", response.widgetToken);
+    Safari.open(`${BASE_URL}/?onboarding=complete`);
+  } catch {
+    Safari.open(`${BASE_URL}/?onboarding=error&reason=network`);
+  }
+}
+
+await main();
+Script.complete();

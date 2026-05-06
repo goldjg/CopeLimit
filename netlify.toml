@@ -40,6 +40,16 @@
   to = "/.netlify/functions/widget-token"
   status = 200
 
+[[redirects]]
+  from = "/api/onboarding/session"
+  to = "/.netlify/functions/onboarding-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/exchange"
+  to = "/.netlify/functions/onboarding-exchange"
+  status = 200
+
 [[headers]]
   for = "/sw.js"
   [headers.values]
@@ -54,3 +64,8 @@
   for = "/icons/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/scriptable/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store"
