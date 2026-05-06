@@ -211,6 +211,11 @@ button {
   font-size: 0.95rem;
 }
 
+.installButton {
+  background: #60a5fa;
+  color: #0b1120;
+}
+
 .billingCard {
   position: relative;
 }
