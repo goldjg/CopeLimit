@@ -240,7 +240,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingNotice(`${label} copied to clipboard. Create or edit “${scriptTargetName}” in Scriptable and paste the script text.`);
+      setOnboardingNotice(`${label} copied to clipboard. Create “${scriptTargetName}” in Scriptable and paste the script text.`);
       setOnboardingSuccess(false);
     } catch (err) {
       if (err instanceof TypeError) {
@@ -309,7 +309,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
-      setOnboardingNotice('Configuring token in Scriptable. Ensure you already created “CopeLimitInstall” in Scriptable using the options above.');
+      setOnboardingNotice('Configuring token in Scriptable. Ensure the “CopeLimitInstall” script exists in Scriptable before continuing.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
       storeOnboardingStep('error');
@@ -385,8 +385,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
           </div>
           <p className="widgetTokenMeta">
-            Automatic token handoff works after CopeLimitInstall exists in Scriptable. Final iOS home screen widget creation and
-            script assignment remain manual.
+            Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
+            widget creation and script assignment remain manual.
           </p>
         </div>
       )}
