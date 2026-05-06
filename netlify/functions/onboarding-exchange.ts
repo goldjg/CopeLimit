@@ -60,6 +60,7 @@ export const handler: Handler = async (event) => {
       id: bootstrapRecord.userId,
       login: bootstrapRecord.login,
       accessToken: bootstrapRecord.githubAccessToken,
+      // avatar_url is not required by widget-token issuance, but SessionPayload currently includes it.
       avatar_url: ''
     });
 

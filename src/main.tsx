@@ -100,7 +100,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
   const [onboardingSuccess, setOnboardingSuccess] = useState(false);
 
-  function saveOnboardingStep(step: OnboardingStep) {
+  function storeOnboardingStep(step: OnboardingStep) {
     setOnboardingStep(step);
     sessionStorage.setItem('copelimit-onboarding-step', step);
   }
@@ -141,7 +141,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       setOnboardingSuccess(true);
       setOnboardingError(null);
       setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimitWidget.');
-      saveOnboardingStep('idle');
+      storeOnboardingStep('idle');
       refreshStatus().catch(() => undefined);
       params.delete('onboarding');
       params.delete('reason');
@@ -150,7 +150,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     } else if (onboarding === 'error') {
       setOnboardingSuccess(false);
       setOnboardingError(reason ? `Setup failed (${reason}).` : 'Setup failed. Please try again.');
-      saveOnboardingStep('error');
+      storeOnboardingStep('error');
       params.delete('onboarding');
       params.delete('reason');
       const nextQuery = params.toString();
@@ -221,14 +221,9 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     window.location.href = deepLink;
   }
 
-  async function likelyScriptableInstalled(): Promise<boolean> {
+  async function detectScriptableApp(): Promise<boolean> {
     return new Promise((resolve) => {
       let hidden = false;
-      const timer = window.setTimeout(() => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        resolve(hidden);
-      }, 1700);
-
       function handleVisibilityChange() {
         if (document.hidden) {
           hidden = true;
@@ -238,7 +233,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       document.addEventListener('visibilitychange', handleVisibilityChange);
       window.location.href = 'scriptable:///';
       window.setTimeout(() => {
-        window.clearTimeout(timer);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         resolve(hidden);
       }, 2300);
@@ -249,12 +243,12 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     setOnboardingError(null);
     setOnboardingNotice(null);
     setOnboardingSuccess(false);
-    saveOnboardingStep('checking');
-    const installed = await likelyScriptableInstalled();
+    storeOnboardingStep('checking');
+    const installed = await detectScriptableApp();
     if (installed) {
-      saveOnboardingStep('ready');
+      storeOnboardingStep('ready');
     } else {
-      saveOnboardingStep('scriptable-missing');
+      storeOnboardingStep('scriptable-missing');
     }
   }
 
@@ -271,17 +265,18 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     setOnboardingError(null);
     setOnboardingNotice(null);
     setOnboardingSuccess(false);
-    saveOnboardingStep('requesting');
+    storeOnboardingStep('requesting');
     try {
       const session = await requestOnboardingSession();
-      const runLink = `scriptable:///run?scriptName=CopeLimitInstall&data=${encodeURIComponent(session.bootstrapToken)}`;
-      saveOnboardingStep('linking');
+      // Bootstrap token is short-lived and single-use by design; URL exposure is accepted for iOS deep-link handoff.
+      const runLink = `scriptable:///run?scriptName=CopeLimitInstall&bt=${encodeURIComponent(session.bootstrapToken)}`;
+      storeOnboardingStep('linking');
       window.location.href = runLink;
-      saveOnboardingStep('waiting');
+      storeOnboardingStep('waiting');
       setOnboardingNotice('Opened Scriptable. If prompted, run CopeLimitInstall and return here when complete.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
-      saveOnboardingStep('error');
+      storeOnboardingStep('error');
     }
   }
 
@@ -289,7 +284,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     setOnboardingError(null);
     setOnboardingNotice(null);
     setOnboardingSuccess(false);
-    saveOnboardingStep('idle');
+    storeOnboardingStep('idle');
   }
 
   return (
@@ -328,10 +323,10 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
             {(onboardingStep === 'ready' || onboardingStep === 'import-installer' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
               <>
-                <button type="button" onClick={() => { importScriptableScript('CopeLimitWidget.js'); saveOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { importScriptableScript('CopeLimitWidget.js'); storeOnboardingStep('import-installer'); }}>
                   Import widget script
                 </button>
-                <button type="button" onClick={() => { importScriptableScript('CopeLimitInstall.js'); saveOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { importScriptableScript('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
                   Import installer script
                 </button>
                 <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>

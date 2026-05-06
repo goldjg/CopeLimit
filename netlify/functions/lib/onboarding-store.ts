@@ -174,15 +174,16 @@ export async function resolveAndConsumeBootstrapToken(rawToken: string): Promise
     return null;
   }
 
-  await store.delete(key);
-
   if (isExpired(record.expiresAt)) {
+    await store.delete(key);
     const userIndex = await getUserIndex(record.userId);
     if (userIndex?.activeTokenHash === record.tokenHash) {
       await store.delete(onboardingUserKey(record.userId));
     }
     return null;
   }
+
+  await store.delete(key);
 
   const userIndex = await getUserIndex(record.userId);
   if (userIndex?.activeTokenHash === record.tokenHash) {

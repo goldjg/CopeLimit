@@ -25,7 +25,21 @@ async function main() {
     };
     request.body = JSON.stringify({ bootstrapToken });
 
-    const response = await request.loadJSON();
+    const raw = await request.loadString();
+    let response = null;
+    try {
+      response = JSON.parse(raw);
+    } catch {
+      Safari.open(`${BASE_URL}/?onboarding=error&reason=invalid_response`);
+      return;
+    }
+
+    if (request.response?.statusCode >= 400) {
+      const reason = encodeURIComponent((response && response.error) || `http_${request.response?.statusCode || "error"}`);
+      Safari.open(`${BASE_URL}/?onboarding=error&reason=${reason}`);
+      return;
+    }
+
     if (!response || typeof response.widgetToken !== "string") {
       const reason = encodeURIComponent((response && response.error) || "exchange_failed");
       Safari.open(`${BASE_URL}/?onboarding=error&reason=${reason}`);
