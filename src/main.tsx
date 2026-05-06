@@ -199,6 +199,7 @@ function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [showIosInstallHint, setShowIosInstallHint] = useState(false);
 
   const authError = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -236,6 +237,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
+    const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
+      || iosNavigator.standalone === true;
+    // UA/platform checks are used here because iOS Safari lacks a standard install-prompt API.
+    const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent)
+      || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+    const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';
+    setIsInstalled(inStandaloneMode);
+    setShowIosInstallHint(isIos && !inStandaloneMode && !dismissedIosHint);
+
     const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -272,6 +283,11 @@ function App() {
     }
   }
 
+  function dismissIosInstallHint() {
+    sessionStorage.setItem('copelimit-ios-install-hint-dismissed', '1');
+    setShowIosInstallHint(false);
+  }
+
   const statusText = useMemo(() => {
     if (!usage) return 'Loading';
     if (usage.warningLevel === 'over') return 'Quota exceeded';
@@ -286,7 +302,7 @@ function App() {
     <main className="shell">
       <section className="hero">
         <div className="brand">
-          <img src="https://github.com/user-attachments/assets/044544f3-9cf1-4c08-990d-c28927be0eb5" alt="CopeLimit logo" />
+          <img src="/icons/icon-192.png" alt="CopeLimit logo" />
           <div>
             <h1>CopeLimit</h1>
             <p>Your Copilot usage panic meter.</p>
@@ -319,6 +335,18 @@ function App() {
       </section>
 
       {isOffline && <section className="card notice">You are offline. Attempting to use cached app content.</section>}
+      {showIosInstallHint && (
+        <section className="card notice iosHint">
+          <span>
+            On iPhone or iPad: tap Safari's <strong>Share</strong> button, then
+            {' '}
+            <strong>Add to Home Screen</strong>.
+          </span>
+          <button type="button" className="iosHintDismiss" onClick={dismissIosInstallHint}>
+            Dismiss
+          </button>
+        </section>
+      )}
       {authError && <section className="card error">{authError}</section>}
       {error && <section className="card error">Could not load usage: {error}</section>}
 

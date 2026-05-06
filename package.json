@@ -15,5 +15,8 @@
     "react-dom": "latest",
     "typescript": "latest",
     "vite": "^7.3.2"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }
