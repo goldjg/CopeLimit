@@ -11,6 +11,10 @@
 
 body {
   margin: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
 
 .shell {
@@ -36,6 +40,7 @@ body {
 .brand img {
   width: 72px;
   height: 72px;
+  object-fit: cover;
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(96, 165, 250, 0.2);
 }
@@ -57,6 +62,7 @@ button {
   color: #111827;
   font-weight: 700;
   padding: 12px 18px;
+  min-height: 44px;
   cursor: pointer;
 }
 
@@ -210,6 +216,29 @@ button {
   font-size: 0.95rem;
 }
 
+.installButton {
+  background: #60a5fa;
+  color: #0b1120;
+}
+
+.iosHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.iosHintDismiss {
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.1);
+  color: #f9fafb;
+  flex-shrink: 0;
+}
+
 .billingCard {
   position: relative;
 }
@@ -246,6 +275,81 @@ button {
   margin-bottom: 0;
 }
 
+.widgetTokenCard {
+  margin-top: 20px;
+}
+
+.widgetTokenCard p {
+  margin-top: 6px;
+  margin-bottom: 14px;
+}
+
+.widgetTokenError {
+  color: #ef4444;
+  margin-bottom: 12px;
+}
+
+.widgetTokenResult {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.widgetTokenActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tokenDisplay {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.tokenValue {
+  flex: 1;
+  display: block;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: #d1d5db;
+}
+
+.copyButton {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  font-size: 0.875rem;
+}
+
+.widgetTokenMeta {
+  color: #a1a1aa;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.widgetOnboarding {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(17, 24, 39, 0.35);
+}
+
+.widgetOnboarding p {
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
+
+.widgetOnboardingSuccess {
+  color: #22c55e;
+  font-size: 0.92rem;
+}
+
 @media (max-width: 680px) {
   .hero {
     align-items: flex-start;
@@ -267,5 +371,18 @@ button {
   .loginButton {
     width: 100%;
     text-align: center;
+  }
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }

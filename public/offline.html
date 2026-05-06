@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CopeLimit Offline</title>
+    <style>
+      body {
+        margin: 0;
+        background: #09090b;
+        color: #f9fafb;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        max-width: 440px;
+        padding: 24px;
+        text-align: center;
+      }
+      p {
+        color: #a1a1aa;
+      }
+      button {
+        margin-top: 16px;
+        border: 0;
+        border-radius: 999px;
+        background: #f9fafb;
+        color: #111827;
+        font-weight: 700;
+        padding: 12px 24px;
+        cursor: pointer;
+        font-size: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="64" height="64" role="img" aria-label="CopeLimit logo">
+        <title>CopeLimit logo</title>
+        <rect width="512" height="512" rx="112" fill="#111827"/>
+        <path d="M122 332c34 66 84 99 150 99 53 0 93-18 120-54 13-17 7-42-12-53-18-10-40-4-51 13-12 19-31 28-57 28-40 0-69-22-88-65-10-23-38-34-61-24s-34 38-24 61c7 16 15 31 23 45z" fill="#f9fafb"/>
+        <path d="M136 199c0-64 52-116 116-116s116 52 116 116v21c0 18-14 32-32 32s-32-14-32-32v-21c0-29-23-52-52-52s-52 23-52 52v26h33c18 0 32 14 32 32s-14 32-32 32h-65c-18 0-32-14-32-32v-58z" fill="#60a5fa"/>
+      </svg>
+      <h1>Offline</h1>
+      <p>CopeLimit is unavailable right now. Reconnect and try again.</p>
+      <button type="button" onclick="window.location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

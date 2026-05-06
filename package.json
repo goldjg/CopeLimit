@@ -6,6 +6,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.4",
     "@netlify/functions": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -14,5 +15,8 @@
     "react-dom": "latest",
     "typescript": "latest",
     "vite": "^7.3.2"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

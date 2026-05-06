@@ -29,3 +29,43 @@
   from = "/api/me"
   to = "/.netlify/functions/me"
   status = 200
+
+[[redirects]]
+  from = "/api/widget-usage"
+  to = "/.netlify/functions/widget-usage"
+  status = 200
+
+[[redirects]]
+  from = "/api/widget-token"
+  to = "/.netlify/functions/widget-token"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/session"
+  to = "/.netlify/functions/onboarding-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/exchange"
+  to = "/.netlify/functions/onboarding-exchange"
+  status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/scriptable/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store"

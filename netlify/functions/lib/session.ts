@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEq
 export type SessionPayload = {
   login: string;
   id: number;
-  avatar_url: string;
+  avatar_url?: string;
   accessToken: string;
 };
 
