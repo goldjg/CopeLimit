@@ -273,7 +273,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
-      setOnboardingNotice('Opened Scriptable. If prompted, run CopeLimitInstall and return here when complete.');
+      setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically. Ensure CopeLimitWidget is imported.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
       storeOnboardingStep('error');
@@ -307,7 +307,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
         <div className="widgetOnboarding">
           <span className="label">iPhone Widget Setup</span>
           <p>
-            Fast setup imports Scriptable scripts via deep links. The installer script configures your token automatically,
+            Fast setup imports Scriptable scripts via deep links. The token-configuration script configures your token automatically,
             but you must separately import the widget script and add it to your home screen.
           </p>
           {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
@@ -328,10 +328,10 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
                   Import widget script
                 </button>
                 <button type="button" onClick={() => { importScriptableScript('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
-                  Import installer script
+                  Import token configuration script
                 </button>
                 <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
-                  {onboardingStep === 'requesting' ? 'Connecting…' : 'Connect token in Scriptable'}
+                  {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
                 </button>
                 <button type="button" onClick={resetOnboarding}>
                   Reset
@@ -340,8 +340,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
           </div>
           <p className="widgetTokenMeta">
-            If automatic handoff is interrupted, complete these iOS steps manually: import the widget script, run the installer
-            to configure token, then add/edit the Scriptable widget on your home screen.
+            If automatic handoff is interrupted, complete these iOS steps manually: import the widget script, run the token
+            configuration script, then add/edit the Scriptable widget on your home screen.
           </p>
         </div>
       )}

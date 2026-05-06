@@ -1,4 +1,4 @@
-// CopeLimit Scriptable onboarding installer.
+// CopeLimit Scriptable token configuration script.
 // Imported and run from CopeLimit iPhone onboarding.
 
 const BASE_URL = "https://copelimit.netlify.app";
@@ -8,8 +8,8 @@ async function main() {
 
   if (!bootstrapToken) {
     const alert = new Alert();
-    alert.title = "CopeLimit setup failed";
-    alert.message = "Missing setup token. Return to CopeLimit and try setup again.";
+    alert.title = "CopeLimit token setup failed";
+    alert.message = "Missing Token setup code. Return to CopeLimit and try again.";
     alert.addAction("OK");
     await alert.present();
     Safari.open(`${BASE_URL}/?onboarding=error&reason=missing_token`);
