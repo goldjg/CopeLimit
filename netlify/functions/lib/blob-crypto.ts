@@ -4,7 +4,7 @@ const BLOB_ENCRYPTION_KEY_ENV = 'BLOB_ENCRYPTION_KEY';
 
 function readEncryptionKey(keyHex: string): Buffer {
   if (!/^[0-9a-f]{64}$/.test(keyHex)) {
-    throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} must be a 64-character hex string`);
+    throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} must be a 64-character lowercase hex string`);
   }
   return Buffer.from(keyHex, 'hex');
 }

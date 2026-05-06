@@ -80,15 +80,18 @@ async function readStoredRecord<T>(key: string): Promise<T | null> {
     try {
       return JSON.parse(decrypted) as T;
     } catch {
+      console.warn('[widget-store] failed to parse decrypted blob record', key);
       return null;
     }
   }
 
   try {
     const legacyRecord = JSON.parse(raw) as T;
+    console.warn('[widget-store] migrated plaintext blob record to encrypted format', key);
     await store.set(key, encryptBlob(JSON.stringify(legacyRecord), encryptionKey));
     return legacyRecord;
   } catch {
+    console.warn('[widget-store] failed to parse blob record as encrypted or legacy plaintext JSON', key);
     return null;
   }
 }
