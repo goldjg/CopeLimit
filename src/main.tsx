@@ -130,8 +130,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       || saved === 'error'
     ) {
       setOnboardingStep(saved);
-    } else if (saved === 'import-installer') {
-      setOnboardingStep('manual-setup');
     }
   }, []);
 
@@ -228,7 +226,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
 
   async function copyScriptSource(
     scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js',
-    scriptTargetName: 'CopeLimitInstall' | 'CopeLimitWidget',
+    scriptDisplayName: 'CopeLimitInstall' | 'CopeLimitWidget',
     label: string
   ) {
     setOnboardingError(null);
@@ -240,11 +238,11 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingNotice(`${label} copied to clipboard. Create “${scriptTargetName}” in Scriptable and paste the script text.`);
+      setOnboardingNotice(`${label} copied to clipboard. Create “${scriptDisplayName}” in Scriptable and paste the script text.`);
       setOnboardingSuccess(false);
     } catch (err) {
       if (err instanceof TypeError) {
-        setOnboardingError('Failed to copy script: could not load script source (network or browser policy issue).');
+        setOnboardingError('Failed to copy script: network error or script source unavailable.');
       } else if (err instanceof Error) {
         setOnboardingError(`Failed to copy script: ${err.message}`);
       } else {
@@ -309,7 +307,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
-      setOnboardingNotice('Configuring token in Scriptable. Ensure the “CopeLimitInstall” script exists in Scriptable before continuing.');
+      setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
       storeOnboardingStep('error');
