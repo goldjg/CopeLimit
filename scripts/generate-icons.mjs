@@ -5,7 +5,7 @@ import sharp from 'sharp';
 const root = process.cwd();
 const iconsDir = path.join(root, 'public', 'icons');
 // Canonical source icon provided at repository root.
-const sourceIconPath = path.join(root, '32B68FCA-EE7F-464A-A166-5D2A48363E3A.png');
+const sourceIconPath = path.join(root, 'app-icon-source.png');
 
 const jobs = [
   { output: 'icon-16.png', size: 16 },
