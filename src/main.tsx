@@ -36,6 +36,11 @@ type WidgetTokenStatus = {
   expiresAt?: string;
 };
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
+
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
   const now = Date.now();
@@ -191,6 +196,9 @@ function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const authError = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -226,6 +234,43 @@ function App() {
     refresh();
     fetchUser();
   }, []);
+
+  useEffect(() => {
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleAppInstalled = () => {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+    };
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  async function installApp() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstallPrompt(null);
+      }
+    } catch (error) {
+      console.warn('Install prompt failed');
+    }
+  }
 
   const statusText = useMemo(() => {
     if (!usage) return 'Loading';
@@ -264,10 +309,16 @@ function App() {
               Sign in with GitHub
             </a>
           )}
+          {!isInstalled && installPrompt && (
+            <button type="button" className="installButton" onClick={installApp}>
+              Install app
+            </button>
+          )}
           <button onClick={refresh}>Refresh</button>
         </div>
       </section>
 
+      {isOffline && <section className="card notice">You are offline. Attempting to use cached app content.</section>}
       {authError && <section className="card error">{authError}</section>}
       {error && <section className="card error">Could not load usage: {error}</section>}
 
@@ -345,3 +396,11 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      console.warn('Service worker registration failed');
+    });
+  });
+}
