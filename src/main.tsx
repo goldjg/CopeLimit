@@ -233,7 +233,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   ) {
     setOnboardingError(null);
     try {
-      const response = await fetch(scriptSourceUrl(scriptName), { cache: 'no-store' });
+      const response = await fetch(scriptSourceUrl(scriptName));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
