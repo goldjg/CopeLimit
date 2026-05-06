@@ -1,5 +1,13 @@
-const CACHE_NAME = 'copelimit-v1';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg', '/offline.html'];
+const CACHE_NAME = 'copelimit-v2';
+const APP_SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icons/icon.svg',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/offline.html'
+];
 
 async function shellResources() {
   try {

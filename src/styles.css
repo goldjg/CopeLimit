@@ -11,6 +11,10 @@
 
 body {
   margin: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
 
 .shell {
@@ -58,6 +62,7 @@ button {
   color: #111827;
   font-weight: 700;
   padding: 12px 18px;
+  min-height: 44px;
   cursor: pointer;
 }
 
@@ -216,6 +221,24 @@ button {
   color: #0b1120;
 }
 
+.iosHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.iosHintDismiss {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.1);
+  color: #f9fafb;
+  flex-shrink: 0;
+}
+
 .billingCard {
   position: relative;
 }
@@ -330,5 +353,18 @@ button {
   .loginButton {
     width: 100%;
     text-align: center;
+  }
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }
