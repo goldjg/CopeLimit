@@ -14,7 +14,9 @@ export function readBlobEncryptionKey(): string {
   if (!key) {
     throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} is not configured`);
   }
-  readEncryptionKey(key);
+  if (!/^[0-9a-f]{64}$/.test(key)) {
+    throw new Error(`${BLOB_ENCRYPTION_KEY_ENV} must be a 64-character lowercase hex string`);
+  }
   return key;
 }
 

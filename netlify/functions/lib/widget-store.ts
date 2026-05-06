@@ -94,23 +94,23 @@ async function readStoredRecord<T>(key: string): Promise<T | null> {
     try {
       return JSON.parse(decrypted) as T;
     } catch {
-      console.warn('[widget-store] failed to parse decrypted blob record', key);
+      console.warn('[widget-store] failed to parse decrypted blob record');
       return null;
     }
   }
 
   if (looksEncryptedBlobRecord(raw)) {
-    console.warn('[widget-store] encrypted-looking blob record failed decryption and will not be migrated', key);
+    console.warn('[widget-store] encrypted-looking blob record failed decryption and will not be migrated');
     return null;
   }
 
   try {
     const legacyRecord = JSON.parse(raw) as T;
-    console.warn('[widget-store] migrated plaintext blob record to encrypted format', key);
+    console.warn('[widget-store] migrated plaintext blob record to encrypted format');
     await store.set(key, encryptBlob(JSON.stringify(legacyRecord), encryptionKey));
     return legacyRecord;
   } catch {
-    console.warn('[widget-store] failed to parse blob record as encrypted or legacy plaintext JSON', key);
+    console.warn('[widget-store] failed to parse blob record as encrypted or legacy plaintext JSON');
     return null;
   }
 }
