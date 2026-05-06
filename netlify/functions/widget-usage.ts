@@ -9,7 +9,7 @@ import {
   readString,
   getUnsupportedUsage
 } from './lib/copilot';
-import { isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
+import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
 
 function extractToken(event: HandlerEvent): string | undefined {
   const auth = event.headers['authorization'];
@@ -129,6 +129,13 @@ export const handler: Handler = async (event) => {
       body: JSON.stringify(usage)
     };
   } catch (error) {
+    if (isWidgetStoreNotConfiguredError(error)) {
+      return {
+        statusCode: 503,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ error: 'Service not configured' })
+      };
+    }
     if (isWidgetStoreUnavailableError(error)) {
       return {
         statusCode: 503,

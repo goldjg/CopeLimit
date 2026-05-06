@@ -49,6 +49,7 @@ For hosted Copilot usage on Netlify, set:
 COPELIMIT_PROVIDER=github-copilot-internal
 SESSION_SECRET=...                 # strong random string
 SESSION_ENCRYPTION_KEY=...         # 64-char hex (openssl rand -hex 32)
+BLOB_ENCRYPTION_KEY=...            # 64-char hex (openssl rand -hex 32)
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
 ```
@@ -56,6 +57,7 @@ GITHUB_CLIENT_SECRET=...
 Notes:
 - `SESSION_ENCRYPTION_KEY` is required in production to encrypt the signed session payload containing OAuth access tokens.
 - The key must be 64 lowercase hex characters (32 bytes). Generate with `openssl rand -hex 32`.
+- `BLOB_ENCRYPTION_KEY` is required to encrypt widget token records and user index entries in Netlify Blobs.
 - After enabling `copilot` OAuth scope, existing users must sign out and sign in again to refresh token scopes.
 
 When a reliable public GitHub API source is available for your account type, switch to:
