@@ -307,7 +307,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
         <div className="widgetOnboarding">
           <span className="label">iPhone Widget Setup</span>
           <p>
-            Fast setup installs Scriptable scripts via deep links and bootstraps your widget token automatically.
+            Fast setup imports Scriptable scripts via deep links. The installer script configures your token automatically,
+            but you must separately import the widget script and add it to your home screen.
           </p>
           {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
           {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
@@ -339,7 +340,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
           </div>
           <p className="widgetTokenMeta">
-            Manual steps still required by iOS: confirm imports in Scriptable and add/edit the Scriptable widget on your home screen.
+            If automatic handoff is interrupted, complete these iOS steps manually: import the widget script, run the installer
+            to configure token, then add/edit the Scriptable widget on your home screen.
           </p>
         </div>
       )}

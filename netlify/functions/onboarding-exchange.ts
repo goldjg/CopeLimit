@@ -59,9 +59,7 @@ export const handler: Handler = async (event) => {
     const issued = await issueWidgetTokenForUser({
       id: bootstrapRecord.userId,
       login: bootstrapRecord.login,
-      accessToken: bootstrapRecord.githubAccessToken,
-      // avatar_url is not required by widget-token issuance, but SessionPayload currently includes it.
-      avatar_url: ''
+      accessToken: bootstrapRecord.githubAccessToken
     });
 
     return {

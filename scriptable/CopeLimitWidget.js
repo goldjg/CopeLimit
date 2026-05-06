@@ -2,7 +2,7 @@
 // Token is configured automatically via the CopeLimit PWA onboarding flow.
 // Do not use your GitHub token here.
 
-const COPELIMIT_URL = "https://copelimit.netlify.app/.netlify/functions/widget-usage";
+const COPELIMIT_URL = "https://copelimit.netlify.app/api/widget-usage";
 const WIDGET_TOKEN = Keychain.get("copelimit_widget_token") || "";
 
 async function getUsage() {
