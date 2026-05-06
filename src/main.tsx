@@ -240,7 +240,8 @@ function App() {
     const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
     const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
       || iosNavigator.standalone === true;
-    const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent);
+    const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent)
+      || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
     const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';
     setIsInstalled(inStandaloneMode);
     setShowIosInstallHint(isIos && !inStandaloneMode && !dismissedIosHint);
@@ -336,7 +337,7 @@ function App() {
       {showIosInstallHint && (
         <section className="card notice iosHint">
           <span>
-            On iPhone or iPad: tap Safari&apos;s <strong>Share</strong> button, then
+            On iPhone or iPad: tap Safari's <strong>Share</strong> button, then
             {' '}
             <strong>Add to Home Screen</strong>.
           </span>
