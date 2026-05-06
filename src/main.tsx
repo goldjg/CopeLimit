@@ -261,10 +261,14 @@ function App() {
 
   async function installApp() {
     if (!installPrompt) return;
-    await installPrompt.prompt();
-    const choice = await installPrompt.userChoice;
-    if (choice.outcome === 'accepted') {
-      setInstallPrompt(null);
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstallPrompt(null);
+      }
+    } catch (error) {
+      console.warn('Install prompt failed');
     }
   }
 
@@ -314,7 +318,7 @@ function App() {
         </div>
       </section>
 
-      {isOffline && <section className="card notice">You are offline. Showing cached app shell when available.</section>}
+      {isOffline && <section className="card notice">You are offline. Attempting to use cached app content.</section>}
       {authError && <section className="card error">{authError}</section>}
       {error && <section className="card error">Could not load usage: {error}</section>}
 
@@ -395,6 +399,8 @@ createRoot(document.getElementById('root')!).render(<App />);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      console.warn('Service worker registration failed');
+    });
   });
 }
