@@ -217,10 +217,15 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
 
   function openScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
+    storeOnboardingStep('import-installer');
     window.open(scriptUrl, '_blank', 'noopener,noreferrer');
   }
 
-  async function copyScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js', label: string) {
+  async function copyScriptSource(
+    scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js',
+    scriptTargetName: 'CopeLimitInstall' | 'CopeLimitWidget',
+    label: string
+  ) {
     setOnboardingError(null);
     try {
       const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
@@ -230,10 +235,17 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       }
       const text = await response.text();
       await navigator.clipboard.writeText(text);
-      setOnboardingNotice(`${label} copied to clipboard. Create or edit the script in Scriptable and paste it.`);
+      storeOnboardingStep('import-installer');
+      setOnboardingNotice(`${label} copied to clipboard. Create or edit “${scriptTargetName}” in Scriptable and paste the script text.`);
       setOnboardingSuccess(false);
     } catch (err) {
-      setOnboardingError(err instanceof Error ? `Failed to copy script: ${err.message}` : 'Failed to copy script.');
+      if (err instanceof TypeError) {
+        setOnboardingError('Failed to copy script: network error while loading script source.');
+      } else if (err instanceof Error) {
+        setOnboardingError(`Failed to copy script: ${err.message}`);
+      } else {
+        setOnboardingError('Failed to copy script.');
+      }
     }
   }
 
@@ -344,16 +356,16 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
             {(onboardingStep === 'ready' || onboardingStep === 'import-installer' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
               <>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); storeOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); }}>
                   Open widget script source
                 </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js', 'Widget script'); storeOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js', 'CopeLimitWidget', 'Widget script'); }}>
                   Copy widget script
                 </button>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { openScriptSource('CopeLimitInstall.js'); }}>
                   Open token configuration script source
                 </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js', 'Token configuration script'); storeOnboardingStep('import-installer'); }}>
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js', 'CopeLimitInstall', 'Token configuration script'); }}>
                   Copy token configuration script
                 </button>
                 <button type="button" onClick={openScriptableApp}>
