@@ -215,10 +215,26 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     window.location.href = 'https://apps.apple.com/app/scriptable/id1405459188';
   }
 
-  function importScriptableScript(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
+  function openScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
-    const deepLink = `scriptable:///import?url=${encodeURIComponent(scriptUrl)}`;
-    window.location.href = deepLink;
+    window.open(scriptUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function copyScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js', label: string) {
+    setOnboardingError(null);
+    try {
+      const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
+      const response = await fetch(scriptUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const text = await response.text();
+      await navigator.clipboard.writeText(text);
+      setOnboardingNotice(`${label} copied to clipboard. Create or edit the script in Scriptable and paste it.`);
+      setOnboardingSuccess(false);
+    } catch (err) {
+      setOnboardingError(err instanceof Error ? `Failed to copy script: ${err.message}` : 'Failed to copy script.');
+    }
   }
 
   async function detectScriptableApp(): Promise<boolean> {
@@ -237,6 +253,10 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
         resolve(hidden);
       }, 2300);
     });
+  }
+
+  function openScriptableApp() {
+    window.location.href = 'scriptable:///';
   }
 
   async function checkScriptable() {
@@ -273,7 +293,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
-      setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically. Ensure CopeLimitWidget is imported.');
+      setOnboardingNotice('Configuring token in Scriptable. This requires CopeLimitInstall to already exist in Scriptable.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
       storeOnboardingStep('error');
@@ -307,8 +327,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
         <div className="widgetOnboarding">
           <span className="label">iPhone Widget Setup</span>
           <p>
-            Fast setup imports Scriptable scripts via deep links. The token-configuration script configures your token automatically,
-            but you must separately import the widget script and add it to your home screen.
+            Scriptable script creation/import is manual in iOS. Open or copy each script source below, create scripts in Scriptable,
+            then run token configuration for automatic token handoff.
           </p>
           {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
           {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
@@ -324,11 +344,20 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
             {(onboardingStep === 'ready' || onboardingStep === 'import-installer' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
               <>
-                <button type="button" onClick={() => { importScriptableScript('CopeLimitWidget.js'); storeOnboardingStep('import-installer'); }}>
-                  Import widget script
+                <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); storeOnboardingStep('import-installer'); }}>
+                  Open widget script source
                 </button>
-                <button type="button" onClick={() => { importScriptableScript('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
-                  Import token configuration script
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js', 'Widget script'); storeOnboardingStep('import-installer'); }}>
+                  Copy widget script
+                </button>
+                <button type="button" onClick={() => { openScriptSource('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
+                  Open token configuration script source
+                </button>
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js', 'Token configuration script'); storeOnboardingStep('import-installer'); }}>
+                  Copy token configuration script
+                </button>
+                <button type="button" onClick={openScriptableApp}>
+                  Open Scriptable
                 </button>
                 <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
                   {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
@@ -340,8 +369,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
             )}
           </div>
           <p className="widgetTokenMeta">
-            If automatic handoff is interrupted, complete these iOS steps manually: import the widget script, run the token
-            configuration script, then add/edit the Scriptable widget on your home screen.
+            Automatic token handoff works after CopeLimitInstall exists in Scriptable. Final iOS home screen widget creation and
+            script assignment remain manual.
           </p>
         </div>
       )}
