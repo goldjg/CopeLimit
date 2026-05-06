@@ -1,9 +1,9 @@
-const CACHE_NAME = 'copelimit-v2';
+const CACHE_NAME = 'copelimit-2026-05-06';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icons/icon.svg',
+  '/icons/icon-32.png',
   '/icons/icon-180.png',
   '/icons/icon-192.png',
   '/offline.html'

@@ -300,7 +300,7 @@ function App() {
     <main className="shell">
       <section className="hero">
         <div className="brand">
-          <img src="/icons/icon.svg" alt="CopeLimit logo" />
+          <img src="/icons/icon-192.png" alt="CopeLimit logo" />
           <div>
             <h1>CopeLimit</h1>
             <p>Your Copilot usage panic meter.</p>
