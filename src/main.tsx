@@ -41,7 +41,7 @@ type OnboardingStep =
   | 'checking'
   | 'scriptable-missing'
   | 'ready'
-  | 'import-installer'
+  | 'manual-setup'
   | 'requesting'
   | 'linking'
   | 'waiting'
@@ -123,13 +123,15 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       saved === 'checking'
       || saved === 'scriptable-missing'
       || saved === 'ready'
-      || saved === 'import-installer'
+      || saved === 'manual-setup'
       || saved === 'requesting'
       || saved === 'linking'
       || saved === 'waiting'
       || saved === 'error'
     ) {
       setOnboardingStep(saved);
+    } else if (saved === 'import-installer') {
+      setOnboardingStep('manual-setup');
     }
   }, []);
 
@@ -215,10 +217,13 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     window.location.href = 'https://apps.apple.com/app/scriptable/id1405459188';
   }
 
+  function scriptSourceUrl(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
+    return `${window.location.origin}/scriptable/${scriptName}`;
+  }
+
   function openScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
-    const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
-    storeOnboardingStep('import-installer');
-    window.open(scriptUrl, '_blank', 'noopener,noreferrer');
+    storeOnboardingStep('manual-setup');
+    window.open(scriptSourceUrl(scriptName), '_blank', 'noopener,noreferrer');
   }
 
   async function copyScriptSource(
@@ -228,19 +233,18 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   ) {
     setOnboardingError(null);
     try {
-      const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
-      const response = await fetch(scriptUrl, { cache: 'no-store' });
+      const response = await fetch(scriptSourceUrl(scriptName), { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       const text = await response.text();
       await navigator.clipboard.writeText(text);
-      storeOnboardingStep('import-installer');
+      storeOnboardingStep('manual-setup');
       setOnboardingNotice(`${label} copied to clipboard. Create or edit “${scriptTargetName}” in Scriptable and paste the script text.`);
       setOnboardingSuccess(false);
     } catch (err) {
       if (err instanceof TypeError) {
-        setOnboardingError('Failed to copy script: network error while loading script source.');
+        setOnboardingError('Failed to copy script: could not load script source (network or browser policy issue).');
       } else if (err instanceof Error) {
         setOnboardingError(`Failed to copy script: ${err.message}`);
       } else {
@@ -305,7 +309,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
-      setOnboardingNotice('Configuring token in Scriptable. This requires CopeLimitInstall to already exist in Scriptable.');
+      setOnboardingNotice('Configuring token in Scriptable. Ensure you already created “CopeLimitInstall” in Scriptable using the options above.');
     } catch (err) {
       setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
       storeOnboardingStep('error');
@@ -354,7 +358,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
                 Install Scriptable
               </button>
             )}
-            {(onboardingStep === 'ready' || onboardingStep === 'import-installer' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
+            {(onboardingStep === 'ready' || onboardingStep === 'manual-setup' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
               <>
                 <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); }}>
                   Open widget script source
