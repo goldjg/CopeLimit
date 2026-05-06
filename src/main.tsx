@@ -36,10 +36,32 @@ type WidgetTokenStatus = {
   expiresAt?: string;
 };
 
+type OnboardingStep =
+  | 'idle'
+  | 'checking'
+  | 'scriptable-missing'
+  | 'ready'
+  | 'import-installer'
+  | 'requesting'
+  | 'linking'
+  | 'waiting'
+  | 'error';
+
+type OnboardingSessionResult = {
+  bootstrapToken: string;
+  expiresAt: string;
+  ttlSeconds: number;
+};
+
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 };
+
+function isLikelyIos(): boolean {
+  return /iPad|iPhone|iPod/.test(window.navigator.userAgent)
+    || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+}
 
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
@@ -66,13 +88,22 @@ function authErrorMessage(code: string | null): string | null {
   return 'An authentication error occurred. Please try again.';
 }
 
-function WidgetTokenSection() {
+function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   const [result, setResult] = useState<WidgetTokenResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<WidgetTokenStatus | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('idle');
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
+  const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
+  const [onboardingSuccess, setOnboardingSuccess] = useState(false);
+
+  function storeOnboardingStep(step: OnboardingStep) {
+    setOnboardingStep(step);
+    sessionStorage.setItem('copelimit-onboarding-step', step);
+  }
 
   async function refreshStatus() {
     const response = await fetch('/api/widget-token', { cache: 'no-store' });
@@ -84,6 +115,47 @@ function WidgetTokenSection() {
 
   useEffect(() => {
     refreshStatus().catch(() => setStatus(null));
+  }, []);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem('copelimit-onboarding-step');
+    if (
+      saved === 'checking'
+      || saved === 'scriptable-missing'
+      || saved === 'ready'
+      || saved === 'import-installer'
+      || saved === 'requesting'
+      || saved === 'linking'
+      || saved === 'waiting'
+      || saved === 'error'
+    ) {
+      setOnboardingStep(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const onboarding = params.get('onboarding');
+    const reason = params.get('reason');
+    if (onboarding === 'complete') {
+      setOnboardingSuccess(true);
+      setOnboardingError(null);
+      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimitWidget.');
+      storeOnboardingStep('idle');
+      refreshStatus().catch(() => undefined);
+      params.delete('onboarding');
+      params.delete('reason');
+      const nextQuery = params.toString();
+      window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
+    } else if (onboarding === 'error') {
+      setOnboardingSuccess(false);
+      setOnboardingError(reason ? `Setup failed (${reason}).` : 'Setup failed. Please try again.');
+      storeOnboardingStep('error');
+      params.delete('onboarding');
+      params.delete('reason');
+      const nextQuery = params.toString();
+      window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
+    }
   }, []);
 
   async function generate() {
@@ -139,6 +211,82 @@ function WidgetTokenSection() {
     }
   }
 
+  function appStoreLink() {
+    window.location.href = 'https://apps.apple.com/app/scriptable/id1405459188';
+  }
+
+  function importScriptableScript(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
+    const scriptUrl = `${window.location.origin}/scriptable/${scriptName}`;
+    const deepLink = `scriptable:///import?url=${encodeURIComponent(scriptUrl)}`;
+    window.location.href = deepLink;
+  }
+
+  async function detectScriptableApp(): Promise<boolean> {
+    return new Promise((resolve) => {
+      let hidden = false;
+      function handleVisibilityChange() {
+        if (document.hidden) {
+          hidden = true;
+        }
+      }
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.location.href = 'scriptable:///';
+      window.setTimeout(() => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        resolve(hidden);
+      }, 2300);
+    });
+  }
+
+  async function checkScriptable() {
+    setOnboardingError(null);
+    setOnboardingNotice(null);
+    setOnboardingSuccess(false);
+    storeOnboardingStep('checking');
+    const installed = await detectScriptableApp();
+    if (installed) {
+      storeOnboardingStep('ready');
+    } else {
+      storeOnboardingStep('scriptable-missing');
+    }
+  }
+
+  async function requestOnboardingSession(): Promise<OnboardingSessionResult> {
+    const response = await fetch('/api/onboarding/session', { method: 'POST', cache: 'no-store' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+    }
+    return response.json() as Promise<OnboardingSessionResult>;
+  }
+
+  async function connectScriptable() {
+    setOnboardingError(null);
+    setOnboardingNotice(null);
+    setOnboardingSuccess(false);
+    storeOnboardingStep('requesting');
+    try {
+      const session = await requestOnboardingSession();
+      // Bootstrap token is short-lived and single-use by design; URL exposure is accepted for iOS deep-link handoff.
+      const runLink = `scriptable:///run?scriptName=CopeLimitInstall&bt=${encodeURIComponent(session.bootstrapToken)}`;
+      storeOnboardingStep('linking');
+      window.location.href = runLink;
+      storeOnboardingStep('waiting');
+      setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically. Ensure CopeLimitWidget is imported.');
+    } catch (err) {
+      setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
+      storeOnboardingStep('error');
+    }
+  }
+
+  function resetOnboarding() {
+    setOnboardingError(null);
+    setOnboardingNotice(null);
+    setOnboardingSuccess(false);
+    storeOnboardingStep('idle');
+  }
+
   return (
     <section className="card widgetTokenCard">
       <span className="label">iOS Widget Token</span>
@@ -155,6 +303,48 @@ function WidgetTokenSection() {
         </p>
       )}
       {error && <p className="widgetTokenError">{error}</p>}
+      {isIos && (
+        <div className="widgetOnboarding">
+          <span className="label">iPhone Widget Setup</span>
+          <p>
+            Fast setup imports Scriptable scripts via deep links. The token-configuration script configures your token automatically,
+            but you must separately import the widget script and add it to your home screen.
+          </p>
+          {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
+          {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
+          {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
+          <div className="widgetTokenActions">
+            <button type="button" onClick={checkScriptable} disabled={onboardingStep === 'checking' || onboardingStep === 'requesting'}>
+              {onboardingStep === 'checking' ? 'Checking…' : 'Setup iPhone widget'}
+            </button>
+            {(onboardingStep === 'scriptable-missing') && (
+              <button type="button" onClick={appStoreLink}>
+                Install Scriptable
+              </button>
+            )}
+            {(onboardingStep === 'ready' || onboardingStep === 'import-installer' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
+              <>
+                <button type="button" onClick={() => { importScriptableScript('CopeLimitWidget.js'); storeOnboardingStep('import-installer'); }}>
+                  Import widget script
+                </button>
+                <button type="button" onClick={() => { importScriptableScript('CopeLimitInstall.js'); storeOnboardingStep('import-installer'); }}>
+                  Import token configuration script
+                </button>
+                <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
+                  {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
+                </button>
+                <button type="button" onClick={resetOnboarding}>
+                  Reset
+                </button>
+              </>
+            )}
+          </div>
+          <p className="widgetTokenMeta">
+            If automatic handoff is interrupted, complete these iOS steps manually: import the widget script, run the token
+            configuration script, then add/edit the Scriptable widget on your home screen.
+          </p>
+        </div>
+      )}
       {result ? (
         <div className="widgetTokenResult">
           <div className="tokenDisplay">
@@ -200,6 +390,7 @@ function App() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [showIosInstallHint, setShowIosInstallHint] = useState(false);
+  const [isIosDevice, setIsIosDevice] = useState(false);
 
   const authError = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -241,10 +432,10 @@ function App() {
     const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
       || iosNavigator.standalone === true;
     // UA/platform checks are used here because iOS Safari lacks a standard install-prompt API.
-    const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent)
-      || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+    const isIos = isLikelyIos();
     const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';
     setIsInstalled(inStandaloneMode);
+    setIsIosDevice(isIos);
     setShowIosInstallHint(isIos && !inStandaloneMode && !dismissedIosHint);
 
     const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
@@ -418,7 +609,7 @@ function App() {
         </>
       )}
 
-      {user?.authenticated && <WidgetTokenSection />}
+      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} />}
     </main>
   );
 }

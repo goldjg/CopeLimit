@@ -332,6 +332,24 @@ button {
   margin: 0;
 }
 
+.widgetOnboarding {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(17, 24, 39, 0.35);
+}
+
+.widgetOnboarding p {
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
+
+.widgetOnboardingSuccess {
+  color: #22c55e;
+  font-size: 0.92rem;
+}
+
 @media (max-width: 680px) {
   .hero {
     align-items: flex-start;
