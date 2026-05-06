@@ -240,6 +240,7 @@ function App() {
     const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
     const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
       || iosNavigator.standalone === true;
+    // UA/platform checks are used here because iOS Safari lacks a standard install-prompt API.
     const isIos = /iPad|iPhone|iPod/.test(window.navigator.userAgent)
       || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
     const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';

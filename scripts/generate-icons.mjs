@@ -22,6 +22,7 @@ for (const job of jobs) {
   const outputPath = path.join(iconsDir, job.output);
   try {
     await sharp(sourceIconPath)
+      // Intentionally crops to square to produce required app-icon aspect ratios.
       .resize(job.size, job.size, { fit: 'cover', position: 'centre' })
       .png()
       .toFile(outputPath);
