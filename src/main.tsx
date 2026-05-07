@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -120,6 +120,20 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasDialogOpenRef = useRef(false);
 
+  const closeScriptableDialog = useCallback(() => {
+    setScriptableDialog((current) => {
+      if (current) {
+        setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${current.targetScriptName}.`);
+      }
+      return null;
+    });
+  }, []);
+
+  const openScriptableForPasting = useCallback(() => {
+    setScriptableDialog(null);
+    window.location.href = 'scriptable:///add';
+  }, []);
+
   function storeOnboardingStep(step: OnboardingStep) {
     setOnboardingStep(step);
     sessionStorage.setItem('copelimit-onboarding-step', step);
@@ -193,16 +207,20 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       }
     }
 
+    let listenerAdded = false;
     if (isOpen) {
       window.addEventListener('keydown', handleEscape);
+      listenerAdded = true;
     }
 
     wasDialogOpenRef.current = isOpen;
 
     return () => {
-      window.removeEventListener('keydown', handleEscape);
+      if (listenerAdded) {
+        window.removeEventListener('keydown', handleEscape);
+      }
     };
-  }, [scriptableDialog]);
+  }, [scriptableDialog, closeScriptableDialog]);
 
   async function generate() {
     setGenerating(true);
@@ -322,17 +340,6 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
     setOnboardingSuccess(false);
     setScriptableDialog(null);
     storeOnboardingStep('idle');
-  }
-
-  function closeScriptableDialog() {
-    if (!scriptableDialog) return;
-    setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${scriptableDialog.targetScriptName}.`);
-    setScriptableDialog(null);
-  }
-
-  function openScriptableForPasting() {
-    setScriptableDialog(null);
-    window.location.href = 'scriptable:///add';
   }
 
   return (
