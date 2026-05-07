@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -38,12 +38,8 @@ type WidgetTokenStatus = {
 
 type OnboardingStep =
   | 'idle'
-  | 'checking'
-  | 'scriptable-missing'
-  | 'ready'
   | 'manual-setup'
   | 'requesting'
-  | 'linking'
   | 'waiting'
   | 'error';
 
@@ -73,6 +69,26 @@ function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
 }
 
+type ScriptablePasteDialog = {
+  title: string;
+  intro: string;
+  steps: string[];
+  targetScriptName: string;
+};
+
+function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): ScriptablePasteDialog {
+  return {
+    title: `${scriptFriendlyName} has been copied.`,
+    intro: 'Scriptable will open a blank script.',
+    steps: [
+      'Double tap inside the empty script.',
+      'Choose Paste.',
+      `Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`
+    ],
+    targetScriptName
+  };
+}
+
 function sourceBadge(source: string): { label: string; className: string } {
   if (source === 'copilot-local') return { label: 'Live (local)', className: 'badge badge-live' };
   if (source === 'github-copilot-internal') return { label: 'Live (hosted)', className: 'badge badge-live' };
@@ -88,7 +104,7 @@ function authErrorMessage(code: string | null): string | null {
   return 'An authentication error occurred. Please try again.';
 }
 
-function WidgetTokenSection({ isIos }: { isIos: boolean }) {
+function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandalone: boolean }) {
   const [result, setResult] = useState<WidgetTokenResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -99,6 +115,24 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
   const [onboardingSuccess, setOnboardingSuccess] = useState(false);
+  const [scriptableDialog, setScriptableDialog] = useState<ScriptablePasteDialog | null>(null);
+  const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasDialogOpenRef = useRef(false);
+
+  const closeScriptableDialog = useCallback(() => {
+    setScriptableDialog((current) => {
+      if (current) {
+        setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${current.targetScriptName}.`);
+      }
+      return null;
+    });
+  }, []);
+
+  const openScriptableForPasting = useCallback(() => {
+    setScriptableDialog(null);
+    window.location.href = 'scriptable:///add';
+  }, []);
 
   function storeOnboardingStep(step: OnboardingStep) {
     setOnboardingStep(step);
@@ -120,12 +154,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   useEffect(() => {
     const saved = sessionStorage.getItem('copelimit-onboarding-step');
     if (
-      saved === 'checking'
-      || saved === 'scriptable-missing'
-      || saved === 'ready'
-      || saved === 'manual-setup'
+      saved === 'manual-setup'
       || saved === 'requesting'
-      || saved === 'linking'
       || saved === 'waiting'
       || saved === 'error'
     ) {
@@ -140,7 +170,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     if (onboarding === 'complete') {
       setOnboardingSuccess(true);
       setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimitWidget.');
+      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
       storeOnboardingStep('idle');
       refreshStatus().catch(() => undefined);
       params.delete('onboarding');
@@ -157,6 +187,41 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
     }
   }, []);
+
+  useEffect(() => {
+    const isOpen = Boolean(scriptableDialog);
+    if (isOpen && !wasDialogOpenRef.current) {
+      previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
+    }
+    if (!isOpen && wasDialogOpenRef.current) {
+      if (previousFocusRef.current && document.contains(previousFocusRef.current)) {
+        previousFocusRef.current.focus();
+      }
+      previousFocusRef.current = null;
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeScriptableDialog();
+      }
+    }
+
+    let listenerAdded = false;
+    if (isOpen) {
+      window.addEventListener('keydown', handleEscape);
+      listenerAdded = true;
+    }
+
+    wasDialogOpenRef.current = isOpen;
+
+    return () => {
+      if (listenerAdded) {
+        window.removeEventListener('keydown', handleEscape);
+      }
+    };
+  }, [scriptableDialog, closeScriptableDialog]);
 
   async function generate() {
     setGenerating(true);
@@ -211,24 +276,11 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     }
   }
 
-  function appStoreLink() {
-    window.location.href = 'https://apps.apple.com/app/scriptable/id1405459188';
-  }
-
   function scriptSourceUrl(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     return `${window.location.origin}/scriptable/${scriptName}`;
   }
 
-  function openScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
-    storeOnboardingStep('manual-setup');
-    window.open(scriptSourceUrl(scriptName), '_blank', 'noopener,noreferrer');
-  }
-
-  async function copyScriptSource(
-    scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js',
-    scriptDisplayName: 'CopeLimitInstall' | 'CopeLimitWidget',
-    label: string
-  ) {
+  async function copyScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     setOnboardingError(null);
     try {
       const response = await fetch(scriptSourceUrl(scriptName));
@@ -238,9 +290,13 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingNotice(`${label} copied to clipboard. Scriptable will open a new blank script: paste, name it “${scriptDisplayName}”, and save.`);
       setOnboardingSuccess(false);
-      window.location.href = 'scriptable:///add';
+      const isWidgetScript = scriptName === 'CopeLimitWidget.js';
+      const scriptLabels = isWidgetScript
+        ? { modalName: 'The CopeLimit widget script', noticeName: 'Widget script', targetName: 'CopeLimit' }
+        : { modalName: 'The token setup script', noticeName: 'Token setup script', targetName: 'CopeLimitInstall' };
+      setOnboardingNotice(`${scriptLabels.noticeName} copied to clipboard.`);
+      setScriptableDialog(buildScriptablePasteDialog(scriptLabels.modalName, scriptLabels.targetName));
     } catch (err) {
       if (err instanceof TypeError) {
         setOnboardingError('Failed to copy script: network error or script source unavailable.');
@@ -249,41 +305,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       } else {
         setOnboardingError('Failed to copy script.');
       }
-    }
-  }
-
-  async function detectScriptableApp(): Promise<boolean> {
-    return new Promise((resolve) => {
-      let hidden = false;
-      function handleVisibilityChange() {
-        if (document.hidden) {
-          hidden = true;
-        }
-      }
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      window.location.href = 'scriptable:///';
-      window.setTimeout(() => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        resolve(hidden);
-      }, 2300);
-    });
-  }
-
-  function openScriptableApp() {
-    window.location.href = 'scriptable:///';
-  }
-
-  async function checkScriptable() {
-    setOnboardingError(null);
-    setOnboardingNotice(null);
-    setOnboardingSuccess(false);
-    storeOnboardingStep('checking');
-    const installed = await detectScriptableApp();
-    if (installed) {
-      storeOnboardingStep('ready');
-    } else {
-      storeOnboardingStep('scriptable-missing');
     }
   }
 
@@ -305,7 +326,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const session = await requestOnboardingSession();
       // Bootstrap token is short-lived and single-use by design; URL exposure is accepted for iOS deep-link handoff.
       const runLink = `scriptable:///run?scriptName=CopeLimitInstall&bt=${encodeURIComponent(session.bootstrapToken)}`;
-      storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
       setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically.');
@@ -319,6 +339,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     setOnboardingError(null);
     setOnboardingNotice(null);
     setOnboardingSuccess(false);
+    setScriptableDialog(null);
     storeOnboardingStep('idle');
   }
 
@@ -341,38 +362,30 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       {isIos && (
         <div className="widgetOnboarding">
           <span className="label">iPhone Widget Setup</span>
-          <p>
-            Scriptable script creation/import is manual in iOS. Open or copy each script source below, create scripts in Scriptable,
-            then run token configuration for automatic token handoff.
-          </p>
-          {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
-          {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
-          {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
-          <div className="widgetTokenActions">
-            <button type="button" onClick={checkScriptable} disabled={onboardingStep === 'checking' || onboardingStep === 'requesting'}>
-              {onboardingStep === 'checking' ? 'Checking…' : 'Setup iPhone widget'}
-            </button>
-            {(onboardingStep === 'scriptable-missing') && (
-              <button type="button" onClick={appStoreLink}>
-                Install Scriptable
-              </button>
-            )}
-            {(onboardingStep === 'ready' || onboardingStep === 'manual-setup' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
-              <>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); }}>
-                  Open widget script source
-                </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js', 'CopeLimitWidget', 'Widget script'); }}>
+          {!isStandalone ? (
+            <p className="widgetTokenMeta">
+              Install CopeLimit to your Home Screen first, then open it as an app to set up the iPhone widget.
+            </p>
+          ) : (
+            <>
+              <ol className="widgetOnboardingSteps">
+                <li>
+                  Copy widget script, paste in Scriptable, rename to <strong>CopeLimit</strong>, and save.
+                </li>
+                <li>
+                  Copy token setup script, paste in Scriptable, rename to <strong>CopeLimitInstall</strong>, and save.
+                </li>
+                <li>Run token configuration.</li>
+              </ol>
+              {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
+              {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
+              {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
+              <div className="widgetTokenActions">
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js'); }}>
                   Copy widget script
                 </button>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitInstall.js'); }}>
-                  Open token configuration script source
-                </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js', 'CopeLimitInstall', 'Token configuration script'); }}>
-                  Copy token configuration script
-                </button>
-                <button type="button" onClick={openScriptableApp}>
-                  Open Scriptable
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js'); }}>
+                  Copy token setup script
                 </button>
                 <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
                   {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
@@ -380,13 +393,13 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
                 <button type="button" onClick={resetOnboarding}>
                   Reset
                 </button>
-              </>
-            )}
-          </div>
-          <p className="widgetTokenMeta">
-            Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
-            widget creation and script assignment remain manual.
-          </p>
+              </div>
+              <p className="widgetTokenMeta">
+                Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
+                widget creation and script assignment remain manual.
+              </p>
+            </>
+          )}
         </div>
       )}
       {result ? (
@@ -420,6 +433,34 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
               {revoking ? 'Revoking…' : 'Revoke token'}
             </button>
           )}
+        </div>
+      )}
+      {scriptableDialog && (
+        <div className="modalOverlay">
+          <div
+            className="modalCard"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scriptable-dialog-title"
+            aria-describedby="scriptable-dialog-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="scriptable-dialog-title">{scriptableDialog.title}</h2>
+            <p id="scriptable-dialog-description">{scriptableDialog.intro}</p>
+            <ol className="scriptableDialogSteps">
+              {scriptableDialog.steps.map((step, index) => (
+                <li key={index}>{step}</li>
+              ))}
+            </ol>
+            <div className="widgetTokenActions">
+              <button type="button" className="secondaryButton" onClick={closeScriptableDialog}>
+                Cancel
+              </button>
+              <button type="button" ref={openScriptableButtonRef} onClick={openScriptableForPasting}>
+                Open Scriptable
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -653,7 +694,7 @@ function App() {
         </>
       )}
 
-      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} />}
+      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} isStandalone={isInstalled} />}
     </main>
   );
 }
