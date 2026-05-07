@@ -118,6 +118,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
   const [scriptableDialog, setScriptableDialog] = useState<ScriptablePasteDialog | null>(null);
   const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasDialogOpenRef = useRef(false);
 
   function storeOnboardingStep(step: OnboardingStep) {
     setOnboardingStep(step);
@@ -174,19 +175,32 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
   }, []);
 
   useEffect(() => {
-    if (!scriptableDialog) return;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
+    const isOpen = Boolean(scriptableDialog);
+    if (isOpen && !wasDialogOpenRef.current) {
+      previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
+    }
+    if (!isOpen && wasDialogOpenRef.current) {
+      previousFocusRef.current?.focus();
+    }
+
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
         setScriptableDialog(null);
       }
     }
-    window.addEventListener('keydown', handleEscape);
+
+    if (isOpen) {
+      window.addEventListener('keydown', handleEscape);
+    }
+
+    wasDialogOpenRef.current = isOpen;
+
     return () => {
-      window.removeEventListener('keydown', handleEscape);
-      previousFocusRef.current?.focus();
+      if (isOpen) {
+        window.removeEventListener('keydown', handleEscape);
+      }
     };
   }, [scriptableDialog]);
 
@@ -416,7 +430,6 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       {scriptableDialog && (
         <div
           className="modalOverlay"
-          role="presentation"
           onClick={closeScriptableDialog}
         >
           <div
@@ -430,8 +443,8 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
             <h2 id="scriptable-dialog-title">{scriptableDialog.title}</h2>
             <p id="scriptable-dialog-description">{scriptableDialog.intro}</p>
             <ol className="scriptableDialogSteps">
-              {scriptableDialog.steps.map((step) => (
-                <li key={step}>{step}</li>
+              {scriptableDialog.steps.map((step, index) => (
+                <li key={index}>{step}</li>
               ))}
             </ol>
             <div className="widgetTokenActions">
