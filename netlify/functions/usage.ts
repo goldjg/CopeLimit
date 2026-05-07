@@ -1,3 +1,53 @@
+/**
+ * @file Netlify Function: `usage`
+ *
+ * The primary Copilot usage endpoint. Dispatches to the configured provider
+ * and returns a normalised {@link Usage} JSON response.
+ *
+ * ## Endpoint
+ * `GET /api/usage`
+ *
+ * ## Providers (controlled by `COPELIMIT_PROVIDER` env var)
+ *
+ * | Value                      | Data source                                        | Auth required |
+ * |----------------------------|----------------------------------------------------|---------------|
+ * | `mock` (default)           | Configurable static values via `MOCK_*` env vars   | No            |
+ * | `github-copilot-internal`  | `api.github.com/copilot_internal/user`             | Session cookie|
+ * | `copilot-local`            | Local `copilot-api` proxy (`http://127.0.0.1:4141`)| No            |
+ * | `github` / `unsupported`   | Returns zeroed unsupported usage                   | No            |
+ *
+ * ## Response shape
+ * ```json
+ * {
+ *   "mode": "premium_requests",
+ *   "used": 321,
+ *   "quota": 500,
+ *   "remaining": 179,
+ *   "percentUsed": 64,
+ *   "resetAt": "2026-06-01T00:00:00.000Z",
+ *   "billingEntity": "octocat",
+ *   "source": "github-copilot-internal",
+ *   "warningLevel": "normal",
+ *   "updatedAt": "2026-05-07T21:00:00.000Z",
+ *   "notes": []
+ * }
+ * ```
+ *
+ * ## Capture
+ * When `CAPTURE_PROVIDER_RESPONSES=true`, a sanitised snapshot of the raw
+ * provider response is written to Netlify Blobs asynchronously (fire-and-forget)
+ * via {@link maybeCapture}. This never blocks the usage response.
+ *
+ * ## Cache
+ * Responses are marked `Cache-Control: private, max-age=60`.
+ *
+ * ## Required environment variables (provider-dependent)
+ * - `COPELIMIT_PROVIDER`      – Provider selection
+ * - `SESSION_SECRET`          – Required for `github-copilot-internal`
+ * - `SESSION_ENCRYPTION_KEY`  – Recommended for `github-copilot-internal`
+ * - `MOCK_USED` / `MOCK_QUOTA` / `MOCK_RESET_AT` – Mock provider overrides
+ * - `COPILOT_API_URL`         – Override for `copilot-local` (default: `http://127.0.0.1:4141`)
+ */
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { parseCookies, verifySession } from './lib/session';
 import {

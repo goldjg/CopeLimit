@@ -1,3 +1,25 @@
+/**
+ * @file Netlify Function: `auth-callback`
+ *
+ * Completes the GitHub OAuth 2.0 authorisation code flow.
+ *
+ * ## Endpoint
+ * `GET /api/auth/callback?code=<code>&state=<state>`
+ *
+ * ## Behaviour
+ * 1. Validates the `state` query parameter against the `oauth_state` cookie.
+ * 2. Exchanges the `code` for a GitHub access token via `github.com/login/oauth/access_token`.
+ * 3. Fetches the authenticated user's profile via `api.github.com/user`.
+ * 4. Creates a signed (and optionally encrypted) session cookie containing
+ *    the user's login, numeric ID, avatar URL, and OAuth access token.
+ * 5. Redirects to `/` on success, or `/?error=<code>` on failure.
+ *
+ * ## Required environment variables
+ * - `GITHUB_CLIENT_ID`       – GitHub OAuth App client ID
+ * - `GITHUB_CLIENT_SECRET`   – GitHub OAuth App client secret
+ * - `SESSION_SECRET`         – HMAC-SHA256 signing secret for session cookies
+ * - `SESSION_ENCRYPTION_KEY` – (recommended) AES-256 key for encrypting session payloads
+ */
 import type { Handler } from '@netlify/functions';
 import {
   signSession,

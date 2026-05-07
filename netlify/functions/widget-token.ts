@@ -1,3 +1,34 @@
+/**
+ * @file Netlify Function: `widget-token`
+ *
+ * CRUD endpoint for managing per-user widget bearer tokens.
+ *
+ * ## Endpoint
+ * `/api/widget-token` — requires a valid session cookie for all methods.
+ *
+ * | Method   | Behaviour                                                      |
+ * |----------|----------------------------------------------------------------|
+ * | `GET`    | Returns token status (`hasActiveToken`, `expiresAt`, `ttlDays`) without revealing the raw token |
+ * | `POST`   | Issues a new token (replacing any existing one) and returns the raw token **once** |
+ * | `DELETE` | Revokes the active token                                       |
+ *
+ * ## POST response
+ * ```json
+ * {
+ *   "token": "<opaque-bearer-token>",
+ *   "expiresAt": "2026-08-05T00:00:00.000Z",
+ *   "ttlDays": 90,
+ *   "login": "octocat",
+ *   "replacedExisting": false
+ * }
+ * ```
+ *
+ * ## Required environment variables
+ * - `SESSION_SECRET`          – For session verification
+ * - `SESSION_ENCRYPTION_KEY`  – For encrypted session cookies
+ * - `BLOB_ENCRYPTION_KEY`     – For encrypting token records in Netlify Blobs
+ * - `WIDGET_TOKEN_TTL_DAYS`   – (optional) Token TTL; defaults to 90 days
+ */
 import type { Handler } from '@netlify/functions';
 import { parseCookies, verifySession } from './lib/session';
 import { widgetTokenTtlDays } from './lib/widget-token';

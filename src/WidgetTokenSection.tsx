@@ -1,3 +1,33 @@
+/**
+ * @file Widget Token Section React component.
+ *
+ * Renders the "iOS Widget Token" card visible to authenticated users. This
+ * component handles the complete widget token lifecycle:
+ *
+ * - Displays the current token status (active / inactive, expiry date).
+ * - Issues a new token via `POST /api/widget-token` (replaces any existing one).
+ * - Revokes the token via `DELETE /api/widget-token`.
+ * - Copies the raw token to the clipboard (shown exactly once after generation).
+ *
+ * ## iOS Widget onboarding
+ *
+ * When the user is on iOS and has installed the PWA as a standalone app, the
+ * component also drives the full widget onboarding flow (see
+ * {@link widget-onboarding} for the state machine types and logic):
+ *
+ * ### Fast Setup
+ * Uses the iOS Shortcuts app to automate token installation into Scriptable.
+ * Requires the `CopeLimitInstaller` Shortcut to be installed on the device.
+ *
+ * ### Manual Setup
+ * Guides the user to copy `CopeLimitWidget.js` and `CopeLimitInstall.js`
+ * into Scriptable manually, then run the installer via a deep link.
+ *
+ * ## State persistence
+ * Onboarding state is persisted across page reloads via `sessionStorage`
+ * (step) and `localStorage` (mode, installed flag, recovery state) so that
+ * the flow survives the round-trip through the Shortcuts app.
+ */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   buildShortcutPayload,

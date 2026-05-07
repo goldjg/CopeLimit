@@ -1,3 +1,37 @@
+/**
+ * CopeLimit Scriptable widget for iOS.
+ *
+ * @description
+ * Displays your GitHub Copilot quota usage as a Scriptable home-screen widget.
+ *
+ * The widget fetches live usage data from the CopeLimit hosted API endpoint
+ * using the personal widget bearer token stored in the iOS Keychain. The token
+ * is configured automatically via the CopeLimit PWA onboarding flow —
+ * **do not use your GitHub OAuth token here**.
+ *
+ * ## Setup
+ * Follow the onboarding flow in the CopeLimit PWA (https://copelimit.netlify.app)
+ * to have this script and your token installed automatically. Alternatively:
+ * 1. Copy this script into Scriptable and name it `CopeLimit`.
+ * 2. Run the `CopeLimitInstall.js` script to store your widget token.
+ * 3. Add a Scriptable widget to your home screen and select this script.
+ *
+ * ## Token storage
+ * The widget reads the bearer token from `Keychain.get("copelimit_widget_token")`.
+ * If the token is missing the API will return a 401 error, which the widget
+ * will display as `remaining: "?"`.
+ *
+ * ## Colour coding
+ * | Condition                   | Colour      |
+ * |-----------------------------|-------------|
+ * | Over quota / nearly over    | Red (#ef4444)  |
+ * | Warm (≥ 75 % used)          | Amber (#f59e0b) |
+ * | Unsupported source          | Amber (#f59e0b) |
+ * | Live (github-copilot-internal) | Green (#22c55e) |
+ * | Live (copilot-local)        | Blue (#60a5fa) |
+ * | Other / default             | Blue (#60a5fa) |
+ */
+
 // CopeLimit Scriptable widget for iOS.
 // Token is configured automatically via the CopeLimit PWA onboarding flow.
 // Do not use your GitHub token here.

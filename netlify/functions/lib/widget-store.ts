@@ -1,28 +1,70 @@
+/**
+ * @file Netlify Blobs storage layer for widget tokens.
+ *
+ * ## Blob store layout (`widget-tokens`)
+ *
+ * | Key                   | Value                        | Purpose                       |
+ * |-----------------------|------------------------------|-------------------------------|
+ * | `token/<hash>`        | Encrypted `WidgetTokenRecord` | Look up a token by its hash   |
+ * | `user/<userId>`       | Encrypted `WidgetUserIndex`  | Look up a user's active token |
+ *
+ * All records are AES-256-GCM encrypted at rest via {@link encryptBlob} /
+ * {@link decryptBlob}. Legacy plaintext records written before encryption was
+ * introduced are migrated automatically on first read.
+ *
+ * ## Token lifecycle
+ *
+ * 1. `POST /api/widget-token` → {@link issueWidgetTokenForUser}
+ *    - Generates a new opaque random token and stores its hash.
+ *    - If the user already has an active token its old token record is deleted.
+ * 2. `GET /api/widget-usage` → {@link resolveWidgetToken}
+ *    - Hashes the bearer token from the request and looks up the record.
+ *    - Returns `null` (401) if the token is missing or expired.
+ * 3. `DELETE /api/widget-token` → {@link revokeWidgetTokenForUser}
+ *    - Removes both the token record and the user index entry.
+ */
 import { getStore } from '@netlify/blobs';
 import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
 import type { SessionPayload } from './session';
 import { generateOpaqueWidgetToken, hashWidgetToken, widgetTokenTtlSeconds } from './widget-token';
 
+/** An encrypted blob record representing a single issued widget token. */
 type WidgetTokenRecord = {
+  /** HMAC-SHA256 hash of the raw bearer token (used as the blob key). */
   tokenHash: string;
+  /** Numeric GitHub user ID of the token owner. */
   userId: number;
+  /** GitHub login of the token owner. */
   login: string;
+  /** The GitHub OAuth access token used to call the Copilot API on the widget's behalf. */
   githubAccessToken: string;
+  /** ISO 8601 timestamp when this token was issued. */
   createdAt: string;
+  /** ISO 8601 timestamp when this token expires. */
   expiresAt: string;
 };
 
+/** Per-user index blob that tracks the hash of the user's currently active widget token. */
 type WidgetUserIndex = {
+  /** Numeric GitHub user ID. */
   userId: number;
+  /** GitHub login. */
   login: string;
+  /** Hash of the currently active token; used to efficiently look up and delete old tokens. */
   activeTokenHash: string;
+  /** ISO 8601 timestamp when this index was last written. */
   updatedAt: string;
+  /** ISO 8601 timestamp when the current token expires. */
   expiresAt: string;
 };
 
+/** Return value of {@link issueWidgetTokenForUser}. */
 type IssueResult = {
+  /** The raw bearer token to hand to the user (shown once). */
   token: string;
+  /** The persisted token record (without the raw token). */
   record: WidgetTokenRecord;
+  /** `true` when a previous token was revoked as part of this issuance. */
   replacedExisting: boolean;
 };
 
@@ -53,10 +95,19 @@ function getWidgetStore() {
   }
 }
 
+/**
+ * Returns `true` when the given error was thrown because Netlify Blobs is
+ * unavailable in the current environment (e.g. missing site credentials).
+ * Use this to return a `503` response rather than a generic `500`.
+ */
 export function isWidgetStoreUnavailableError(error: unknown): boolean {
   return error instanceof Error && error.message === STORE_UNAVAILABLE_ERROR;
 }
 
+/**
+ * Returns `true` when the given error was thrown because `BLOB_ENCRYPTION_KEY`
+ * is not configured. Use this to return a `503 Service not configured` response.
+ */
 export function isWidgetStoreNotConfiguredError(error: unknown): boolean {
   return error instanceof Error && error.message === STORE_NOT_CONFIGURED_ERROR;
 }
@@ -148,6 +199,15 @@ function isExpired(iso: string): boolean {
   return Date.now() >= new Date(iso).getTime();
 }
 
+/**
+ * Returns the token status for a given user without exposing the raw token.
+ *
+ * If the stored token has expired it is revoked automatically and
+ * `{ hasActiveToken: false }` is returned.
+ *
+ * @param userId - Numeric GitHub user ID.
+ * @returns `{ hasActiveToken: true, expiresAt }` or `{ hasActiveToken: false }`.
+ */
 export async function getWidgetTokenStatusForUser(userId: number): Promise<{ hasActiveToken: boolean; expiresAt?: string }> {
   const index = await getUserIndex(userId);
   if (!index) return { hasActiveToken: false };
@@ -160,6 +220,20 @@ export async function getWidgetTokenStatusForUser(userId: number): Promise<{ has
   return { hasActiveToken: true, expiresAt: index.expiresAt };
 }
 
+/**
+ * Issues a new widget token for the authenticated user.
+ *
+ * Generates a new opaque random token, stores the hashed record in
+ * `token/<hash>` and updates the user index at `user/<userId>`. If the user
+ * already has an active token its old token record is deleted.
+ *
+ * The raw token is returned **exactly once** in the {@link IssueResult}; it
+ * is not stored anywhere and cannot be recovered after this call returns.
+ *
+ * @param session - The verified session payload of the requesting user.
+ * @returns The newly issued token, its persisted record, and whether an old
+ *          token was revoked.
+ */
 export async function issueWidgetTokenForUser(session: SessionPayload): Promise<IssueResult> {
   const existing = await getUserIndex(session.id);
 
@@ -199,6 +273,14 @@ export async function issueWidgetTokenForUser(session: SessionPayload): Promise<
   };
 }
 
+/**
+ * Revokes the active widget token for a given user by deleting both the
+ * token record and the user index entry.
+ *
+ * @param userId - Numeric GitHub user ID.
+ * @returns `true` when a token was found and deleted; `false` when no active
+ *          token existed.
+ */
 export async function revokeWidgetTokenForUser(userId: number): Promise<boolean> {
   const store = getWidgetStore();
   const existing = await getUserIndex(userId);
@@ -213,6 +295,17 @@ export async function revokeWidgetTokenForUser(userId: number): Promise<boolean>
   return true;
 }
 
+/**
+ * Resolves a raw widget bearer token to its stored record.
+ *
+ * The token is hashed before the lookup so the raw value is never compared
+ * directly against stored data. Expired tokens are deleted automatically and
+ * `null` is returned.
+ *
+ * @param token - The raw bearer token from the `Authorization` header.
+ * @returns The valid, non-expired {@link WidgetTokenRecord}, or `null` when the
+ *          token is unknown, expired, or the store is unavailable.
+ */
 export async function resolveWidgetToken(token: string): Promise<WidgetTokenRecord | null> {
   const store = getWidgetStore();
   const tokenHash = hashWidgetToken(token);
