@@ -1,3 +1,34 @@
+/**
+ * CopeLimit Scriptable token configuration script.
+ *
+ * @description
+ * Exchanges a short-lived bootstrap token for a long-lived widget bearer token
+ * and stores the result in the iOS Keychain under `"copelimit_widget_token"`.
+ *
+ * This script is **not intended to be run manually**. It is invoked
+ * automatically by the `CopeLimitInstaller` iOS Shortcut as part of the Fast
+ * Setup onboarding flow from the CopeLimit PWA.
+ *
+ * ## Input sources (tried in order)
+ * 1. `args.queryParameters.bt` — bootstrap token supplied as a URL parameter
+ *    when launched via `scriptable:///run?scriptName=CopeLimitInstall&bt=<token>`.
+ * 2. `Script.parameter()` — JSON string `{ bootstrapToken, callbackUrl, ... }`
+ *    passed by the iOS Shortcut from the clipboard.
+ * 3. `Script.parameter()` — treated as a raw bootstrap token string (fallback).
+ *
+ * ## Flow
+ * 1. Parse the bootstrap token from the available input source.
+ * 2. `POST /api/onboarding/exchange` with `{ bootstrapToken }`.
+ * 3. On success: store `widgetToken` in Keychain, redirect to `callbackUrl`.
+ * 4. On error: redirect to `/?onboarding=error&reason=<reason>`.
+ *
+ * ## Security
+ * - The `callbackUrl` is validated against `BASE_URL` before any redirect to
+ *   prevent open-redirect attacks.
+ * - The bootstrap token is single-use: the exchange endpoint consumes it
+ *   immediately so it cannot be replayed.
+ */
+
 // CopeLimit Scriptable token configuration script.
 // Imported and run from CopeLimit iPhone onboarding.
 

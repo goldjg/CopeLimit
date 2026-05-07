@@ -1,3 +1,9 @@
+/**
+ * @file Reads the provider capture subsystem configuration from environment variables.
+ *
+ * All capture behaviour is off by default. Individual options are controlled
+ * by the environment variables documented in {@link readCaptureConfig}.
+ */
 import type { CaptureConfig } from './capture-types'
 
 const DEFAULT_CAPTURE_CONFIG: CaptureConfig = {
@@ -32,6 +38,21 @@ function readPositiveInteger(name: string, fallback: number): number {
   return fallback
 }
 
+/**
+ * Reads the capture subsystem configuration from environment variables.
+ *
+ * | Variable                           | Type    | Default | Description                              |
+ * |------------------------------------|---------|---------|------------------------------------------|
+ * | `CAPTURE_PROVIDER_RESPONSES`       | boolean | `false` | Enable/disable capture                   |
+ * | `PROVIDER_CAPTURE_RETENTION_DAYS`  | integer | `30`    | Days to retain capture records           |
+ * | `PROVIDER_CAPTURE_MAX_PER_DAY`     | integer | `10`    | Max captures stored per user per day     |
+ * | `PROVIDER_CAPTURE_INCLUDE_NORMALIZED` | boolean | `true` | Include normalised usage in captures  |
+ *
+ * Invalid values are ignored and the documented defaults are used instead; a
+ * console warning is emitted for each invalid value.
+ *
+ * @returns A validated {@link CaptureConfig} ready for use by {@link maybeCapture}.
+ */
 export function readCaptureConfig(): CaptureConfig {
   return {
     enabled: readBoolean('CAPTURE_PROVIDER_RESPONSES', DEFAULT_CAPTURE_CONFIG.enabled),

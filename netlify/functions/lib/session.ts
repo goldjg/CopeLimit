@@ -1,9 +1,42 @@
+/**
+ * @file HMAC-SHA256-signed, optionally AES-256-GCM-encrypted session cookies.
+ *
+ * ## Cookie format
+ *
+ * ### Without encryption (`SESSION_ENCRYPTION_KEY` not set)
+ * ```
+ * base64(JSON.stringify(payload)).HMAC-SHA256(secret)
+ * ```
+ *
+ * ### With encryption (`SESSION_ENCRYPTION_KEY` set)
+ * ```
+ * base64("e:" + AES-256-GCM(JSON.stringify(payload))).HMAC-SHA256(secret)
+ * ```
+ *
+ * The `e:` prefix lets the server distinguish encrypted from plaintext payloads
+ * and enables zero-downtime key rotation: old plaintext cookies issued before
+ * enabling encryption continue to be accepted until they expire.
+ *
+ * @see {@link signSession} for cookie creation
+ * @see {@link verifySession} for cookie verification
+ */
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
+/**
+ * Data stored inside every authenticated session cookie.
+ * The entire object is HMAC-signed and optionally AES-256-GCM encrypted.
+ */
 export type SessionPayload = {
+  /** The authenticated GitHub login (username). */
   login: string;
+  /** The numeric GitHub user ID. */
   id: number;
+  /** Optional GitHub avatar URL (for display only; never used server-side). */
   avatar_url?: string;
+  /**
+   * The GitHub OAuth access token granted during the OAuth callback.
+   * **Never exposed to the browser.**
+   */
   accessToken: string;
 };
 
@@ -49,14 +82,32 @@ function decryptPayload(encrypted: string, keyHex: string): string | null {
   }
 }
 
+/** Options accepted by {@link serializeCookie}. */
 export type CookieOptions = {
+  /** Whether to set `HttpOnly` on the cookie. Defaults to `false`. */
   httpOnly?: boolean;
+  /** Whether to set `Secure` on the cookie. Defaults to `false`. */
   secure?: boolean;
+  /** `SameSite` attribute value. */
   sameSite?: 'Strict' | 'Lax' | 'None';
+  /** Maximum lifetime in seconds (`Max-Age`). `0` deletes the cookie. */
   maxAge?: number;
+  /** Cookie path. Defaults to `/`. */
   path?: string;
 };
 
+/**
+ * Serialises `payload` into a signed (and optionally encrypted) session cookie value.
+ *
+ * When `encryptionKey` is provided the JSON payload is encrypted with AES-256-GCM
+ * before being base64-encoded. The outer HMAC-SHA256 signature is always applied
+ * regardless of whether encryption is used.
+ *
+ * @param payload       - Session data to embed.
+ * @param secret        - HMAC-SHA256 signing secret (`SESSION_SECRET`).
+ * @param encryptionKey - Optional 64-char hex AES-256 key (`SESSION_ENCRYPTION_KEY`).
+ * @returns An opaque cookie value string suitable for use with `set-cookie`.
+ */
 export function signSession(payload: SessionPayload, secret: string, encryptionKey?: string): string {
   const json = JSON.stringify(payload);
   const content = encryptionKey ? `e:${encryptPayload(json, encryptionKey)}` : json;
@@ -65,6 +116,20 @@ export function signSession(payload: SessionPayload, secret: string, encryptionK
   return `${data}.${sig}`;
 }
 
+/**
+ * Verifies and deserialises a session cookie value produced by {@link signSession}.
+ *
+ * Returns `null` (rather than throwing) for any input that fails HMAC verification,
+ * decryption, or JSON parsing to avoid leaking timing information or throwing
+ * unhandled errors in request handlers.
+ *
+ * @param cookie        - The raw cookie value from the `Cookie` header.
+ * @param secret        - HMAC-SHA256 signing secret (`SESSION_SECRET`).
+ * @param encryptionKey - Optional 64-char hex AES-256 key; required when the
+ *                        cookie was signed with encryption enabled.
+ * @returns The verified {@link SessionPayload}, or `null` if the cookie is
+ *          invalid, tampered, or cannot be decrypted.
+ */
 export function verifySession(cookie: string, secret: string, encryptionKey?: string): SessionPayload | null {
   const dot = cookie.lastIndexOf('.');
   if (dot === -1) return null;
@@ -100,10 +165,26 @@ export function verifySession(cookie: string, secret: string, encryptionKey?: st
   }
 }
 
+/**
+ * Generates a cryptographically random OAuth CSRF state parameter (16 bytes, hex).
+ *
+ * @returns A 32-character lowercase hex string.
+ */
 export function generateState(): string {
   return randomBytes(16).toString('hex');
 }
 
+/**
+ * Serialises a `Set-Cookie` header value from a name/value pair and options.
+ *
+ * The cookie value is percent-encoded. `Path=/` is set by default unless
+ * `opts.path` is explicitly provided.
+ *
+ * @param name  - Cookie name.
+ * @param value - Cookie value (will be percent-encoded).
+ * @param opts  - Optional cookie attributes.
+ * @returns A `Set-Cookie` header string.
+ */
 export function serializeCookie(name: string, value: string, opts: CookieOptions = {}): string {
   const parts: string[] = [`${name}=${encodeURIComponent(value)}`];
 
@@ -118,6 +199,14 @@ export function serializeCookie(name: string, value: string, opts: CookieOptions
   return parts.join('; ');
 }
 
+/**
+ * Parses a `Cookie` header string into a key–value map.
+ *
+ * Values are percent-decoded. Malformed pairs are returned as empty strings.
+ *
+ * @param header - Raw `Cookie` header value (may be `undefined`).
+ * @returns A plain object mapping cookie names to their decoded values.
+ */
 export function parseCookies(header: string | undefined): Record<string, string> {
   if (!header) return {};
   return Object.fromEntries(
@@ -129,6 +218,13 @@ export function parseCookies(header: string | undefined): Record<string, string>
   );
 }
 
+/**
+ * Returns `true` when the Netlify site URL begins with `https://`, which
+ * indicates a production/preview deployment where the `Secure` cookie flag
+ * should be set. Returns `false` in local development (`netlify dev`).
+ *
+ * @returns Whether the current deployment context is a secure (HTTPS) origin.
+ */
 export function isSecureContext(): boolean {
   const siteUrl = process.env.URL || '';
   return siteUrl.startsWith('https://');

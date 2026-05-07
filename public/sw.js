@@ -1,3 +1,25 @@
+/**
+ * CopeLimit Service Worker — App Shell Cache Strategy
+ *
+ * @description
+ * Implements a cache-first strategy for the PWA app shell (HTML, JS, CSS,
+ * icons) with a network-first strategy for navigation requests. API calls and
+ * Scriptable scripts bypass the cache entirely so they are always fresh.
+ *
+ * Cache versioning: Update {@link CACHE_NAME} whenever the app shell changes
+ * to force old caches to be purged during the `activate` event.
+ *
+ * ## Request routing
+ * - Cross-origin requests: pass-through (not cached).
+ * - `/api/*` requests: pass-through (never cached).
+ * - `/scriptable/*` requests: pass-through (never cached — scripts must be fresh).
+ * - Navigation requests: network-first; falls back to cached `/index.html`,
+ *   then `/offline.html`, then an inline 503 response.
+ * - All other same-origin GET requests: cache-first; caches the response on
+ *   first miss for future offline use.
+ *
+ * @version 2026-05-06
+ */
 const CACHE_NAME = 'copelimit-2026-05-06';
 const APP_SHELL = [
   '/',

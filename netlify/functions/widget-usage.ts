@@ -1,3 +1,33 @@
+/**
+ * @file Netlify Function: `widget-usage`
+ *
+ * Unauthenticated (token-authenticated) Copilot usage endpoint for the
+ * Scriptable iOS widget. This endpoint is called directly by
+ * `CopeLimitWidget.js` on the device, which presents the widget bearer token
+ * instead of a session cookie.
+ *
+ * ## Endpoint
+ * `GET /api/widget-usage`
+ *
+ * ## Authentication
+ * The widget token must be supplied in **one** of:
+ * - `Authorization: Bearer <token>` header
+ * - `X-Widget-Token: <token>` header
+ *
+ * ## Behaviour
+ * 1. Extracts the raw bearer token from the request.
+ * 2. Looks up the token hash in Netlify Blobs via {@link resolveWidgetToken}.
+ * 3. Calls `api.github.com/copilot_internal/user` using the stored GitHub
+ *    access token associated with the widget token record.
+ * 4. Returns a normalised {@link Usage} JSON response.
+ *
+ * ## Response shape
+ * Same as `/api/usage` — a {@link Usage} JSON object.
+ *
+ * ## Required environment variables
+ * - `SESSION_SECRET` or `WIDGET_TOKEN_HASH_SECRET` – For HMAC token hashing
+ * - `BLOB_ENCRYPTION_KEY` – For decrypting token records
+ */
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
   type Usage,

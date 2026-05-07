@@ -1,3 +1,28 @@
+/**
+ * @file Netlify Function: `me`
+ *
+ * Returns the currently authenticated user's public profile, or an
+ * unauthenticated marker when no valid session cookie is present.
+ *
+ * ## Endpoint
+ * `GET /api/me`
+ *
+ * ## Response (authenticated)
+ * ```json
+ * { "authenticated": true, "login": "octocat", "avatar_url": "https://..." }
+ * ```
+ *
+ * ## Response (unauthenticated)
+ * ```json
+ * { "authenticated": false }
+ * ```
+ *
+ * The `accessToken` is intentionally never included in the response.
+ *
+ * ## Required environment variables
+ * - `SESSION_SECRET`         – HMAC-SHA256 signing secret
+ * - `SESSION_ENCRYPTION_KEY` – (optional) AES-256 decryption key
+ */
 import type { Handler } from '@netlify/functions';
 import { verifySession, parseCookies } from './lib/session';
 

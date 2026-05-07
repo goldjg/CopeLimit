@@ -1,3 +1,29 @@
+/**
+ * @file Netlify Blobs storage layer for provider response captures.
+ *
+ * ## Blob store layout (`provider-captures`)
+ *
+ * ```
+ * <provider>/<userId>/<YYYY-MM-DD>/<ISO-timestamp>.json   — individual capture
+ * <provider>/<userId>/<YYYY-MM-DD>/_index.json            — daily counter
+ * ```
+ *
+ * Captures are partitioned by provider, user, and UTC date for efficient
+ * enumeration and retention-based cleanup.
+ *
+ * ## Retention and cleanup
+ *
+ * Old captures are deleted lazily: whenever a new capture is about to be
+ * persisted, {@link runLazyCleanup} lists all blobs for the
+ * provider/user prefix and deletes any whose date folder is older than
+ * `retentionDays`. This avoids a separate scheduled cleanup job.
+ *
+ * ## Daily cap
+ *
+ * The daily index (`_index.json`) tracks how many captures have already been
+ * stored for a given provider/user/day. If the count reaches `maxPerDay` the
+ * capture is silently dropped to prevent runaway storage growth.
+ */
 import { getStore } from '@netlify/blobs'
 import type { JsonObject, Usage } from './copilot'
 import { sanitizeProviderPayload } from './capture-sanitize'
@@ -35,11 +61,33 @@ function getCaptureStore() {
   return captureStore
 }
 
+/**
+ * Builds the Blobs key for a single capture record.
+ *
+ * Format: `<provider>/<userId>/<YYYY-MM-DD>/<isoTimestamp>.json`
+ *
+ * @param provider      - Provider identifier (must match `/^[a-z0-9_-]+$/i`).
+ * @param userId        - Numeric GitHub user ID.
+ * @param isoTimestamp  - ISO 8601 capture timestamp.
+ * @returns The Blobs key string.
+ * @throws If `provider` contains characters that could escape the key path.
+ */
 export function buildCaptureKey(provider: string, userId: number, isoTimestamp: string): string {
   assertSafeProvider(provider)
   return `${provider}/${userId}/${buildDateFromIso(isoTimestamp)}/${isoTimestamp}.json`
 }
 
+/**
+ * Builds the Blobs key for a daily capture index record.
+ *
+ * Format: `<provider>/<userId>/<YYYY-MM-DD>/_index.json`
+ *
+ * @param provider  - Provider identifier.
+ * @param userId    - Numeric GitHub user ID.
+ * @param dateUtc   - UTC date string (`YYYY-MM-DD`).
+ * @returns The Blobs key string.
+ * @throws If `provider` contains path-unsafe characters.
+ */
 export function buildIndexKey(provider: string, userId: number, dateUtc: string): string {
   assertSafeProvider(provider)
   return `${provider}/${userId}/${dateUtc}/_index.json`
@@ -74,6 +122,15 @@ function getDateFolderFromKey(provider: string, userId: number, key: string): st
   return dateFolder
 }
 
+/**
+ * Returns `true` when the given `dateFolder` (`YYYY-MM-DD`) is older than the
+ * retention cutoff calculated from `retentionDays` before `now`.
+ *
+ * @param dateFolder    - UTC date string in `YYYY-MM-DD` format.
+ * @param retentionDays - Number of calendar days to retain.
+ * @param now           - Reference date (defaults to the current wall-clock time).
+ * @returns `true` if the date is before the retention cutoff.
+ */
 export function isDateExpired(dateFolder: string, retentionDays: number, now = new Date()): boolean {
   const cutoff = new Date(now)
   cutoff.setUTCHours(0, 0, 0, 0)
@@ -169,6 +226,24 @@ async function persistCapture(capture: ProviderCapture, config: CaptureConfig): 
   })
 }
 
+/**
+ * Conditionally captures a sanitised provider response to Netlify Blobs.
+ *
+ * Guards applied before persisting:
+ * - `config.enabled` must be `true`.
+ * - `provider` must not be in the skip-list (`mock`, `unsupported`, `github`).
+ * - `rawPayload` must be non-null.
+ * - `userId` must be a positive integer.
+ *
+ * Capture is **fire-and-forget**: failures are logged but never rethrown so
+ * that telemetry persistence never blocks the user-facing usage response.
+ *
+ * @param input.config      - Capture configuration from {@link readCaptureConfig}.
+ * @param input.provider    - Provider identifier.
+ * @param input.userId      - Numeric GitHub user ID (omit to skip capture).
+ * @param input.usage       - Normalised usage record for the optional normalised snapshot.
+ * @param input.rawPayload  - Raw provider response body (will be sanitised before storage).
+ */
 export async function maybeCapture(input: {
   config: CaptureConfig;
   provider: string;

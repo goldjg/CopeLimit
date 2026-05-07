@@ -1,14 +1,48 @@
+/**
+ * @file Netlify Blobs storage layer for iOS onboarding bootstrap tokens.
+ *
+ * ## What is a bootstrap token?
+ *
+ * The iOS onboarding flow needs to hand a short-lived, single-use credential
+ * to the `CopeLimitInstall.js` Scriptable script running on-device. The
+ * Scriptable script cannot access the web session cookie, so instead the PWA:
+ *
+ * 1. Calls `POST /api/onboarding/session` to obtain a **bootstrap token** (15-minute TTL).
+ * 2. Encodes the bootstrap token in the JSON payload it copies to the clipboard.
+ * 3. Launches the Shortcuts app which in turn runs `CopeLimitInstall.js`.
+ * 4. `CopeLimitInstall.js` calls `POST /api/onboarding/exchange` with the
+ *    bootstrap token, which:
+ *    a. Consumes (deletes) the bootstrap token so it cannot be reused.
+ *    b. Issues a long-lived widget token on behalf of the user.
+ *    c. Returns the widget token for Keychain storage.
+ *
+ * ## Blob store layout (`onboarding-sessions`)
+ *
+ * | Key                       | Value                          | Purpose                          |
+ * |---------------------------|--------------------------------|----------------------------------|
+ * | `bt/<hash>`               | Encrypted `BootstrapTokenRecord` | Look up a token for exchange   |
+ * | `onboarding-user/<userId>`| Encrypted `BootstrapUserIndex` | Track the active token per user  |
+ *
+ * All records are AES-256-GCM encrypted at rest via {@link encryptBlob}.
+ */
 import { getStore } from '@netlify/blobs';
 import type { SessionPayload } from './session';
 import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
 import { generateOpaqueWidgetToken, hashWidgetToken } from './widget-token';
 
+/** Persisted record for a single-use onboarding bootstrap token. */
 export type BootstrapTokenRecord = {
+  /** HMAC-SHA256 hash of the raw bootstrap token. */
   tokenHash: string;
+  /** Numeric GitHub user ID of the requesting user. */
   userId: number;
+  /** GitHub login of the requesting user. */
   login: string;
+  /** The OAuth access token used to call the Copilot API once the token is exchanged. */
   githubAccessToken: string;
+  /** ISO 8601 timestamp when this bootstrap token was issued. */
   createdAt: string;
+  /** ISO 8601 timestamp when this bootstrap token expires (default: 15 minutes). */
   expiresAt: string;
 };
 
@@ -108,18 +142,36 @@ async function deleteBootstrapRecord(tokenHash: string): Promise<void> {
   await store.delete(bootstrapTokenKey(tokenHash));
 }
 
+/**
+ * Returns the bootstrap token TTL in seconds.
+ * Reads `ONBOARDING_BOOTSTRAP_TTL_SECONDS`; defaults to 900 (15 minutes).
+ */
 export function onboardingBootstrapTtlSeconds(): number {
   return bootstrapTtlSeconds();
 }
 
+/**
+ * Returns `true` when the error indicates the onboarding Blobs store is
+ * unavailable in the current environment (e.g. missing Netlify credentials).
+ */
 export function isOnboardingStoreUnavailableError(error: unknown): boolean {
   return error instanceof Error && error.message === STORE_UNAVAILABLE_ERROR;
 }
 
+/**
+ * Returns `true` when the error indicates `BLOB_ENCRYPTION_KEY` is not
+ * configured. Use this to return a `503 Service not configured` response.
+ */
 export function isOnboardingStoreNotConfiguredError(error: unknown): boolean {
   return error instanceof Error && error.message === STORE_NOT_CONFIGURED_ERROR;
 }
 
+/**
+ * Revokes the active bootstrap token for a user, deleting both the token
+ * record and the user index entry. Safe to call when no token exists.
+ *
+ * @param userId - Numeric GitHub user ID.
+ */
 export async function revokeBootstrapTokenForUser(userId: number): Promise<void> {
   const store = getOnboardingStore();
   const index = await getUserIndex(userId);
@@ -132,6 +184,15 @@ export async function revokeBootstrapTokenForUser(userId: number): Promise<void>
   await store.delete(onboardingUserKey(userId));
 }
 
+/**
+ * Issues a short-lived, single-use bootstrap token for the given authenticated
+ * session. Any previously active bootstrap token for the same user is revoked.
+ *
+ * The raw token is returned **exactly once**; only its hash is persisted.
+ *
+ * @param session - The verified session payload of the requesting user.
+ * @returns The raw bootstrap token and its expiry timestamp.
+ */
 export async function issueBootstrapToken(session: SessionPayload): Promise<{ token: string; expiresAt: string }> {
   const existing = await getUserIndex(session.id);
 
@@ -164,6 +225,17 @@ export async function issueBootstrapToken(session: SessionPayload): Promise<{ to
   return { token, expiresAt };
 }
 
+/**
+ * Resolves and consumes a bootstrap token in a single atomic operation.
+ *
+ * - Hashes the raw token for storage lookup.
+ * - Returns `null` if the token is unknown or expired.
+ * - **Deletes** the token record (and the user index entry if it matches) so
+ *   the same token cannot be used more than once.
+ *
+ * @param rawToken - The raw bootstrap token received from the Scriptable script.
+ * @returns The associated {@link BootstrapTokenRecord} if valid, or `null`.
+ */
 export async function resolveAndConsumeBootstrapToken(rawToken: string): Promise<BootstrapTokenRecord | null> {
   const store = getOnboardingStore();
   const tokenHash = hashWidgetToken(rawToken);

@@ -1,3 +1,38 @@
+/**
+ * @file Netlify Function: `onboarding-exchange`
+ *
+ * Exchanges a single-use onboarding bootstrap token for a long-lived widget
+ * token. Called by `CopeLimitInstall.js` running on-device in Scriptable.
+ *
+ * ## Endpoint
+ * `POST /api/onboarding/exchange` — **no** session cookie required; the
+ * bootstrap token itself acts as the credential.
+ *
+ * ## Request body
+ * ```json
+ * { "bootstrapToken": "<token-from-clipboard>" }
+ * ```
+ *
+ * ## Behaviour
+ * 1. Validates and consumes (single-use) the bootstrap token.
+ * 2. Issues a long-lived widget token tied to the user account that created
+ *    the bootstrap token.
+ * 3. Returns the widget token so Scriptable can store it in the device Keychain.
+ *
+ * ## Response
+ * ```json
+ * {
+ *   "widgetToken": "<long-lived-bearer-token>",
+ *   "expiresAt": "2026-08-05T00:00:00.000Z",
+ *   "ttlDays": 90,
+ *   "login": "octocat"
+ * }
+ * ```
+ *
+ * ## Required environment variables
+ * - `BLOB_ENCRYPTION_KEY`            – Decrypting/encrypting token records
+ * - `SESSION_SECRET` or `WIDGET_TOKEN_HASH_SECRET` – Token HMAC hashing
+ */
 import type { Handler } from '@netlify/functions';
 import {
   isOnboardingStoreNotConfiguredError,

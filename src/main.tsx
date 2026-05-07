@@ -1,3 +1,14 @@
+/**
+ * @file Main React application entry point for the CopeLimit PWA.
+ *
+ * Renders the root `App` component which:
+ * - Fetches Copilot usage from `/api/usage` and the authenticated user from `/api/me`.
+ * - Displays a colour-coded quota meter with reset date, billing entity, and data-source badge.
+ * - Handles GitHub OAuth sign-in / sign-out.
+ * - Shows PWA install prompts for Android (`beforeinstallprompt`) and iOS (Add to Home Screen hint).
+ * - Registers the service worker (`/sw.js`) for offline-capable app-shell caching.
+ * - Renders the {@link WidgetTokenSection} for authenticated users to manage their iOS widget token.
+ */
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WidgetTokenSection } from './WidgetTokenSection';
