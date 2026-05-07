@@ -3,8 +3,26 @@
 
 const BASE_URL = "https://copelimit.netlify.app";
 
+function safeCallbackUrl(raw) {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return `${BASE_URL}/?onboarding=complete`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.origin === BASE_URL) {
+      return parsed.toString();
+    }
+  } catch {
+    // Fall through to default callback URL.
+  }
+
+  return `${BASE_URL}/?onboarding=complete`;
+}
+
 async function main() {
   const bootstrapToken = args.queryParameters.bt || Script.parameter();
+  const callbackUrl = safeCallbackUrl(args.queryParameters.callbackUrl);
 
   if (!bootstrapToken) {
     const alert = new Alert();
@@ -47,7 +65,7 @@ async function main() {
     }
 
     Keychain.set("copelimit_widget_token", response.widgetToken);
-    Safari.open(`${BASE_URL}/?onboarding=complete`);
+    Safari.open(callbackUrl);
   } catch {
     Safari.open(`${BASE_URL}/?onboarding=error&reason=network`);
   }
