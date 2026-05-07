@@ -76,7 +76,7 @@ Scriptable will open a blank script.
 
 1. Double tap inside the empty script.
 2. Choose Paste.
-3. Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`;
+3. Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`.trim();
 }
 
 function sourceBadge(source: string): { label: string; className: string } {
@@ -239,6 +239,8 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       );
       if (proceed) {
         window.location.href = 'scriptable:///add';
+      } else {
+        setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${scriptLabels.targetName}.`);
       }
     } catch (err) {
       if (err instanceof TypeError) {
