@@ -74,9 +74,9 @@ function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName
 
 Scriptable will open a blank script.
 
-1) Double tap inside the empty script.
-2) Choose Paste.
-3) Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`;
+1. Double tap inside the empty script.
+2. Choose Paste.
+3. Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`;
 }
 
 function sourceBadge(source: string): { label: string; className: string } {
@@ -142,7 +142,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
     if (onboarding === 'complete') {
       setOnboardingSuccess(true);
       setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select the CopeLimit script.');
+      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
       storeOnboardingStep('idle');
       refreshStatus().catch(() => undefined);
       params.delete('onboarding');
@@ -229,10 +229,11 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       storeOnboardingStep('manual-setup');
       setOnboardingSuccess(false);
       const isWidgetScript = scriptName === 'CopeLimitWidget.js';
-      const scriptFriendlyName = isWidgetScript ? 'The CopeLimit widget script' : 'The token setup script';
-      const targetScriptName = isWidgetScript ? 'CopeLimit' : 'CopeLimitInstall';
-      setOnboardingNotice(`${isWidgetScript ? 'Widget script' : 'Token setup script'} copied to clipboard.`);
-      const dialogMessage = buildScriptablePasteDialog(scriptFriendlyName, targetScriptName);
+      const scriptLabels = isWidgetScript
+        ? { modalName: 'The CopeLimit widget script', noticeName: 'Widget script', targetName: 'CopeLimit' }
+        : { modalName: 'The token setup script', noticeName: 'Token setup script', targetName: 'CopeLimitInstall' };
+      setOnboardingNotice(`${scriptLabels.noticeName} copied to clipboard.`);
+      const dialogMessage = buildScriptablePasteDialog(scriptLabels.modalName, scriptLabels.targetName);
       const proceed = window.confirm(
         dialogMessage
       );
