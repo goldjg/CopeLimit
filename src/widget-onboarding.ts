@@ -15,6 +15,7 @@ export type ShortcutPayloadInput = {
 const DEFAULT_CALLBACK_PATH = '/?shortcut=complete';
 
 export function isLikelyIosNavigator(navigatorLike: Pick<Navigator, 'userAgent' | 'platform' | 'maxTouchPoints'>): boolean {
+  // iPadOS can report itself as MacIntel in desktop-class browsing mode.
   return /iPad|iPhone|iPod/.test(navigatorLike.userAgent)
     || (navigatorLike.platform === 'MacIntel' && navigatorLike.maxTouchPoints > 1);
 }

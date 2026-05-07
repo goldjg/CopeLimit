@@ -20,9 +20,49 @@ function safeCallbackUrl(raw) {
   return `${BASE_URL}/?onboarding=complete`;
 }
 
+function parseInstallerInput() {
+  const parameter = Script.parameter();
+  const queryBootstrapToken = args.queryParameters.bt;
+  const queryCallbackUrl = args.queryParameters.callbackUrl;
+
+  if (typeof queryBootstrapToken === "string" && queryBootstrapToken.length > 0) {
+    return {
+      bootstrapToken: queryBootstrapToken,
+      callbackUrl: safeCallbackUrl(queryCallbackUrl)
+    };
+  }
+
+  if (typeof parameter === "string" && parameter.length > 0) {
+    try {
+      const parsed = JSON.parse(parameter);
+      if (parsed && typeof parsed === "object") {
+        const bootstrapToken = typeof parsed.bootstrapToken === "string" ? parsed.bootstrapToken : "";
+        const callbackUrl = typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : queryCallbackUrl;
+        if (bootstrapToken) {
+          return {
+            bootstrapToken,
+            callbackUrl: safeCallbackUrl(callbackUrl)
+          };
+        }
+      }
+    } catch {
+      // Non-JSON parameter can still be a raw bootstrap token.
+    }
+
+    return {
+      bootstrapToken: parameter,
+      callbackUrl: safeCallbackUrl(queryCallbackUrl)
+    };
+  }
+
+  return {
+    bootstrapToken: "",
+    callbackUrl: safeCallbackUrl(queryCallbackUrl)
+  };
+}
+
 async function main() {
-  const bootstrapToken = args.queryParameters.bt || Script.parameter();
-  const callbackUrl = safeCallbackUrl(args.queryParameters.callbackUrl);
+  const { bootstrapToken, callbackUrl } = parseInstallerInput();
 
   if (!bootstrapToken) {
     const alert = new Alert();

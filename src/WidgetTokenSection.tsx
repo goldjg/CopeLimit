@@ -49,7 +49,7 @@ const STEP_STORAGE_KEY = 'copelimit-onboarding-step';
 const SETUP_MODE_STORAGE_KEY = 'copelimit-setup-mode';
 const SHORTCUT_INSTALLED_STORAGE_KEY = 'copelimit-shortcut-installed';
 const SHORTCUT_LAUNCHED_AT_KEY = 'copelimit-shortcut-launched-at';
-const SHORTCUT_TOKEN_MAX_AGE_MS = 14 * 60 * 1000;
+const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS = 14 * 60 * 1000;
 const SHORTCUT_WAIT_TIMEOUT_MS = 90 * 1000;
 const SHORTCUT_SLOW_HINT_DELAY_MS = 15 * 1000;
 
@@ -350,7 +350,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   }, []);
 
   const ensureShortcutPayload = useCallback(async (forceRefresh = false): Promise<string> => {
-    const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < SHORTCUT_TOKEN_MAX_AGE_MS;
+    const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS;
     if (!forceRefresh && isPayloadFresh) {
       return shortcutPayload;
     }
@@ -566,7 +566,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   }
 
   function openShortcutInstallPage() {
-    setOnboardingNotice('Install the Shortcut, then return here and tap “I\'ve installed it”.');
+    setOnboardingNotice('Install the Shortcut, then return here and tap “I have installed it”.');
   }
 
   function resetOnboarding() {
