@@ -12,6 +12,14 @@ import {
   readString,
   getUnsupportedUsage
 } from './lib/copilot';
+import { maybeCapture } from './lib/capture-store';
+import { readCaptureConfig } from './lib/capture-config';
+
+type UsageResult = {
+  usage: Usage;
+  rawPayload: JsonObject | null;
+  userId?: number;
+};
 
 function readMode(input: JsonObject): Mode {
   const modeText = readString(input, 'mode', 'metric', 'kind');
@@ -38,24 +46,27 @@ function resolveCopilotApiUrl(): string {
   return parsed.toString();
 }
 
-async function getMockUsage(): Promise<Usage> {
+async function getMockUsage(): Promise<UsageResult> {
   const used = Number(process.env.MOCK_USED ?? 321);
   const quota = Number(process.env.MOCK_QUOTA ?? 500);
 
-  return normaliseUsage({
-    mode: 'premium_requests',
-    used,
-    quota,
-    resetAt: process.env.MOCK_RESET_AT || nextMonthReset(),
-    billingEntity: process.env.GITHUB_LOGIN || 'goldjg',
-    source: 'mock',
-    notes: [
-      'Mock provider active. Replace with GitHub billing/usage provider when API access is confirmed.'
-    ]
-  });
+  return {
+    usage: normaliseUsage({
+      mode: 'premium_requests',
+      used,
+      quota,
+      resetAt: process.env.MOCK_RESET_AT || nextMonthReset(),
+      billingEntity: process.env.GITHUB_LOGIN || 'goldjg',
+      source: 'mock',
+      notes: [
+        'Mock provider active. Replace with GitHub billing/usage provider when API access is confirmed.'
+      ]
+    }),
+    rawPayload: null
+  };
 }
 
-async function getCopilotLocalUsage(): Promise<Usage> {
+async function getCopilotLocalUsage(): Promise<UsageResult> {
   const fallbackBillingEntity = process.env.GITHUB_LOGIN || 'unknown';
   const baseUrl = resolveCopilotApiUrl();
   const usageUrl = new URL('/usage', baseUrl).toString();
@@ -114,36 +125,48 @@ async function getCopilotLocalUsage(): Promise<Usage> {
   const billingEntity = readString(payload, 'login', 'username', 'billingEntity', 'billing_entity', 'copilot_plan') ?? fallbackBillingEntity;
   const mode = readMode(payload);
 
-  return normaliseUsage({
-    mode,
-    used,
-    quota,
-    resetAt,
-    billingEntity,
-    source: 'copilot-local',
-    notes
-  });
+  return {
+    usage: normaliseUsage({
+      mode,
+      used,
+      quota,
+      resetAt,
+      billingEntity,
+      source: 'copilot-local',
+      notes
+    }),
+    rawPayload: payload
+  };
 }
 
-async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
+async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult> {
   const sessionSecret = process.env.SESSION_SECRET;
   if (!sessionSecret) {
-    return getUnsupportedUsage(undefined, ['Session secret not configured; cannot authenticate.']);
+    return {
+      usage: await getUnsupportedUsage(undefined, ['Session secret not configured; cannot authenticate.']),
+      rawPayload: null
+    };
   }
 
   const cookies = parseCookies(event.headers['cookie']);
   const rawSession = cookies['session'];
   if (!rawSession) {
-    return getUnsupportedUsage(undefined, ['No session cookie present. Please sign in.']);
+    return {
+      usage: await getUnsupportedUsage(undefined, ['No session cookie present. Please sign in.']),
+      rawPayload: null
+    };
   }
 
   const encKey = process.env.SESSION_ENCRYPTION_KEY;
-  const payload = verifySession(rawSession, sessionSecret, encKey || undefined);
-  if (!payload) {
-    return getUnsupportedUsage(undefined, ['Session invalid or expired. Please sign in again.']);
+  const sessionPayload = verifySession(rawSession, sessionSecret, encKey || undefined);
+  if (!sessionPayload) {
+    return {
+      usage: await getUnsupportedUsage(undefined, ['Session invalid or expired. Please sign in again.']),
+      rawPayload: null
+    };
   }
 
-  const { accessToken, login } = payload;
+  const { accessToken, login, id } = sessionPayload;
   const response = await fetch('https://api.github.com/copilot_internal/user', {
     signal: AbortSignal.timeout(10_000),
     headers: {
@@ -158,26 +181,42 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
 
   if (!response.ok) {
     if (response.status === 401) {
-      return getUnsupportedUsage(login, [
-        'GitHub token is not valid or has expired. Please sign out and sign in again.'
-      ]);
+      return {
+        usage: await getUnsupportedUsage(login, [
+          'GitHub token is not valid or has expired. Please sign out and sign in again.'
+        ]),
+        rawPayload: null,
+        userId: id
+      };
     }
     if (response.status === 403) {
-      return getUnsupportedUsage(login, [
-        'This GitHub account does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
-      ]);
+      return {
+        usage: await getUnsupportedUsage(login, [
+          'This GitHub account does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
+        ]),
+        rawPayload: null,
+        userId: id
+      };
     }
     if (response.status === 404) {
-      return getUnsupportedUsage(login, ['No Copilot subscription found for this account.']);
+      return {
+        usage: await getUnsupportedUsage(login, ['No Copilot subscription found for this account.']),
+        rawPayload: null,
+        userId: id
+      };
     }
     throw new Error(`Copilot internal API returned HTTP ${response.status}`);
   }
 
   const body: unknown = await response.json();
   if (!isObject(body)) {
-    return getUnsupportedUsage(login, [
-      'Copilot API responded but did not include quota data. The response shape may have changed.'
-    ]);
+    return {
+      usage: await getUnsupportedUsage(login, [
+        'Copilot API responded but did not include quota data. The response shape may have changed.'
+      ]),
+      rawPayload: null,
+      userId: id
+    };
   }
 
   const quota =
@@ -194,9 +233,13 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
 
   if (quota === undefined && remaining === undefined) {
     console.warn('[usage] copilot_internal user payload missing quota fields', Object.keys(body));
-    return getUnsupportedUsage(login, [
-      'Copilot API responded but did not include quota data. The response shape may have changed.'
-    ]);
+    return {
+      usage: await getUnsupportedUsage(login, [
+        'Copilot API responded but did not include quota data. The response shape may have changed.'
+      ]),
+      rawPayload: body,
+      userId: id
+    };
   }
 
   const safeQuota = Math.max(0, quota ?? 0);
@@ -206,28 +249,43 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<Usage> {
     readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
     nextMonthReset();
 
-  return normaliseUsage({
-    mode: 'premium_requests',
-    used,
-    quota: safeQuota,
-    resetAt,
-    billingEntity: login,
-    source: 'github-copilot-internal',
-    notes: ['Live data via GitHub Copilot internal API.']
-  });
+  return {
+    usage: normaliseUsage({
+      mode: 'premium_requests',
+      used,
+      quota: safeQuota,
+      resetAt,
+      billingEntity: login,
+      source: 'github-copilot-internal',
+      notes: ['Live data via GitHub Copilot internal API.']
+    }),
+    rawPayload: body,
+    userId: id
+  };
 }
 
 export const handler: Handler = async (event) => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
-    const usage =
+    const captureConfig = readCaptureConfig();
+    const result =
       provider === 'copilot-local'
         ? await getCopilotLocalUsage()
         : provider === 'github-copilot-internal'
           ? await getCopilotInternalUsage(event)
-        : provider === 'unsupported' || provider === 'github'
-          ? await getUnsupportedUsage()
+          : provider === 'unsupported' || provider === 'github'
+          ? { usage: await getUnsupportedUsage(), rawPayload: null }
           : await getMockUsage();
+    const usage = result.usage;
+
+    // Capture is intentionally fire-and-forget so telemetry persistence never blocks user-facing usage responses.
+    void maybeCapture({
+      config: captureConfig,
+      provider,
+      userId: result.userId,
+      usage,
+      rawPayload: result.rawPayload
+    });
 
     return {
       statusCode: 200,

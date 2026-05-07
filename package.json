@@ -3,7 +3,8 @@
     "dev": "netlify dev",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.4",
@@ -17,6 +18,7 @@
     "vite": "^7.3.2"
   },
   "devDependencies": {
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "vitest": "^4.1.5"
   }
 }
