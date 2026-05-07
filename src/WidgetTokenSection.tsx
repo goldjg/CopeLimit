@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   buildShortcutPayload,
+  deriveOnboardingPhase,
   getFastSetupProgress,
+  OnboardingStep,
   parseOnboardingCallback
 } from './widget-onboarding';
 
@@ -17,16 +19,6 @@ type WidgetTokenStatus = {
   expiresAt?: string;
 };
 
-type ManualOnboardingStep = 'manual-setup' | 'requesting' | 'waiting' | 'error';
-type ShortcutOnboardingStep =
-  | 'shortcut-prompt-install'
-  | 'shortcut-ready'
-  | 'shortcut-launching'
-  | 'shortcut-waiting'
-  | 'shortcut-success'
-  | 'shortcut-error';
-
-type OnboardingStep = 'idle' | ManualOnboardingStep | ShortcutOnboardingStep;
 type SetupMode = 'fast' | 'manual';
 
 type OnboardingSessionResult = {
@@ -50,6 +42,8 @@ const STEP_STORAGE_KEY = 'copelimit-onboarding-step';
 const SETUP_MODE_STORAGE_KEY = 'copelimit-setup-mode';
 const SHORTCUT_INSTALLED_STORAGE_KEY = 'copelimit-shortcut-installed';
 const SHORTCUT_LAUNCHED_AT_KEY = 'copelimit-shortcut-launched-at';
+const ONBOARDING_PHASE_STORAGE_KEY = 'copelimit-onboarding-phase';
+const SHORTCUT_PAYLOAD_ORIGIN_KEY = 'copelimit-shortcut-origin';
 const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES = 14;
 const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS = BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES * 60 * 1000;
 const SHORTCUT_WAIT_TIMEOUT_MS = 90 * 1000;
@@ -102,6 +96,22 @@ function readSetupMode(): SetupMode {
 function writeLocalStorage(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
+  } catch {
+    // non-fatal in private mode
+  }
+}
+
+function readLocalStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function clearLocalStorage(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
   } catch {
     // non-fatal in private mode
   }
@@ -172,7 +182,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('idle');
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
-  const [onboardingSuccess, setOnboardingSuccess] = useState(false);
+  const [verifyingSetup, setVerifyingSetup] = useState(false);
   const [scriptableDialog, setScriptableDialog] = useState<ScriptablePasteDialog | null>(null);
   const [setupMode, setSetupMode] = useState<SetupMode>(() => readSetupMode());
   const [shortcutInstalled, setShortcutInstalled] = useState<boolean>(() => readStorageFlag(SHORTCUT_INSTALLED_STORAGE_KEY));
@@ -183,7 +193,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [shortcutPreparing, setShortcutPreparing] = useState(false);
   const [showSlowHint, setShowSlowHint] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
-  const fastSetupProgress = getFastSetupProgress(onboardingStep, shortcutInstalled, onboardingSuccess);
+  const hasActiveToken = Boolean(status?.hasActiveToken);
+  const onboardingPhase = deriveOnboardingPhase(onboardingStep, hasActiveToken, verifyingSetup);
+  const isSetupComplete = onboardingPhase === 'SETUP_COMPLETE';
+  const fastSetupProgress = getFastSetupProgress(onboardingStep, shortcutInstalled, hasActiveToken);
+  const scriptsStateClass = fastSetupProgress.scriptsInstalled ? 'stateDone' : (onboardingPhase === 'AWAITING_RETURN' || onboardingPhase === 'VERIFYING_SETUP' ? 'stateInProgress' : 'statePending');
+  const tokenStateClass = fastSetupProgress.tokenConfigured ? 'stateDone' : (onboardingPhase === 'AWAITING_RETURN' || onboardingPhase === 'VERIFYING_SETUP' ? 'stateInProgress' : 'statePending');
 
   const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
   const fastSetupActionRef = useRef<HTMLButtonElement | null>(null);
@@ -195,6 +210,18 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const storeOnboardingStep = useCallback((step: OnboardingStep) => {
     setOnboardingStep(step);
     writeSessionStorage(STEP_STORAGE_KEY, step);
+  }, []);
+
+  const clearFastSetupRecoveryState = useCallback(() => {
+    clearSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
+    clearLocalStorage(ONBOARDING_PHASE_STORAGE_KEY);
+    clearLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
+  }, []);
+
+  const markAwaitingReturnRecoveryState = useCallback(() => {
+    writeSessionStorage(SHORTCUT_LAUNCHED_AT_KEY, String(Date.now()));
+    writeLocalStorage(ONBOARDING_PHASE_STORAGE_KEY, 'AWAITING_RETURN');
+    writeLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY, window.location.origin);
   }, []);
 
   const clearShortcutTimers = useCallback(() => {
@@ -209,14 +236,14 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   }, []);
 
   const setShortcutError = useCallback((reason: ShortcutErrorReason, details: string | null = null) => {
+    clearFastSetupRecoveryState();
     setShortcutErrorReason(reason);
     setShortcutErrorDetails(details);
-    setOnboardingSuccess(false);
     setOnboardingNotice(null);
     setOnboardingError(shortcutErrorText(reason, details));
     storeOnboardingStep('shortcut-error');
     setStatusAnnouncement('Fast setup failed.');
-  }, [storeOnboardingStep]);
+  }, [clearFastSetupRecoveryState, storeOnboardingStep]);
 
   const setSetupModeAndPersist = useCallback((mode: SetupMode) => {
     setSetupMode(mode);
@@ -237,57 +264,130 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     window.location.href = 'scriptable:///add';
   }, []);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (): Promise<WidgetTokenStatus | null> => {
     const response = await fetch('/api/widget-token', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    setStatus(await response.json() as WidgetTokenStatus);
+    const nextStatus = await response.json() as WidgetTokenStatus;
+    setStatus(nextStatus);
+    return nextStatus;
   }, []);
 
   useEffect(() => {
     refreshStatus().catch(() => setStatus(null));
   }, [refreshStatus]);
 
+  const verifySetupAndPromote = useCallback(async (): Promise<boolean> => {
+    setVerifyingSetup(true);
+    setStatusAnnouncement('Checking setup…');
+    try {
+      const latest = await refreshStatus();
+      if (!latest?.hasActiveToken) return false;
+
+      clearShortcutTimers();
+      setShowSlowHint(false);
+      setOnboardingError(null);
+      setOnboardingNotice('Widget token installed in Scriptable.');
+      setShortcutErrorReason(null);
+      setShortcutErrorDetails(null);
+      storeOnboardingStep('shortcut-success');
+      clearFastSetupRecoveryState();
+      setStatusAnnouncement('Fast setup complete.');
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setVerifyingSetup(false);
+    }
+  }, [clearFastSetupRecoveryState, clearShortcutTimers, refreshStatus, storeOnboardingStep]);
+
   useEffect(() => {
     const saved = readSessionStorage(STEP_STORAGE_KEY);
     if (isOnboardingStep(saved)) {
       setOnboardingStep(saved);
     }
-  }, []);
+    const savedPhase = readLocalStorage(ONBOARDING_PHASE_STORAGE_KEY);
+    const savedOrigin = readLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
+    const launchedAtRaw = readSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
+    const launchedAt = launchedAtRaw ? Number(launchedAtRaw) : NaN;
+    if (savedPhase !== 'AWAITING_RETURN' || Number.isNaN(launchedAt)) return;
+    if (savedOrigin && savedOrigin !== window.location.origin) {
+      clearFastSetupRecoveryState();
+      return;
+    }
+
+    const elapsed = Date.now() - launchedAt;
+    if (elapsed >= SHORTCUT_WAIT_TIMEOUT_MS) {
+      clearFastSetupRecoveryState();
+      setShortcutError('timeout');
+      return;
+    }
+
+    storeOnboardingStep('shortcut-waiting');
+    const remaining = SHORTCUT_WAIT_TIMEOUT_MS - elapsed;
+    verifySetupAndPromote()
+      .then((verified) => {
+        if (verified) return;
+        startShortcutWaiting(remaining);
+      })
+      .catch(() => startShortcutWaiting(remaining));
+  }, [clearFastSetupRecoveryState, setShortcutError, storeOnboardingStep, verifySetupAndPromote]);
+
+  useEffect(() => {
+    if (!isSetupComplete) return;
+    clearFastSetupRecoveryState();
+  }, [clearFastSetupRecoveryState, isSetupComplete]);
 
   useEffect(() => {
     const callback = parseOnboardingCallback(window.location.search);
     if (!callback.status) return;
-
+    const inFastFlow = callback.fromShortcut || isShortcutStep(onboardingStep) || setupMode === 'fast';
+    cleanOnboardingQueryParams();
     clearShortcutTimers();
     setShowSlowHint(false);
 
-      if (callback.status === 'complete') {
-        setOnboardingSuccess(true);
-        setOnboardingError(null);
-        setOnboardingNotice('Widget token installed in Scriptable.');
-        setShortcutErrorReason(null);
-        setShortcutErrorDetails(null);
-      setStatusAnnouncement('Fast setup complete.');
-      if (callback.fromShortcut || isShortcutStep(onboardingStep) || setupMode === 'fast') {
-        storeOnboardingStep('shortcut-success');
-      } else {
-        storeOnboardingStep('idle');
-      }
-      refreshStatus().catch(() => undefined);
-    } else {
-      if (callback.fromShortcut || isShortcutStep(onboardingStep) || setupMode === 'fast') {
+    if (callback.status === 'error') {
+      if (inFastFlow) {
+        clearFastSetupRecoveryState();
         setShortcutError('shortcut_error', callback.reason);
       } else {
-        setOnboardingSuccess(false);
         setOnboardingError(callback.reason ? `Setup failed (${callback.reason}).` : 'Setup failed. Please try again.');
         storeOnboardingStep('error');
       }
+      return;
     }
 
-    cleanOnboardingQueryParams();
-  }, [clearShortcutTimers, onboardingStep, refreshStatus, setShortcutError, setupMode, storeOnboardingStep]);
+    setOnboardingError(null);
+    setShortcutErrorReason(null);
+    setShortcutErrorDetails(null);
+    setOnboardingNotice('Checking setup…');
+    setStatusAnnouncement('Checking setup…');
+    verifySetupAndPromote()
+      .then((verified) => {
+        if (verified) return;
+        if (inFastFlow) {
+          setOnboardingNotice('The Shortcut returned, but your token has not been confirmed yet. If this persists, try again.');
+          storeOnboardingStep('shortcut-success');
+        } else {
+          setOnboardingError('Setup returned, but token configuration could not be confirmed yet. Please try again.');
+          storeOnboardingStep('error');
+        }
+      })
+      .catch(() => undefined);
+  }, [clearFastSetupRecoveryState, clearShortcutTimers, onboardingStep, setShortcutError, setupMode, storeOnboardingStep, verifySetupAndPromote]);
+
+  useEffect(() => {
+    if (onboardingStep !== 'shortcut-waiting') return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      void verifySetupAndPromote();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [onboardingStep, verifySetupAndPromote]);
 
   useEffect(() => {
     const isOpen = Boolean(scriptableDialog);
@@ -451,7 +551,6 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingSuccess(false);
       const isWidgetScript = scriptName === 'CopeLimitWidget.js';
       const scriptLabels = isWidgetScript
         ? { modalName: 'The CopeLimit widget script', noticeName: 'Widget script', targetName: 'CopeLimit' }
@@ -473,7 +572,6 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   async function connectScriptableManually() {
     setOnboardingError(null);
     setOnboardingNotice(null);
-    setOnboardingSuccess(false);
     setSetupModeAndPersist('manual');
     storeOnboardingStep('requesting');
     try {
@@ -489,25 +587,30 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     }
   }
 
-  function startShortcutWaiting() {
+  function startShortcutWaiting(timeoutMs = SHORTCUT_WAIT_TIMEOUT_MS) {
     clearShortcutTimers();
     setShowSlowHint(false);
-    writeSessionStorage(SHORTCUT_LAUNCHED_AT_KEY, String(Date.now()));
-
+    const slowHintDelay = Math.min(SHORTCUT_SLOW_HINT_DELAY_MS, timeoutMs);
     slowHintTimeoutRef.current = window.setTimeout(() => {
-      setShowSlowHint(true);
-    }, SHORTCUT_SLOW_HINT_DELAY_MS);
+      void verifySetupAndPromote().then((verified) => {
+        if (verified) return;
+        setShowSlowHint(true);
+      });
+    }, slowHintDelay);
 
     waitingTimeoutRef.current = window.setTimeout(() => {
-      setShortcutError('timeout');
-      setShowSlowHint(false);
-    }, SHORTCUT_WAIT_TIMEOUT_MS);
+      void verifySetupAndPromote().then((verified) => {
+        if (verified) return;
+        setShortcutError('timeout');
+        setShowSlowHint(false);
+      });
+    }, timeoutMs);
   }
 
   async function launchShortcut() {
     setOnboardingError(null);
     setOnboardingNotice(null);
-    setOnboardingSuccess(false);
+    setVerifyingSetup(false);
     setShortcutErrorReason(null);
     setShortcutErrorDetails(null);
     storeOnboardingStep('shortcut-launching');
@@ -521,11 +624,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
         return;
       }
 
-      window.location.href = SHORTCUT_RUN_URL;
       storeOnboardingStep('shortcut-waiting');
-      setOnboardingNotice('Setting up your widget. The Shortcut is running and should return you here automatically.');
+      markAwaitingReturnRecoveryState();
+      setOnboardingNotice('Switch to Shortcuts to complete setup. Return here when it is done — this page will update automatically.');
       setStatusAnnouncement('Fast setup started. Waiting for Shortcut callback.');
       startShortcutWaiting();
+      window.location.href = SHORTCUT_RUN_URL;
     } catch (err) {
       if (err instanceof Error && /network|fetch|HTTP/i.test(err.message)) {
         setShortcutError('network', err.message);
@@ -537,21 +641,23 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
 
   function chooseManualSetup() {
     clearShortcutTimers();
-    setSetupModeAndPersist('manual');
-    setOnboardingError(null);
-    setOnboardingNotice('Manual setup enabled. Follow the steps below.');
-    setOnboardingSuccess(false);
-    storeOnboardingStep('manual-setup');
-    setStatusAnnouncement('Manual setup selected.');
+      setSetupModeAndPersist('manual');
+      setOnboardingError(null);
+      setOnboardingNotice('Manual setup enabled. Follow the steps below.');
+      setVerifyingSetup(false);
+      clearFastSetupRecoveryState();
+      storeOnboardingStep('manual-setup');
+      setStatusAnnouncement('Manual setup selected.');
   }
 
   function chooseFastSetup() {
     setSetupModeAndPersist('fast');
     setOnboardingError(null);
     setOnboardingNotice(null);
-    setOnboardingSuccess(false);
+    setVerifyingSetup(false);
     setShortcutErrorReason(null);
     setShortcutErrorDetails(null);
+    clearFastSetupRecoveryState();
     if (shortcutInstalled) {
       storeOnboardingStep('shortcut-ready');
     } else {
@@ -576,12 +682,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     clearShortcutTimers();
     setOnboardingError(null);
     setOnboardingNotice(null);
-    setOnboardingSuccess(false);
+    setVerifyingSetup(false);
     setScriptableDialog(null);
     setShortcutErrorReason(null);
     setShortcutErrorDetails(null);
     setShowSlowHint(false);
-    clearSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
+    clearFastSetupRecoveryState();
     storeOnboardingStep('idle');
   }
 
@@ -623,12 +729,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                       <span className="stateDot" aria-hidden="true">{fastSetupProgress.shortcutInstalled ? '✓' : '•'}</span>
                       <span>Shortcut installed</span>
                     </li>
-                    <li className={fastSetupProgress.scriptsInstalled ? 'stateDone' : 'statePending'}>
-                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.scriptsInstalled ? '✓' : '•'}</span>
+                    <li className={scriptsStateClass}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.scriptsInstalled ? '✓' : (scriptsStateClass === 'stateInProgress' ? '…' : '•')}</span>
                       <span>Scripts installed (CopeLimit and CopeLimitInstall)</span>
                     </li>
-                    <li className={fastSetupProgress.tokenConfigured ? 'stateDone' : 'statePending'}>
-                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.tokenConfigured ? '✓' : '•'}</span>
+                    <li className={tokenStateClass}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.tokenConfigured ? '✓' : (tokenStateClass === 'stateInProgress' ? '…' : '•')}</span>
                       <span>Token configured</span>
                     </li>
                     <li className={fastSetupProgress.widgetReady ? 'stateDone' : 'statePending'}>
@@ -681,8 +787,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                   {(onboardingStep === 'shortcut-launching' || onboardingStep === 'shortcut-waiting') && (
                     <div className="shortcutStateBlock">
                       <p className="widgetTokenMeta"><strong>Setting up your widget…</strong></p>
-                      <p className="widgetTokenMeta">The Shortcut is running. You&apos;ll be redirected back when it&apos;s done.</p>
-                      {showSlowHint && <p className="widgetTokenMeta">Taking too long? You can try again or switch to manual setup.</p>}
+                      {onboardingPhase === 'VERIFYING_SETUP' ? (
+                        <p className="widgetTokenMeta">Checking setup… this takes a moment.</p>
+                      ) : (
+                        <p className="widgetTokenMeta">Switch to Shortcuts to complete setup. Return here when it&apos;s done — this page will update automatically.</p>
+                      )}
+                      {showSlowHint && <p className="widgetTokenMeta">Taking too long? The Shortcut may still be running in the background.</p>}
                       <div className="widgetTokenActions">
                         {showSlowHint && (
                           <>
@@ -694,24 +804,39 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                     </div>
                   )}
 
-                  {onboardingStep === 'shortcut-success' && onboardingSuccess && (
+                  {isSetupComplete && (
                     <div className="shortcutStateBlock finalReadyPanel">
-                      <p className="widgetOnboardingSuccess">✓ Widget setup complete.</p>
-                      <p className="widgetTokenMeta">Now add a Scriptable widget to your Home Screen and select CopeLimit.</p>
+                      <p className="widgetOnboardingSuccess">✅ Widget setup complete.</p>
                       <p className="widgetTokenMeta">
-                        CopeLimit and CopeLimitInstall are installed in Scriptable, and your widget token has been configured.
-                        The remaining step is manual because iOS does not allow web apps or shortcuts to add Home Screen widgets automatically.
+                        Scripts are installed and your token is configured. One last step remains and iOS requires this to be manual.
                       </p>
                       <ul className="widgetOnboardingSteps compact">
-                        <li><strong>Add Scriptable widget</strong></li>
-                        <li><strong>Choose CopeLimit as the script</strong></li>
-                        <li>Your widget should show live quota after the next refresh</li>
+                        <li><strong>Long-press Home Screen, tap +, and search Scriptable</strong></li>
+                        <li><strong>Add a Scriptable widget</strong></li>
+                        <li><strong>Open widget settings and choose CopeLimit as the script</strong></li>
+                        <li>Your widget should show live quota after its next refresh</li>
                       </ul>
+                      <p className="widgetTokenMeta">
+                        iOS does not allow web apps or shortcuts to place Home Screen widgets automatically.
+                      </p>
                       {onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
                     </div>
                   )}
 
-                  {onboardingStep === 'shortcut-error' && (
+                  {onboardingPhase === 'SETUP_PARTIAL' && (
+                    <div className="shortcutStateBlock stateWarning">
+                      <p className="widgetTokenMeta"><strong>⚠️ Setup may be incomplete.</strong></p>
+                      <p className="widgetTokenMeta">
+                        The Shortcut returned, but we could not confirm your token was saved yet. This can happen if Scriptable did not run or was interrupted.
+                      </p>
+                      <div className="widgetTokenActions">
+                        <button type="button" ref={fastSetupActionRef} onClick={chooseFastSetup}>Try again</button>
+                        <button type="button" className="secondaryButton" onClick={chooseManualSetup}>Set up manually</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {onboardingPhase === 'SETUP_FAILED' && (
                     <div className="shortcutStateBlock">
                       <p className="widgetTokenError">{shortcutErrorText(shortcutErrorReason ?? 'unknown', shortcutErrorDetails)}</p>
                       <div className="widgetTokenActions">
@@ -744,9 +869,13 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                     <li>Run token configuration.</li>
                   </ol>
 
-                  {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
+                  {setupMode === 'manual' && onboardingStep === 'idle' && !onboardingError && hasActiveToken && onboardingNotice && (
+                    <p className="widgetOnboardingSuccess">{onboardingNotice}</p>
+                  )}
                   {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
-                  {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
+                  {!(setupMode === 'manual' && onboardingStep === 'idle' && !onboardingError && hasActiveToken && onboardingNotice) && onboardingNotice && (
+                    <p className="widgetTokenMeta">{onboardingNotice}</p>
+                  )}
 
                   <div className="widgetTokenActions">
                     <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js'); }}>

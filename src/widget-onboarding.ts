@@ -19,6 +19,30 @@ export type FastSetupProgress = {
   widgetReady: boolean;
 };
 
+export type OnboardingStep =
+  | 'idle'
+  | 'manual-setup'
+  | 'requesting'
+  | 'waiting'
+  | 'error'
+  | 'shortcut-prompt-install'
+  | 'shortcut-ready'
+  | 'shortcut-launching'
+  | 'shortcut-waiting'
+  | 'shortcut-success'
+  | 'shortcut-error';
+
+export type OnboardingPhase =
+  | 'IDLE'
+  | 'SHORTCUT_INSTALL_REQUIRED'
+  | 'SHORTCUT_READY'
+  | 'SHORTCUT_LAUNCHED'
+  | 'AWAITING_RETURN'
+  | 'VERIFYING_SETUP'
+  | 'SETUP_PARTIAL'
+  | 'SETUP_COMPLETE'
+  | 'SETUP_FAILED';
+
 const DEFAULT_CALLBACK_PATH = '/?shortcut=complete';
 
 export function isLikelyIosNavigator(navigatorLike: Pick<Navigator, 'userAgent' | 'platform' | 'maxTouchPoints'>): boolean {
@@ -73,10 +97,28 @@ export function isTrustedShortcutCallbackUrl(raw: string | null | undefined, exp
   }
 }
 
+export function deriveOnboardingPhase(
+  step: OnboardingStep,
+  hasActiveToken: boolean,
+  verifyingSetup = false
+): OnboardingPhase {
+  if (verifyingSetup) return 'VERIFYING_SETUP';
+  if (step === 'idle' || step === 'manual-setup' || step === 'requesting' || step === 'waiting' || step === 'error') {
+    return 'IDLE';
+  }
+  if (step === 'shortcut-prompt-install') return 'SHORTCUT_INSTALL_REQUIRED';
+  if (step === 'shortcut-ready') return 'SHORTCUT_READY';
+  if (step === 'shortcut-launching') return 'SHORTCUT_LAUNCHED';
+  if (step === 'shortcut-waiting') return hasActiveToken ? 'SETUP_COMPLETE' : 'AWAITING_RETURN';
+  if (step === 'shortcut-success') return hasActiveToken ? 'SETUP_COMPLETE' : 'SETUP_PARTIAL';
+  if (step === 'shortcut-error') return hasActiveToken ? 'SETUP_PARTIAL' : 'SETUP_FAILED';
+  return 'IDLE';
+}
+
 export function getFastSetupProgress(
-  onboardingStep: string,
+  onboardingStep: OnboardingStep,
   shortcutInstalled: boolean,
-  onboardingSuccess: boolean
+  hasActiveToken: boolean
 ): FastSetupProgress {
   const hasReachedShortcutFlow = shortcutInstalled || [
     'shortcut-ready',
@@ -86,12 +128,14 @@ export function getFastSetupProgress(
     'shortcut-error'
   ].includes(onboardingStep);
 
-  const completedFastSetup = onboardingStep === 'shortcut-success' && onboardingSuccess;
+  const phase = deriveOnboardingPhase(onboardingStep, hasActiveToken);
+  const verifiedSetup = hasActiveToken;
+  const completedFastSetup = phase === 'SETUP_COMPLETE';
 
   return {
     shortcutInstalled: hasReachedShortcutFlow,
-    scriptsInstalled: completedFastSetup,
-    tokenConfigured: completedFastSetup,
+    scriptsInstalled: verifiedSetup,
+    tokenConfigured: verifiedSetup,
     widgetReady: completedFastSetup
   };
 }
