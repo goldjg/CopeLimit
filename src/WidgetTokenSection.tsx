@@ -49,7 +49,8 @@ const STEP_STORAGE_KEY = 'copelimit-onboarding-step';
 const SETUP_MODE_STORAGE_KEY = 'copelimit-setup-mode';
 const SHORTCUT_INSTALLED_STORAGE_KEY = 'copelimit-shortcut-installed';
 const SHORTCUT_LAUNCHED_AT_KEY = 'copelimit-shortcut-launched-at';
-const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS = 14 * 60 * 1000;
+const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES = 14;
+const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS = BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES * 60 * 1000;
 const SHORTCUT_WAIT_TIMEOUT_MS = 90 * 1000;
 const SHORTCUT_SLOW_HINT_DELAY_MS = 15 * 1000;
 

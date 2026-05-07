@@ -21,9 +21,10 @@ function safeCallbackUrl(raw) {
 }
 
 function parseInstallerInput() {
-  const parameter = Script.parameter();
-  const queryBootstrapToken = args.queryParameters.bt;
-  const queryCallbackUrl = args.queryParameters.callbackUrl;
+  const parameter = typeof Script !== "undefined" && typeof Script.parameter === "function" ? Script.parameter() : "";
+  const query = args && typeof args === "object" && args.queryParameters ? args.queryParameters : {};
+  const queryBootstrapToken = typeof query.bt === "string" ? query.bt : "";
+  const queryCallbackUrl = typeof query.callbackUrl === "string" ? query.callbackUrl : "";
 
   if (typeof queryBootstrapToken === "string" && queryBootstrapToken.length > 0) {
     return {
