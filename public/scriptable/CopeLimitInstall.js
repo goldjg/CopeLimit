@@ -35,7 +35,7 @@ function parseInstallerInput() {
   if (typeof parameter === "string" && parameter.length > 0) {
     try {
       const parsed = JSON.parse(parameter);
-      if (parsed && typeof parsed === "object") {
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const bootstrapToken = typeof parsed.bootstrapToken === "string" ? parsed.bootstrapToken : "";
         const callbackUrl = typeof parsed.callbackUrl === "string" ? parsed.callbackUrl : queryCallbackUrl;
         if (bootstrapToken) {

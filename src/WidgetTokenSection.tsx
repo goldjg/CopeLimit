@@ -144,7 +144,7 @@ function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName
 
 function shortcutErrorText(reason: ShortcutErrorReason, details: string | null): string {
   if (reason === 'session_failed') return 'Could not start setup. Please try again.';
-  if (reason === 'clipboard_denied') return 'Clipboard access is required for Fast Setup. Tap Set Up Widget again.';
+  if (reason === 'clipboard_denied') return 'Clipboard access is required for Fast Setup. Tap “Set Up Widget →” again.';
   if (reason === 'timeout') return 'The Shortcut did not return in time. Confirm it is installed, then try again.';
   if (reason === 'network') return 'Network error during setup. Check your connection and try again.';
   if (reason === 'shortcut_error') return details ? `Setup failed (${details}).` : 'The Shortcut reported an error.';
@@ -598,7 +598,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
         </p>
       )}
       {error && <p className="widgetTokenError">{error}</p>}
-      <p className="srOnly" role="status" aria-live="polite">{statusAnnouncement}</p>
+      {statusAnnouncement && <p className="srOnly" role="status" aria-live="polite">{statusAnnouncement}</p>}
 
       {isIos && (
         <div className="widgetOnboarding">
@@ -631,7 +631,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                           Install CopeLimitInstaller Shortcut ↗
                         </a>
                         <button type="button" ref={fastSetupActionRef} onClick={markShortcutInstalled}>
-                          I&apos;ve installed it →
+                          I&apos;ve installed the Shortcut →
                         </button>
                       </div>
                     </div>

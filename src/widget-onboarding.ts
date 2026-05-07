@@ -60,7 +60,7 @@ export function isTrustedShortcutCallbackUrl(raw: string | null | undefined, exp
 
   try {
     const parsed = new URL(raw);
-    return parsed.origin === normaliseOrigin(expectedOrigin);
+    return normaliseOrigin(parsed.origin) === normaliseOrigin(expectedOrigin);
   } catch {
     return false;
   }
