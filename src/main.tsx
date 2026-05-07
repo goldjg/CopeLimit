@@ -238,8 +238,9 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingNotice(`${label} copied to clipboard. Create “${scriptDisplayName}” in Scriptable and paste the script text.`);
+      setOnboardingNotice(`${label} copied to clipboard. Scriptable will open a new blank script: paste, name it “${scriptDisplayName}”, and save.`);
       setOnboardingSuccess(false);
+      window.location.href = 'scriptable:///add';
     } catch (err) {
       if (err instanceof TypeError) {
         setOnboardingError('Failed to copy script: network error or script source unavailable.');
