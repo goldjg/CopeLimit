@@ -345,6 +345,15 @@ button {
   margin-bottom: 10px;
 }
 
+.widgetOnboardingSteps {
+  margin: 8px 0 12px 20px;
+  padding: 0;
+}
+
+.widgetOnboardingSteps li {
+  margin-bottom: 6px;
+}
+
 .widgetOnboardingSuccess {
   color: #22c55e;
   font-size: 0.92rem;

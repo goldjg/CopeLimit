@@ -220,10 +220,11 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       setOnboardingSuccess(false);
       const isWidgetScript = scriptName === 'CopeLimitWidget.js';
       setOnboardingNotice(`${isWidgetScript ? 'Widget script' : 'Token setup script'} copied to clipboard.`);
+      const dialogMessage = isWidgetScript
+        ? "The CopeLimit widget script has been copied.\n\nScriptable will open a blank script.\n\n1) Double tap inside the empty script.\n2) Choose Paste.\n3) Tap 'Untitled Script', rename it to CopeLimit, then tap Done."
+        : "The token setup script has been copied.\n\nScriptable will open a blank script.\n\n1) Double tap inside the empty script.\n2) Choose Paste.\n3) Tap 'Untitled Script', rename it to CopeLimitInstall, then tap Done.";
       const proceed = window.confirm(
-        isWidgetScript
-          ? "The CopeLimit widget script has been copied.\nScriptable will open a blank script.\nDouble tap inside the empty script, choose Paste, tap 'Untitled Script', rename it to CopeLimit, then tap Done."
-          : "The token setup script has been copied.\nScriptable will open a blank script.\nDouble tap inside the empty script, choose Paste, tap 'Untitled Script', rename it to CopeLimitInstall, then tap Done."
+        dialogMessage
       );
       if (proceed) {
         window.location.href = 'scriptable:///add';
@@ -298,13 +299,15 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
             </p>
           ) : (
             <>
-              <p>
-                Step 1: Copy widget script, paste in Scriptable, rename to <strong>CopeLimit</strong>, and save.
-                {' '}
-                Step 2: Copy token setup script, paste in Scriptable, rename to <strong>CopeLimitInstall</strong>, and save.
-                {' '}
-                Step 3: Run token configuration.
-              </p>
+              <ol className="widgetOnboardingSteps">
+                <li>
+                  Copy widget script, paste in Scriptable, rename to <strong>CopeLimit</strong>, and save.
+                </li>
+                <li>
+                  Copy token setup script, paste in Scriptable, rename to <strong>CopeLimitInstall</strong>, and save.
+                </li>
+                <li>Run token configuration.</li>
+              </ol>
               {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
               {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
               {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
