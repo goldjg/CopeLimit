@@ -69,6 +69,16 @@ function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
 }
 
+function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): string {
+  return `${scriptFriendlyName} has been copied.
+
+Scriptable will open a blank script.
+
+1) Double tap inside the empty script.
+2) Choose Paste.
+3) Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`;
+}
+
 function sourceBadge(source: string): { label: string; className: string } {
   if (source === 'copilot-local') return { label: 'Live (local)', className: 'badge badge-live' };
   if (source === 'github-copilot-internal') return { label: 'Live (hosted)', className: 'badge badge-live' };
@@ -132,7 +142,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
     if (onboarding === 'complete') {
       setOnboardingSuccess(true);
       setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
+      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select the CopeLimit script.');
       storeOnboardingStep('idle');
       refreshStatus().catch(() => undefined);
       params.delete('onboarding');
@@ -221,15 +231,8 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       const isWidgetScript = scriptName === 'CopeLimitWidget.js';
       const scriptFriendlyName = isWidgetScript ? 'The CopeLimit widget script' : 'The token setup script';
       const targetScriptName = isWidgetScript ? 'CopeLimit' : 'CopeLimitInstall';
-      const commonDialogSteps = [
-        'Scriptable will open a blank script.',
-        '',
-        '1) Double tap inside the empty script.',
-        '2) Choose Paste.',
-        `3) Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`
-      ].join('\n');
       setOnboardingNotice(`${isWidgetScript ? 'Widget script' : 'Token setup script'} copied to clipboard.`);
-      const dialogMessage = `${scriptFriendlyName} has been copied.\n\n${commonDialogSteps}`;
+      const dialogMessage = buildScriptablePasteDialog(scriptFriendlyName, targetScriptName);
       const proceed = window.confirm(
         dialogMessage
       );
