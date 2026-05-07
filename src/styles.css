@@ -402,6 +402,15 @@ button {
   color: #d1d5db;
 }
 
+.stateInProgress {
+  color: #93c5fd;
+}
+
+.stateWarning {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(120, 53, 15, 0.15);
+}
+
 .finalReadyPanel {
   border-color: rgba(34, 197, 94, 0.4);
 }

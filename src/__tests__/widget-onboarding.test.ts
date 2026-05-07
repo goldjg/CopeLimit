@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildShortcutPayload,
+  deriveOnboardingPhase,
   getFastSetupProgress,
   isLikelyIosNavigator,
   isTrustedShortcutCallbackUrl,
@@ -104,5 +105,54 @@ describe('getFastSetupProgress', () => {
       tokenConfigured: true,
       widgetReady: true
     });
+  });
+
+  it('keeps widget readiness pending until shortcut flow reaches complete phase', () => {
+    expect(getFastSetupProgress('shortcut-waiting', true, true)).toEqual({
+      shortcutInstalled: true,
+      scriptsInstalled: true,
+      tokenConfigured: true,
+      widgetReady: true
+    });
+    expect(getFastSetupProgress('shortcut-ready', true, true)).toEqual({
+      shortcutInstalled: true,
+      scriptsInstalled: true,
+      tokenConfigured: true,
+      widgetReady: false
+    });
+  });
+});
+
+describe('deriveOnboardingPhase', () => {
+  it('maps waiting without token to awaiting return', () => {
+    expect(deriveOnboardingPhase('shortcut-waiting', false)).toBe('AWAITING_RETURN');
+  });
+
+  it('maps waiting with token to complete', () => {
+    expect(deriveOnboardingPhase('shortcut-waiting', true)).toBe('SETUP_COMPLETE');
+  });
+
+  it('maps shortcut success with token to complete', () => {
+    expect(deriveOnboardingPhase('shortcut-success', true)).toBe('SETUP_COMPLETE');
+  });
+
+  it('maps shortcut success without token to partial', () => {
+    expect(deriveOnboardingPhase('shortcut-success', false)).toBe('SETUP_PARTIAL');
+  });
+
+  it('maps shortcut error without token to failed', () => {
+    expect(deriveOnboardingPhase('shortcut-error', false)).toBe('SETUP_FAILED');
+  });
+
+  it('maps shortcut error with token to partial', () => {
+    expect(deriveOnboardingPhase('shortcut-error', true)).toBe('SETUP_PARTIAL');
+  });
+
+  it('maps idle to idle phase', () => {
+    expect(deriveOnboardingPhase('idle', false)).toBe('IDLE');
+  });
+
+  it('supports transient verifying phase override', () => {
+    expect(deriveOnboardingPhase('shortcut-waiting', false, true)).toBe('VERIFYING_SETUP');
   });
 });
