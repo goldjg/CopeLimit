@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildShortcutPayload,
+  getFastSetupProgress,
   isLikelyIosNavigator,
   isTrustedShortcutCallbackUrl,
   parseOnboardingCallback
@@ -83,5 +84,25 @@ describe('isTrustedShortcutCallbackUrl', () => {
 
   it('rejects callback urls on other origins', () => {
     expect(isTrustedShortcutCallbackUrl('https://example.com/?shortcut=complete', 'https://copelimit.netlify.app')).toBe(false);
+  });
+});
+
+describe('getFastSetupProgress', () => {
+  it('shows only shortcut installed after shortcut confirmation', () => {
+    expect(getFastSetupProgress('shortcut-ready', true, false)).toEqual({
+      shortcutInstalled: true,
+      scriptsInstalled: false,
+      tokenConfigured: false,
+      widgetReady: false
+    });
+  });
+
+  it('shows all states complete after successful fast setup callback', () => {
+    expect(getFastSetupProgress('shortcut-success', true, true)).toEqual({
+      shortcutInstalled: true,
+      scriptsInstalled: true,
+      tokenConfigured: true,
+      widgetReady: true
+    });
   });
 });

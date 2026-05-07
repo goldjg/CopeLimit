@@ -12,6 +12,13 @@ export type ShortcutPayloadInput = {
   callbackPath?: string;
 };
 
+export type FastSetupProgress = {
+  shortcutInstalled: boolean;
+  scriptsInstalled: boolean;
+  tokenConfigured: boolean;
+  widgetReady: boolean;
+};
+
 const DEFAULT_CALLBACK_PATH = '/?shortcut=complete';
 
 export function isLikelyIosNavigator(navigatorLike: Pick<Navigator, 'userAgent' | 'platform' | 'maxTouchPoints'>): boolean {
@@ -64,4 +71,27 @@ export function isTrustedShortcutCallbackUrl(raw: string | null | undefined, exp
   } catch {
     return false;
   }
+}
+
+export function getFastSetupProgress(
+  onboardingStep: string,
+  shortcutInstalled: boolean,
+  onboardingSuccess: boolean
+): FastSetupProgress {
+  const hasReachedShortcutFlow = shortcutInstalled || [
+    'shortcut-ready',
+    'shortcut-launching',
+    'shortcut-waiting',
+    'shortcut-success',
+    'shortcut-error'
+  ].includes(onboardingStep);
+
+  const completedFastSetup = onboardingStep === 'shortcut-success' && onboardingSuccess;
+
+  return {
+    shortcutInstalled: hasReachedShortcutFlow,
+    scriptsInstalled: completedFastSetup,
+    tokenConfigured: completedFastSetup,
+    widgetReady: completedFastSetup
+  };
 }

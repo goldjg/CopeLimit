@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   buildShortcutPayload,
+  getFastSetupProgress,
   parseOnboardingCallback
 } from './widget-onboarding';
 
@@ -182,6 +183,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [shortcutPreparing, setShortcutPreparing] = useState(false);
   const [showSlowHint, setShowSlowHint] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
+  const fastSetupProgress = getFastSetupProgress(onboardingStep, shortcutInstalled, onboardingSuccess);
 
   const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
   const fastSetupActionRef = useRef<HTMLButtonElement | null>(null);
@@ -261,12 +263,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     clearShortcutTimers();
     setShowSlowHint(false);
 
-    if (callback.status === 'complete') {
-      setOnboardingSuccess(true);
-      setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
-      setShortcutErrorReason(null);
-      setShortcutErrorDetails(null);
+      if (callback.status === 'complete') {
+        setOnboardingSuccess(true);
+        setOnboardingError(null);
+        setOnboardingNotice('Widget token installed in Scriptable.');
+        setShortcutErrorReason(null);
+        setShortcutErrorDetails(null);
       setStatusAnnouncement('Fast setup complete.');
       if (callback.fromShortcut || isShortcutStep(onboardingStep) || setupMode === 'fast') {
         storeOnboardingStep('shortcut-success');
@@ -616,6 +618,24 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                   <p className="widgetTokenMeta">
                     Set up your widget in under a minute using the CopeLimitInstaller Shortcut.
                   </p>
+                  <ul className="onboardingStateList" aria-label="Fast setup status">
+                    <li className={fastSetupProgress.shortcutInstalled ? 'stateDone' : 'statePending'}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.shortcutInstalled ? '✓' : '•'}</span>
+                      <span>Shortcut installed</span>
+                    </li>
+                    <li className={fastSetupProgress.scriptsInstalled ? 'stateDone' : 'statePending'}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.scriptsInstalled ? '✓' : '•'}</span>
+                      <span>Scripts installed (CopeLimit and CopeLimitInstall)</span>
+                    </li>
+                    <li className={fastSetupProgress.tokenConfigured ? 'stateDone' : 'statePending'}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.tokenConfigured ? '✓' : '•'}</span>
+                      <span>Token configured</span>
+                    </li>
+                    <li className={fastSetupProgress.widgetReady ? 'stateDone' : 'statePending'}>
+                      <span className="stateDot" aria-hidden="true">{fastSetupProgress.widgetReady ? '✓' : '•'}</span>
+                      <span>Widget ready</span>
+                    </li>
+                  </ul>
 
                   {onboardingStep === 'shortcut-prompt-install' && (
                     <div className="shortcutStateBlock">
@@ -674,8 +694,21 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                     </div>
                   )}
 
-                  {onboardingStep === 'shortcut-success' && onboardingSuccess && onboardingNotice && (
-                    <p className="widgetOnboardingSuccess">✓ {onboardingNotice}</p>
+                  {onboardingStep === 'shortcut-success' && onboardingSuccess && (
+                    <div className="shortcutStateBlock finalReadyPanel">
+                      <p className="widgetOnboardingSuccess">✓ Widget setup complete.</p>
+                      <p className="widgetTokenMeta">Now add a Scriptable widget to your Home Screen and select CopeLimit.</p>
+                      <p className="widgetTokenMeta">
+                        CopeLimit and CopeLimitInstall are installed in Scriptable, and your widget token has been configured.
+                        The remaining step is manual because iOS does not allow web apps or shortcuts to add Home Screen widgets automatically.
+                      </p>
+                      <ul className="widgetOnboardingSteps compact">
+                        <li><strong>Add Scriptable widget</strong></li>
+                        <li><strong>Choose CopeLimit as the script</strong></li>
+                        <li>Your widget should show live quota after the next refresh</li>
+                      </ul>
+                      {onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
+                    </div>
                   )}
 
                   {onboardingStep === 'shortcut-error' && (
