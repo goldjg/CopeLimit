@@ -20,8 +20,13 @@ function readPositiveInteger(name: string, fallback: number): number {
   const value = process.env[name]
   if (value === undefined) return fallback
 
+  if (!/^[0-9]+$/.test(value)) {
+    console.warn(`[capture-config] Invalid integer for ${name}; using default`, { value, fallback })
+    return fallback
+  }
+
   const parsed = Number.parseInt(value, 10)
-  if (Number.isFinite(parsed) && parsed > 0) return parsed
+  if (Number.isFinite(parsed) && Number.isInteger(parsed) && parsed > 0) return parsed
 
   console.warn(`[capture-config] Invalid integer for ${name}; using default`, { value, fallback })
   return fallback

@@ -278,6 +278,7 @@ export const handler: Handler = async (event) => {
           : await getMockUsage();
     const usage = result.usage;
 
+    // Capture is intentionally fire-and-forget so telemetry persistence never blocks user-facing usage responses.
     void maybeCapture({
       config: captureConfig,
       provider,

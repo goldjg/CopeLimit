@@ -5,7 +5,7 @@ describe('readCaptureConfig', () => {
   const originalEnv = process.env
 
   afterEach(() => {
-    process.env = { ...originalEnv }
+    process.env = originalEnv
     vi.restoreAllMocks()
   })
 
@@ -45,7 +45,7 @@ describe('readCaptureConfig', () => {
 
     process.env = {
       CAPTURE_PROVIDER_RESPONSES: 'yes',
-      PROVIDER_CAPTURE_RETENTION_DAYS: '0',
+      PROVIDER_CAPTURE_RETENTION_DAYS: '5.5',
       PROVIDER_CAPTURE_MAX_PER_DAY: 'nan',
       PROVIDER_CAPTURE_INCLUDE_NORMALIZED: 'sure'
     }

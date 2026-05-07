@@ -7,27 +7,41 @@ const CAPTURE_STORE = 'provider-captures'
 const CAPTURE_VERSION = '1'
 const SANITIZER_VERSION = '1'
 const SKIPPED_PROVIDERS = new Set(['mock', 'unsupported', 'github'])
+const SAFE_PROVIDER_PATTERN = /^[a-z0-9_-]+$/i
+let captureStore: ReturnType<typeof getStore> | null = null
 
 function buildDateFromIso(iso: string): string {
   return iso.slice(0, 10)
 }
 
+function assertSafeProvider(provider: string): void {
+  if (!SAFE_PROVIDER_PATTERN.test(provider)) {
+    throw new Error('Invalid provider key')
+  }
+}
+
 function getCaptureStore() {
+  if (captureStore) return captureStore
+
   const siteID = process.env.NETLIFY_SITE_ID
   const token = process.env.NETLIFY_AUTH_TOKEN
 
   if (siteID && token) {
-    return getStore({ name: CAPTURE_STORE, siteID, token })
+    captureStore = getStore({ name: CAPTURE_STORE, siteID, token })
+    return captureStore
   }
 
-  return getStore({ name: CAPTURE_STORE })
+  captureStore = getStore({ name: CAPTURE_STORE })
+  return captureStore
 }
 
 export function buildCaptureKey(provider: string, userId: number, isoTimestamp: string): string {
+  assertSafeProvider(provider)
   return `${provider}/${userId}/${buildDateFromIso(isoTimestamp)}/${isoTimestamp}.json`
 }
 
 export function buildIndexKey(provider: string, userId: number, dateUtc: string): string {
+  assertSafeProvider(provider)
   return `${provider}/${userId}/${dateUtc}/_index.json`
 }
 
@@ -68,6 +82,10 @@ export function isDateExpired(dateFolder: string, retentionDays: number, now = n
   return dateFolder < cutoffDate
 }
 
+function isValidUserId(userId: number | undefined): userId is number {
+  return typeof userId === 'number' && Number.isFinite(userId) && Number.isInteger(userId) && userId > 0
+}
+
 async function runLazyCleanup(provider: string, userId: number, retentionDays: number): Promise<void> {
   const store = getCaptureStore()
   const prefix = `${provider}/${userId}/`
@@ -81,7 +99,15 @@ async function runLazyCleanup(provider: string, userId: number, retentionDays: n
       return isDateExpired(dateFolder, retentionDays)
     })
 
-  await Promise.all(keysToDelete.map(async (key) => store.delete(key)))
+  const deleteResults = await Promise.allSettled(keysToDelete.map(async (key) => store.delete(key)))
+  for (const [index, result] of deleteResults.entries()) {
+    if (result.status === 'rejected') {
+      console.warn('[capture-store] Failed to delete expired capture', {
+        key: keysToDelete[index],
+        error: result.reason instanceof Error ? result.reason.message : 'Unknown error'
+      })
+    }
+  }
 }
 
 function buildCapture(
@@ -153,10 +179,11 @@ export async function maybeCapture(input: {
   if (!input.config.enabled) return
   if (SKIPPED_PROVIDERS.has(input.provider)) return
   if (!input.rawPayload) return
+  if (!isValidUserId(input.userId)) return
 
   const capture = buildCapture(
     input.provider,
-    input.userId ?? 0,
+    input.userId,
     new Date().toISOString(),
     input.usage,
     input.rawPayload,
@@ -168,8 +195,9 @@ export async function maybeCapture(input: {
   } catch (error) {
     console.warn('[capture-store] Failed to persist provider capture', {
       provider: input.provider,
-      userId: input.userId ?? 0,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      userId: input.userId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
     })
   }
 }

@@ -58,14 +58,16 @@ const PROVIDER_ALLOWLISTS: Record<string, Set<string>> = {
   'copilot-local': new Set(BASE_ALLOWED_FIELDS)
 }
 
-const LONG_SECRET_PATTERN = /^[a-zA-Z0-9+/=_-]+$/
+const BASE64_LIKE_PATTERN = /^[a-zA-Z0-9+/=_-]+$/
+const SENSITIVE_STRING_REDACTION_LENGTH = 128
 
 function looksSensitiveKey(key: string): boolean {
   return FORBIDDEN_KEY_PATTERNS.some((pattern) => pattern.test(key))
 }
 
 function maybeRedactString(value: string): string {
-  if (value.length > 512 && LONG_SECRET_PATTERN.test(value)) return '[REDACTED]'
+  // Strings beyond this size that look token/base64-like are treated as likely secret-bearing telemetry.
+  if (value.length > SENSITIVE_STRING_REDACTION_LENGTH && BASE64_LIKE_PATTERN.test(value)) return '[REDACTED]'
   return value
 }
 
