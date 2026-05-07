@@ -181,13 +181,15 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
     }
     if (!isOpen && wasDialogOpenRef.current) {
-      previousFocusRef.current?.focus();
+      if (previousFocusRef.current && document.contains(previousFocusRef.current)) {
+        previousFocusRef.current.focus();
+      }
     }
 
     function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        setScriptableDialog(null);
+        closeScriptableDialog();
       }
     }
 
@@ -198,9 +200,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
     wasDialogOpenRef.current = isOpen;
 
     return () => {
-      if (isOpen) {
-        window.removeEventListener('keydown', handleEscape);
-      }
+      window.removeEventListener('keydown', handleEscape);
     };
   }, [scriptableDialog]);
 
@@ -428,10 +428,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
         </div>
       )}
       {scriptableDialog && (
-        <div
-          className="modalOverlay"
-          onClick={closeScriptableDialog}
-        >
+        <div className="modalOverlay">
           <div
             className="modalCard"
             role="dialog"
