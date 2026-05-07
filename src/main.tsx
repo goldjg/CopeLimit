@@ -219,10 +219,17 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       storeOnboardingStep('manual-setup');
       setOnboardingSuccess(false);
       const isWidgetScript = scriptName === 'CopeLimitWidget.js';
+      const scriptFriendlyName = isWidgetScript ? 'The CopeLimit widget script' : 'The token setup script';
+      const targetScriptName = isWidgetScript ? 'CopeLimit' : 'CopeLimitInstall';
+      const commonDialogSteps = [
+        'Scriptable will open a blank script.',
+        '',
+        '1) Double tap inside the empty script.',
+        '2) Choose Paste.',
+        `3) Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`
+      ].join('\n');
       setOnboardingNotice(`${isWidgetScript ? 'Widget script' : 'Token setup script'} copied to clipboard.`);
-      const dialogMessage = isWidgetScript
-        ? "The CopeLimit widget script has been copied.\n\nScriptable will open a blank script.\n\n1) Double tap inside the empty script.\n2) Choose Paste.\n3) Tap 'Untitled Script', rename it to CopeLimit, then tap Done."
-        : "The token setup script has been copied.\n\nScriptable will open a blank script.\n\n1) Double tap inside the empty script.\n2) Choose Paste.\n3) Tap 'Untitled Script', rename it to CopeLimitInstall, then tap Done.";
+      const dialogMessage = `${scriptFriendlyName} has been copied.\n\n${commonDialogSteps}`;
       const proceed = window.confirm(
         dialogMessage
       );
