@@ -359,6 +359,49 @@ button {
   font-size: 0.92rem;
 }
 
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 1000;
+}
+
+.modalCard {
+  width: min(520px, 100%);
+  background: linear-gradient(180deg, rgba(31, 41, 55, 0.98), rgba(17, 24, 39, 0.98));
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.modalCard h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.modalCard p {
+  margin: 0 0 10px;
+}
+
+.scriptableDialogSteps {
+  margin: 0 0 14px 20px;
+  padding: 0;
+}
+
+.scriptableDialogSteps li {
+  margin-bottom: 6px;
+}
+
+.secondaryButton {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f9fafb;
+}
+
 @media (max-width: 680px) {
   .hero {
     align-items: flex-start;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -69,14 +69,24 @@ function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
 }
 
-function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): string {
-  return `${scriptFriendlyName} has been copied.
+type ScriptablePasteDialog = {
+  title: string;
+  intro: string;
+  steps: string[];
+  targetScriptName: string;
+};
 
-Scriptable will open a blank script.
-
-1. Double tap inside the empty script.
-2. Choose Paste.
-3. Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`.trim();
+function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): ScriptablePasteDialog {
+  return {
+    title: `${scriptFriendlyName} has been copied.`,
+    intro: 'Scriptable will open a blank script.',
+    steps: [
+      'Double tap inside the empty script.',
+      'Choose Paste.',
+      `Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`
+    ],
+    targetScriptName
+  };
 }
 
 function sourceBadge(source: string): { label: string; className: string } {
@@ -105,6 +115,9 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
   const [onboardingSuccess, setOnboardingSuccess] = useState(false);
+  const [scriptableDialog, setScriptableDialog] = useState<ScriptablePasteDialog | null>(null);
+  const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   function storeOnboardingStep(step: OnboardingStep) {
     setOnboardingStep(step);
@@ -159,6 +172,23 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
     }
   }, []);
+
+  useEffect(() => {
+    if (!scriptableDialog) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setScriptableDialog(null);
+      }
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+      previousFocusRef.current?.focus();
+    };
+  }, [scriptableDialog]);
 
   async function generate() {
     setGenerating(true);
@@ -233,15 +263,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
         ? { modalName: 'The CopeLimit widget script', noticeName: 'Widget script', targetName: 'CopeLimit' }
         : { modalName: 'The token setup script', noticeName: 'Token setup script', targetName: 'CopeLimitInstall' };
       setOnboardingNotice(`${scriptLabels.noticeName} copied to clipboard.`);
-      const dialogMessage = buildScriptablePasteDialog(scriptLabels.modalName, scriptLabels.targetName);
-      const proceed = window.confirm(
-        dialogMessage
-      );
-      if (proceed) {
-        window.location.href = 'scriptable:///add';
-      } else {
-        setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${scriptLabels.targetName}.`);
-      }
+      setScriptableDialog(buildScriptablePasteDialog(scriptLabels.modalName, scriptLabels.targetName));
     } catch (err) {
       if (err instanceof TypeError) {
         setOnboardingError('Failed to copy script: network error or script source unavailable.');
@@ -284,7 +306,19 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
     setOnboardingError(null);
     setOnboardingNotice(null);
     setOnboardingSuccess(false);
+    setScriptableDialog(null);
     storeOnboardingStep('idle');
+  }
+
+  function closeScriptableDialog() {
+    if (!scriptableDialog) return;
+    setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${scriptableDialog.targetScriptName}.`);
+    setScriptableDialog(null);
+  }
+
+  function openScriptableForPasting() {
+    setScriptableDialog(null);
+    window.location.href = 'scriptable:///add';
   }
 
   return (
@@ -377,6 +411,38 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
               {revoking ? 'Revoking…' : 'Revoke token'}
             </button>
           )}
+        </div>
+      )}
+      {scriptableDialog && (
+        <div
+          className="modalOverlay"
+          role="presentation"
+          onClick={closeScriptableDialog}
+        >
+          <div
+            className="modalCard"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scriptable-dialog-title"
+            aria-describedby="scriptable-dialog-description"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="scriptable-dialog-title">{scriptableDialog.title}</h2>
+            <p id="scriptable-dialog-description">{scriptableDialog.intro}</p>
+            <ol className="scriptableDialogSteps">
+              {scriptableDialog.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+            <div className="widgetTokenActions">
+              <button type="button" className="secondaryButton" onClick={closeScriptableDialog}>
+                Cancel
+              </button>
+              <button type="button" ref={openScriptableButtonRef} onClick={openScriptableForPasting}>
+                Open Scriptable
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
