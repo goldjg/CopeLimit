@@ -198,6 +198,7 @@ function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandal
       if (previousFocusRef.current && document.contains(previousFocusRef.current)) {
         previousFocusRef.current.focus();
       }
+      previousFocusRef.current = null;
     }
 
     function handleEscape(event: KeyboardEvent) {
