@@ -21,7 +21,7 @@ describe('buildShortcutPayload', () => {
     });
   });
 
-  it('normalises trailing slash in origin', () => {
+  it('normalizes trailing slash in origin', () => {
     const payload = buildShortcutPayload({
       origin: 'https://copelimit.netlify.app/',
       bootstrapToken: 'abc123token'

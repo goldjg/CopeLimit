@@ -787,8 +787,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
             <h2 id="scriptable-dialog-title">{scriptableDialog.title}</h2>
             <p id="scriptable-dialog-description">{scriptableDialog.intro}</p>
             <ol className="scriptableDialogSteps">
-              {scriptableDialog.steps.map((step, index) => (
-                <li key={index}>{step}</li>
+              {scriptableDialog.steps.map((step) => (
+                <li key={step}>{step}</li>
               ))}
             </ol>
             <div className="widgetTokenActions">
