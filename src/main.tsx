@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { WidgetTokenSection } from './WidgetTokenSection';
+import { isLikelyIosNavigator } from './widget-onboarding';
 import './styles.css';
 
 type Usage = {
@@ -22,41 +24,13 @@ type User = {
   avatar_url?: string;
 };
 
-type WidgetTokenResult = {
-  token: string;
-  expiresAt: string;
-  ttlDays: number;
-  login: string;
-  replacedExisting: boolean;
-};
-
-type WidgetTokenStatus = {
-  ttlDays: number;
-  hasActiveToken: boolean;
-  expiresAt?: string;
-};
-
-type OnboardingStep =
-  | 'idle'
-  | 'manual-setup'
-  | 'requesting'
-  | 'waiting'
-  | 'error';
-
-type OnboardingSessionResult = {
-  bootstrapToken: string;
-  expiresAt: string;
-  ttlSeconds: number;
-};
-
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 };
 
 function isLikelyIos(): boolean {
-  return /iPad|iPhone|iPod/.test(window.navigator.userAgent)
-    || (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+  return isLikelyIosNavigator(window.navigator);
 }
 
 function daysUntil(dateText: string): number {
@@ -67,26 +41,6 @@ function daysUntil(dateText: string): number {
 
 function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
-}
-
-type ScriptablePasteDialog = {
-  title: string;
-  intro: string;
-  steps: string[];
-  targetScriptName: string;
-};
-
-function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): ScriptablePasteDialog {
-  return {
-    title: `${scriptFriendlyName} has been copied.`,
-    intro: 'Scriptable will open a blank script.',
-    steps: [
-      'Double tap inside the empty script.',
-      'Choose Paste.',
-      `Tap 'Untitled Script', rename it to ${targetScriptName}, then tap Done.`
-    ],
-    targetScriptName
-  };
 }
 
 function sourceBadge(source: string): { label: string; className: string } {
@@ -102,369 +56,6 @@ function authErrorMessage(code: string | null): string | null {
   if (code === 'auth_unavailable') return 'GitHub login is not available. GITHUB_CLIENT_ID may not be configured.';
   if (code === 'auth_failed') return 'GitHub login failed. Please try again.';
   return 'An authentication error occurred. Please try again.';
-}
-
-function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandalone: boolean }) {
-  const [result, setResult] = useState<WidgetTokenResult | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [revoking, setRevoking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [status, setStatus] = useState<WidgetTokenStatus | null>(null);
-  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('idle');
-  const [onboardingError, setOnboardingError] = useState<string | null>(null);
-  const [onboardingNotice, setOnboardingNotice] = useState<string | null>(null);
-  const [onboardingSuccess, setOnboardingSuccess] = useState(false);
-  const [scriptableDialog, setScriptableDialog] = useState<ScriptablePasteDialog | null>(null);
-  const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const wasDialogOpenRef = useRef(false);
-
-  const closeScriptableDialog = useCallback(() => {
-    setScriptableDialog((current) => {
-      if (current) {
-        setOnboardingNotice(`Script copied. When ready, manually open Scriptable and create ${current.targetScriptName}.`);
-      }
-      return null;
-    });
-  }, []);
-
-  const openScriptableForPasting = useCallback(() => {
-    setScriptableDialog(null);
-    window.location.href = 'scriptable:///add';
-  }, []);
-
-  function storeOnboardingStep(step: OnboardingStep) {
-    setOnboardingStep(step);
-    sessionStorage.setItem('copelimit-onboarding-step', step);
-  }
-
-  async function refreshStatus() {
-    const response = await fetch('/api/widget-token', { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    setStatus(await response.json() as WidgetTokenStatus);
-  }
-
-  useEffect(() => {
-    refreshStatus().catch(() => setStatus(null));
-  }, []);
-
-  useEffect(() => {
-    const saved = sessionStorage.getItem('copelimit-onboarding-step');
-    if (
-      saved === 'manual-setup'
-      || saved === 'requesting'
-      || saved === 'waiting'
-      || saved === 'error'
-    ) {
-      setOnboardingStep(saved);
-    }
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const onboarding = params.get('onboarding');
-    const reason = params.get('reason');
-    if (onboarding === 'complete') {
-      setOnboardingSuccess(true);
-      setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
-      storeOnboardingStep('idle');
-      refreshStatus().catch(() => undefined);
-      params.delete('onboarding');
-      params.delete('reason');
-      const nextQuery = params.toString();
-      window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
-    } else if (onboarding === 'error') {
-      setOnboardingSuccess(false);
-      setOnboardingError(reason ? `Setup failed (${reason}).` : 'Setup failed. Please try again.');
-      storeOnboardingStep('error');
-      params.delete('onboarding');
-      params.delete('reason');
-      const nextQuery = params.toString();
-      window.history.replaceState({}, '', nextQuery ? `${window.location.pathname}?${nextQuery}` : window.location.pathname);
-    }
-  }, []);
-
-  useEffect(() => {
-    const isOpen = Boolean(scriptableDialog);
-    if (isOpen && !wasDialogOpenRef.current) {
-      previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      window.setTimeout(() => openScriptableButtonRef.current?.focus(), 0);
-    }
-    if (!isOpen && wasDialogOpenRef.current) {
-      if (previousFocusRef.current && document.contains(previousFocusRef.current)) {
-        previousFocusRef.current.focus();
-      }
-      previousFocusRef.current = null;
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeScriptableDialog();
-      }
-    }
-
-    let listenerAdded = false;
-    if (isOpen) {
-      window.addEventListener('keydown', handleEscape);
-      listenerAdded = true;
-    }
-
-    wasDialogOpenRef.current = isOpen;
-
-    return () => {
-      if (listenerAdded) {
-        window.removeEventListener('keydown', handleEscape);
-      }
-    };
-  }, [scriptableDialog, closeScriptableDialog]);
-
-  async function generate() {
-    setGenerating(true);
-    setError(null);
-    setResult(null);
-    try {
-      const response = await fetch('/api/widget-token', { method: 'POST', cache: 'no-store' });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
-      }
-      const generated = await response.json() as WidgetTokenResult;
-      setResult(generated);
-      setStatus({
-        ttlDays: generated.ttlDays,
-        hasActiveToken: true,
-        expiresAt: generated.expiresAt
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate token');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function revoke() {
-    setRevoking(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/widget-token', { method: 'DELETE', cache: 'no-store' });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
-      }
-      setResult(null);
-      await refreshStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to revoke token');
-    } finally {
-      setRevoking(false);
-    }
-  }
-
-  async function copy() {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result.token);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard write failed — user can still select and copy manually
-    }
-  }
-
-  function scriptSourceUrl(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
-    return `${window.location.origin}/scriptable/${scriptName}`;
-  }
-
-  async function copyScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
-    setOnboardingError(null);
-    try {
-      const response = await fetch(scriptSourceUrl(scriptName));
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const text = await response.text();
-      await navigator.clipboard.writeText(text);
-      storeOnboardingStep('manual-setup');
-      setOnboardingSuccess(false);
-      const isWidgetScript = scriptName === 'CopeLimitWidget.js';
-      const scriptLabels = isWidgetScript
-        ? { modalName: 'The CopeLimit widget script', noticeName: 'Widget script', targetName: 'CopeLimit' }
-        : { modalName: 'The token setup script', noticeName: 'Token setup script', targetName: 'CopeLimitInstall' };
-      setOnboardingNotice(`${scriptLabels.noticeName} copied to clipboard.`);
-      setScriptableDialog(buildScriptablePasteDialog(scriptLabels.modalName, scriptLabels.targetName));
-    } catch (err) {
-      if (err instanceof TypeError) {
-        setOnboardingError('Failed to copy script: network error or script source unavailable.');
-      } else if (err instanceof Error) {
-        setOnboardingError(`Failed to copy script: ${err.message}`);
-      } else {
-        setOnboardingError('Failed to copy script.');
-      }
-    }
-  }
-
-  async function requestOnboardingSession(): Promise<OnboardingSessionResult> {
-    const response = await fetch('/api/onboarding/session', { method: 'POST', cache: 'no-store' });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-      throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
-    }
-    return response.json() as Promise<OnboardingSessionResult>;
-  }
-
-  async function connectScriptable() {
-    setOnboardingError(null);
-    setOnboardingNotice(null);
-    setOnboardingSuccess(false);
-    storeOnboardingStep('requesting');
-    try {
-      const session = await requestOnboardingSession();
-      // Bootstrap token is short-lived and single-use by design; URL exposure is accepted for iOS deep-link handoff.
-      const runLink = `scriptable:///run?scriptName=CopeLimitInstall&bt=${encodeURIComponent(session.bootstrapToken)}`;
-      window.location.href = runLink;
-      storeOnboardingStep('waiting');
-      setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically.');
-    } catch (err) {
-      setOnboardingError(err instanceof Error ? err.message : 'Failed to start onboarding');
-      storeOnboardingStep('error');
-    }
-  }
-
-  function resetOnboarding() {
-    setOnboardingError(null);
-    setOnboardingNotice(null);
-    setOnboardingSuccess(false);
-    setScriptableDialog(null);
-    storeOnboardingStep('idle');
-  }
-
-  return (
-    <section className="card widgetTokenCard">
-      <span className="label">iOS Widget Token</span>
-      <p>
-        Generate a personal token to use with the Scriptable iOS widget. The token is tied
-        to your GitHub session and expires after {result?.ttlDays ?? status?.ttlDays ?? '…'} days.
-      </p>
-      {status?.hasActiveToken && !result && (
-        <p className="widgetTokenMeta">
-          You already have an active token
-          {status.expiresAt ? ` (expires ${new Date(status.expiresAt).toLocaleDateString()})` : ''}.
-          {' '}
-          The token value is not stored client-side and cannot be shown again. Generate a new token to rotate it.
-        </p>
-      )}
-      {error && <p className="widgetTokenError">{error}</p>}
-      {isIos && (
-        <div className="widgetOnboarding">
-          <span className="label">iPhone Widget Setup</span>
-          {!isStandalone ? (
-            <p className="widgetTokenMeta">
-              Install CopeLimit to your Home Screen first, then open it as an app to set up the iPhone widget.
-            </p>
-          ) : (
-            <>
-              <ol className="widgetOnboardingSteps">
-                <li>
-                  Copy widget script, paste in Scriptable, rename to <strong>CopeLimit</strong>, and save.
-                </li>
-                <li>
-                  Copy token setup script, paste in Scriptable, rename to <strong>CopeLimitInstall</strong>, and save.
-                </li>
-                <li>Run token configuration.</li>
-              </ol>
-              {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
-              {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
-              {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
-              <div className="widgetTokenActions">
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js'); }}>
-                  Copy widget script
-                </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js'); }}>
-                  Copy token setup script
-                </button>
-                <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
-                  {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
-                </button>
-                <button type="button" onClick={resetOnboarding}>
-                  Reset
-                </button>
-              </div>
-              <p className="widgetTokenMeta">
-                Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
-                widget creation and script assignment remain manual.
-              </p>
-            </>
-          )}
-        </div>
-      )}
-      {result ? (
-        <div className="widgetTokenResult">
-          <div className="tokenDisplay">
-            <code className="tokenValue">{result.token}</code>
-            <button type="button" className="copyButton" onClick={copy}>
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-          <p className="widgetTokenMeta">
-            Expires {new Date(result.expiresAt).toLocaleDateString()} ({daysUntil(result.expiresAt)} days).
-            This token is shown only once. Save it now in your widget configuration.
-          </p>
-          <div className="widgetTokenActions">
-            <button type="button" onClick={generate} disabled={generating}>
-              Regenerate
-            </button>
-            <button type="button" onClick={revoke} disabled={revoking}>
-              {revoking ? 'Revoking…' : 'Revoke'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="widgetTokenActions">
-          <button type="button" onClick={generate} disabled={generating}>
-            {generating ? 'Generating…' : status?.hasActiveToken ? 'Regenerate widget token' : 'Generate widget token'}
-          </button>
-          {status?.hasActiveToken && (
-            <button type="button" onClick={revoke} disabled={revoking}>
-              {revoking ? 'Revoking…' : 'Revoke token'}
-            </button>
-          )}
-        </div>
-      )}
-      {scriptableDialog && (
-        <div className="modalOverlay">
-          <div
-            className="modalCard"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="scriptable-dialog-title"
-            aria-describedby="scriptable-dialog-description"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 id="scriptable-dialog-title">{scriptableDialog.title}</h2>
-            <p id="scriptable-dialog-description">{scriptableDialog.intro}</p>
-            <ol className="scriptableDialogSteps">
-              {scriptableDialog.steps.map((step, index) => (
-                <li key={index}>{step}</li>
-              ))}
-            </ol>
-            <div className="widgetTokenActions">
-              <button type="button" className="secondaryButton" onClick={closeScriptableDialog}>
-                Cancel
-              </button>
-              <button type="button" ref={openScriptableButtonRef} onClick={openScriptableForPasting}>
-                Open Scriptable
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
 }
 
 function App() {
@@ -502,21 +93,19 @@ function App() {
         setUser(await response.json());
       }
     } catch {
-      // non-fatal — show anonymous state
       setUser({ authenticated: false });
     }
   }
 
   useEffect(() => {
-    refresh();
-    fetchUser();
+    void refresh();
+    void fetchUser();
   }, []);
 
   useEffect(() => {
     const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
     const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
       || iosNavigator.standalone === true;
-    // UA/platform checks are used here because iOS Safari lacks a standard install-prompt API.
     const isIos = isLikelyIos();
     const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';
     setIsInstalled(inStandaloneMode);
@@ -554,7 +143,7 @@ function App() {
       if (choice.outcome === 'accepted') {
         setInstallPrompt(null);
       }
-    } catch (error) {
+    } catch {
       console.warn('Install prompt failed');
     }
   }
@@ -602,11 +191,11 @@ function App() {
             </a>
           )}
           {!isInstalled && installPrompt && (
-            <button type="button" className="installButton" onClick={installApp}>
+            <button type="button" className="installButton" onClick={() => { void installApp(); }}>
               Install app
             </button>
           )}
-          <button onClick={refresh}>Refresh</button>
+          <button onClick={() => { void refresh(); }}>Refresh</button>
         </div>
       </section>
 
@@ -614,7 +203,7 @@ function App() {
       {showIosInstallHint && (
         <section className="card notice iosHint">
           <span>
-            On iPhone or iPad: tap Safari's <strong>Share</strong> button, then
+            On iPhone or iPad: tap Safari&apos;s <strong>Share</strong> button, then
             {' '}
             <strong>Add to Home Screen</strong>.
           </span>
@@ -630,7 +219,7 @@ function App() {
         <section className="card notice">
           <strong>Real quota unavailable in hosted mode.</strong>
           <p>
-            GitHub's API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy.
+            GitHub&apos;s API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy.
           </p>
         </section>
       )}
