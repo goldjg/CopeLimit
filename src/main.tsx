@@ -38,12 +38,8 @@ type WidgetTokenStatus = {
 
 type OnboardingStep =
   | 'idle'
-  | 'checking'
-  | 'scriptable-missing'
-  | 'ready'
   | 'manual-setup'
   | 'requesting'
-  | 'linking'
   | 'waiting'
   | 'error';
 
@@ -88,7 +84,7 @@ function authErrorMessage(code: string | null): string | null {
   return 'An authentication error occurred. Please try again.';
 }
 
-function WidgetTokenSection({ isIos }: { isIos: boolean }) {
+function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; isStandalone: boolean }) {
   const [result, setResult] = useState<WidgetTokenResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -120,12 +116,8 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
   useEffect(() => {
     const saved = sessionStorage.getItem('copelimit-onboarding-step');
     if (
-      saved === 'checking'
-      || saved === 'scriptable-missing'
-      || saved === 'ready'
-      || saved === 'manual-setup'
+      saved === 'manual-setup'
       || saved === 'requesting'
-      || saved === 'linking'
       || saved === 'waiting'
       || saved === 'error'
     ) {
@@ -140,7 +132,7 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     if (onboarding === 'complete') {
       setOnboardingSuccess(true);
       setOnboardingError(null);
-      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimitWidget.');
+      setOnboardingNotice('Widget token installed in Scriptable. Add the Scriptable widget and select CopeLimit.');
       storeOnboardingStep('idle');
       refreshStatus().catch(() => undefined);
       params.delete('onboarding');
@@ -211,24 +203,11 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
     }
   }
 
-  function appStoreLink() {
-    window.location.href = 'https://apps.apple.com/app/scriptable/id1405459188';
-  }
-
   function scriptSourceUrl(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     return `${window.location.origin}/scriptable/${scriptName}`;
   }
 
-  function openScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
-    storeOnboardingStep('manual-setup');
-    window.open(scriptSourceUrl(scriptName), '_blank', 'noopener,noreferrer');
-  }
-
-  async function copyScriptSource(
-    scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js',
-    scriptDisplayName: 'CopeLimitInstall' | 'CopeLimitWidget',
-    label: string
-  ) {
+  async function copyScriptSource(scriptName: 'CopeLimitInstall.js' | 'CopeLimitWidget.js') {
     setOnboardingError(null);
     try {
       const response = await fetch(scriptSourceUrl(scriptName));
@@ -238,9 +217,17 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const text = await response.text();
       await navigator.clipboard.writeText(text);
       storeOnboardingStep('manual-setup');
-      setOnboardingNotice(`${label} copied to clipboard. Scriptable will open a new blank script: paste, name it “${scriptDisplayName}”, and save.`);
       setOnboardingSuccess(false);
-      window.location.href = 'scriptable:///add';
+      const isWidgetScript = scriptName === 'CopeLimitWidget.js';
+      setOnboardingNotice(`${isWidgetScript ? 'Widget script' : 'Token setup script'} copied to clipboard.`);
+      const proceed = window.confirm(
+        isWidgetScript
+          ? "The CopeLimit widget script has been copied.\nScriptable will open a blank script.\nDouble tap inside the empty script, choose Paste, tap 'Untitled Script', rename it to CopeLimit, then tap Done."
+          : "The token setup script has been copied.\nScriptable will open a blank script.\nDouble tap inside the empty script, choose Paste, tap 'Untitled Script', rename it to CopeLimitInstall, then tap Done."
+      );
+      if (proceed) {
+        window.location.href = 'scriptable:///add';
+      }
     } catch (err) {
       if (err instanceof TypeError) {
         setOnboardingError('Failed to copy script: network error or script source unavailable.');
@@ -249,41 +236,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       } else {
         setOnboardingError('Failed to copy script.');
       }
-    }
-  }
-
-  async function detectScriptableApp(): Promise<boolean> {
-    return new Promise((resolve) => {
-      let hidden = false;
-      function handleVisibilityChange() {
-        if (document.hidden) {
-          hidden = true;
-        }
-      }
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      window.location.href = 'scriptable:///';
-      window.setTimeout(() => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        resolve(hidden);
-      }, 2300);
-    });
-  }
-
-  function openScriptableApp() {
-    window.location.href = 'scriptable:///';
-  }
-
-  async function checkScriptable() {
-    setOnboardingError(null);
-    setOnboardingNotice(null);
-    setOnboardingSuccess(false);
-    storeOnboardingStep('checking');
-    const installed = await detectScriptableApp();
-    if (installed) {
-      storeOnboardingStep('ready');
-    } else {
-      storeOnboardingStep('scriptable-missing');
     }
   }
 
@@ -305,7 +257,6 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       const session = await requestOnboardingSession();
       // Bootstrap token is short-lived and single-use by design; URL exposure is accepted for iOS deep-link handoff.
       const runLink = `scriptable:///run?scriptName=CopeLimitInstall&bt=${encodeURIComponent(session.bootstrapToken)}`;
-      storeOnboardingStep('linking');
       window.location.href = runLink;
       storeOnboardingStep('waiting');
       setOnboardingNotice('Configuring token in Scriptable. You will be redirected back automatically.');
@@ -341,38 +292,28 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
       {isIos && (
         <div className="widgetOnboarding">
           <span className="label">iPhone Widget Setup</span>
-          <p>
-            Scriptable script creation/import is manual in iOS. Open or copy each script source below, create scripts in Scriptable,
-            then run token configuration for automatic token handoff.
-          </p>
-          {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
-          {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
-          {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
-          <div className="widgetTokenActions">
-            <button type="button" onClick={checkScriptable} disabled={onboardingStep === 'checking' || onboardingStep === 'requesting'}>
-              {onboardingStep === 'checking' ? 'Checking…' : 'Setup iPhone widget'}
-            </button>
-            {(onboardingStep === 'scriptable-missing') && (
-              <button type="button" onClick={appStoreLink}>
-                Install Scriptable
-              </button>
-            )}
-            {(onboardingStep === 'ready' || onboardingStep === 'manual-setup' || onboardingStep === 'waiting' || onboardingStep === 'error') && (
-              <>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitWidget.js'); }}>
-                  Open widget script source
-                </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js', 'CopeLimitWidget', 'Widget script'); }}>
+          {!isStandalone ? (
+            <p className="widgetTokenMeta">
+              Install CopeLimit to your Home Screen first, then open it as an app to set up the iPhone widget.
+            </p>
+          ) : (
+            <>
+              <p>
+                Step 1: Copy widget script, paste in Scriptable, rename to <strong>CopeLimit</strong>, and save.
+                {' '}
+                Step 2: Copy token setup script, paste in Scriptable, rename to <strong>CopeLimitInstall</strong>, and save.
+                {' '}
+                Step 3: Run token configuration.
+              </p>
+              {onboardingSuccess && <p className="widgetOnboardingSuccess">{onboardingNotice}</p>}
+              {onboardingError && <p className="widgetTokenError">{onboardingError}</p>}
+              {!onboardingSuccess && onboardingNotice && <p className="widgetTokenMeta">{onboardingNotice}</p>}
+              <div className="widgetTokenActions">
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitWidget.js'); }}>
                   Copy widget script
                 </button>
-                <button type="button" onClick={() => { openScriptSource('CopeLimitInstall.js'); }}>
-                  Open token configuration script source
-                </button>
-                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js', 'CopeLimitInstall', 'Token configuration script'); }}>
-                  Copy token configuration script
-                </button>
-                <button type="button" onClick={openScriptableApp}>
-                  Open Scriptable
+                <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js'); }}>
+                  Copy token setup script
                 </button>
                 <button type="button" onClick={connectScriptable} disabled={onboardingStep === 'requesting'}>
                   {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
@@ -380,13 +321,13 @@ function WidgetTokenSection({ isIos }: { isIos: boolean }) {
                 <button type="button" onClick={resetOnboarding}>
                   Reset
                 </button>
-              </>
-            )}
-          </div>
-          <p className="widgetTokenMeta">
-            Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
-            widget creation and script assignment remain manual.
-          </p>
+              </div>
+              <p className="widgetTokenMeta">
+                Automatic token handoff requires CopeLimitInstall to be created first using the options above. Final iOS home screen
+                widget creation and script assignment remain manual.
+              </p>
+            </>
+          )}
         </div>
       )}
       {result ? (
@@ -653,7 +594,7 @@ function App() {
         </>
       )}
 
-      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} />}
+      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} isStandalone={isInstalled} />}
     </main>
   );
 }
