@@ -253,7 +253,6 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [shortcutInstalled, setShortcutInstalled] = useState<boolean>(() => readStorageFlag(SHORTCUT_INSTALLED_STORAGE_KEY));
   const [shortcutErrorReason, setShortcutErrorReason] = useState<ShortcutErrorReason | null>(null);
   const [shortcutErrorDetails, setShortcutErrorDetails] = useState<string | null>(null);
-  const [shortcutPreparing, setShortcutPreparing] = useState(false);
   const [showSlowHint, setShowSlowHint] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
   const hasActiveToken = Boolean(status?.hasActiveToken);
@@ -261,11 +260,10 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const isSetupComplete = onboardingPhase === 'SETUP_COMPLETE';
   const fastSetupProgress = getFastSetupProgress(onboardingStep, shortcutInstalled, hasActiveToken);
   const scriptsStateClass = fastSetupProgress.scriptsInstalled ? 'stateDone' : (onboardingPhase === 'AWAITING_RETURN' ? 'stateInProgress' : 'statePending');
+  const tokenConfigurationInProgress = ['AWAITING_RETURN', 'AWAITING_TOKEN_CONFIGURATION', 'VERIFYING_SETUP'].includes(onboardingPhase);
   const tokenStateClass = fastSetupProgress.tokenConfigured
     ? 'stateDone'
-    : (onboardingPhase === 'AWAITING_RETURN' || onboardingPhase === 'AWAITING_TOKEN_CONFIGURATION' || onboardingPhase === 'VERIFYING_SETUP'
-      ? 'stateInProgress'
-      : 'statePending');
+    : (tokenConfigurationInProgress ? 'stateInProgress' : 'statePending');
 
   const openScriptableButtonRef = useRef<HTMLButtonElement | null>(null);
   const fastSetupActionRef = useRef<HTMLButtonElement | null>(null);
@@ -387,6 +385,18 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     clearFastSetupRecoveryState();
   }, [clearFastSetupRecoveryState, isSetupComplete]);
 
+  const setTokenConfigurationFailureState = useCallback((message: string) => {
+    setOnboardingError(message);
+    if (setupMode === 'fast') {
+      setOnboardingNotice(null);
+      setShortcutErrorReason(null);
+      setShortcutErrorDetails(null);
+      storeOnboardingStep('shortcut-awaiting-token-config');
+    } else {
+      storeOnboardingStep('error');
+    }
+  }, [setupMode, storeOnboardingStep]);
+
   useEffect(() => {
     const callback = parseOnboardingCallback(window.location.search);
     if (!callback.status) return;
@@ -399,15 +409,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       if (callback.fromShortcut && inFastFlow) {
         clearFastSetupRecoveryState();
         setShortcutError('shortcut_error', callback.reason);
-      } else if (setupMode === 'fast') {
-        setOnboardingError(callback.reason ? `Setup failed (${callback.reason}).` : 'Setup failed. Please try again.');
-        setOnboardingNotice(null);
-        setShortcutErrorReason(null);
-        setShortcutErrorDetails(null);
-        storeOnboardingStep('shortcut-awaiting-token-config');
       } else {
-        setOnboardingError(callback.reason ? `Setup failed (${callback.reason}).` : 'Setup failed. Please try again.');
-        storeOnboardingStep('error');
+        setTokenConfigurationFailureState(callback.reason ? `Setup failed (${callback.reason}).` : 'Setup failed. Please try again.');
       }
       return;
     }
@@ -440,22 +443,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
           }
           return;
         }
-        setOnboardingError('Setup returned, but token configuration could not be confirmed yet. Please try again.');
-        if (setupMode === 'fast') {
-          storeOnboardingStep('shortcut-awaiting-token-config');
-        } else {
-          storeOnboardingStep('error');
-        }
+        setTokenConfigurationFailureState('Setup returned, but token configuration could not be confirmed yet. Please try again.');
       })
       .catch(() => {
-        setOnboardingError('Setup returned, but token configuration could not be confirmed yet. Please try again.');
-        if (setupMode === 'fast') {
-          storeOnboardingStep('shortcut-awaiting-token-config');
-        } else {
-          storeOnboardingStep('error');
-        }
+        setTokenConfigurationFailureState('Setup returned, but token configuration could not be confirmed yet. Please try again.');
       });
-  }, [clearFastSetupRecoveryState, clearShortcutTimers, onboardingStep, refreshStatus, setShortcutError, setupMode, storeOnboardingStep]);
+  }, [clearFastSetupRecoveryState, clearShortcutTimers, onboardingStep, refreshStatus, setShortcutError, setTokenConfigurationFailureState, storeOnboardingStep]);
 
   useEffect(() => {
     const isOpen = Boolean(scriptableDialog);
@@ -520,7 +513,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     return response.json() as Promise<OnboardingSessionResult>;
   }, []);
 
-  const buildShortcutInstallPayload = useCallback(() => buildShortcutPayload({
+  const createShortcutPayload = useCallback(() => buildShortcutPayload({
     origin: window.location.origin
   }), []);
 
@@ -610,7 +603,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     }
   }
 
-  async function configureTokenInScriptable(targetMode: SetupMode) {
+  async function launchScriptableTokenSetup(targetMode: SetupMode) {
     setOnboardingError(null);
     setOnboardingNotice(null);
     setSetupModeAndPersist(targetMode);
@@ -646,13 +639,12 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     setOnboardingError(null);
     setOnboardingNotice(null);
     setVerifyingSetup(false);
-    setShortcutPreparing(true);
     setShortcutErrorReason(null);
     setShortcutErrorDetails(null);
     storeOnboardingStep('shortcut-launching');
 
     try {
-      const payload = buildShortcutInstallPayload();
+      const payload = createShortcutPayload();
       try {
         await navigator.clipboard.writeText(payload);
       } catch {
@@ -668,8 +660,6 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       window.location.href = SHORTCUT_RUN_URL;
     } catch (err) {
       setShortcutError('session_failed', err instanceof Error ? err.message : null);
-    } finally {
-      setShortcutPreparing(false);
     }
   }
 
@@ -800,16 +790,14 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
 
                     {onboardingStep === 'shortcut-ready' && (
                       <div className="shortcutStateBlock">
-                        <p className="widgetTokenMeta"><strong>Step 2 of 2</strong> — Install/update scripts.</p>
+                        <p className="widgetTokenMeta"><strong>Step 2 of 3</strong> — Install/update scripts.</p>
                         <div className="widgetTokenActions">
-                          <button
-                            type="button"
+                        <button
+                          type="button"
                           ref={fastSetupActionRef}
                           onClick={() => { void launchShortcut(); }}
-                          disabled={shortcutPreparing}
-                          aria-disabled={shortcutPreparing}
                         >
-                          {shortcutPreparing ? 'Preparing setup…' : 'Set Up Widget →'}
+                          Set Up Widget →
                         </button>
                         <button type="button" className="secondaryButton" onClick={() => storeOnboardingStep('shortcut-prompt-install')}>
                           Not installed yet?
@@ -846,7 +834,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                         <button
                           type="button"
                           ref={fastSetupActionRef}
-                          onClick={() => { void configureTokenInScriptable('fast'); }}
+                          onClick={() => { void launchScriptableTokenSetup('fast'); }}
                           disabled={onboardingStep === 'shortcut-token-requesting'}
                         >
                           {onboardingStep === 'shortcut-token-requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
@@ -941,7 +929,11 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                     <button type="button" onClick={() => { void copyScriptSource('CopeLimitInstall.js'); }}>
                       Copy token setup script
                     </button>
-                    <button type="button" onClick={() => { void configureTokenInScriptable('manual'); }} disabled={onboardingStep === 'requesting'}>
+                    <button
+                      type="button"
+                      onClick={() => { void launchScriptableTokenSetup('manual'); }}
+                      disabled={onboardingStep === 'requesting'}
+                    >
                       {onboardingStep === 'requesting' ? 'Connecting…' : 'Configure token in Scriptable'}
                     </button>
                     <button type="button" onClick={resetOnboarding}>

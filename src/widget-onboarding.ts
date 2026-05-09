@@ -122,6 +122,11 @@ export type OnboardingPhase =
   | 'SETUP_FAILED';
 
 const DEFAULT_CALLBACK_PATH = '/?shortcut=complete';
+const POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS: readonly OnboardingStep[] = [
+  'shortcut-awaiting-token-config',
+  'shortcut-token-requesting',
+  'shortcut-token-waiting'
+];
 
 /**
  * Returns `true` when the provided navigator-like object matches known iOS
@@ -237,7 +242,7 @@ export function deriveOnboardingPhase(
   if (step === 'shortcut-ready') return 'SHORTCUT_READY';
   if (step === 'shortcut-launching') return 'SHORTCUT_LAUNCHED';
   if (step === 'shortcut-waiting') return 'AWAITING_RETURN';
-  if (step === 'shortcut-awaiting-token-config' || step === 'shortcut-token-requesting' || step === 'shortcut-token-waiting') {
+  if (POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS.includes(step)) {
     return 'AWAITING_TOKEN_CONFIGURATION';
   }
   if (step === 'shortcut-success') return 'SETUP_COMPLETE';
@@ -259,6 +264,7 @@ export function getFastSetupProgress(
   shortcutInstalled: boolean,
   hasActiveToken: boolean
 ): FastSetupProgress {
+  const postShortcutStates: readonly OnboardingStep[] = [...POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS, 'shortcut-success'];
   const hasReachedShortcutFlow = shortcutInstalled || [
     'shortcut-ready',
     'shortcut-launching',
@@ -276,12 +282,7 @@ export function getFastSetupProgress(
 
   return {
     shortcutInstalled: hasReachedShortcutFlow,
-    scriptsInstalled: verifiedSetup || [
-      'shortcut-awaiting-token-config',
-      'shortcut-token-requesting',
-      'shortcut-token-waiting',
-      'shortcut-success'
-    ].includes(onboardingStep),
+    scriptsInstalled: verifiedSetup || postShortcutStates.includes(onboardingStep),
     tokenConfigured: verifiedSetup,
     widgetReady: completedFastSetup
   };
