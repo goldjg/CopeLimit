@@ -470,7 +470,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       verifySetupAndPromote(fastFlowSessionId)
         .then((verified) => {
           if (verified) return;
-          setOnboardingNotice('The Shortcut returned, but this onboarding session was not confirmed. Try Fast Setup again.');
+          setOnboardingNotice('The Shortcut returned, but setup was not completed. Try Fast Setup again.');
           storeOnboardingStep('shortcut-error');
         })
         .catch(() => undefined);
@@ -598,7 +598,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     try {
       const session = await requestOnboardingSession();
       if (!session.onboardingSessionId) {
-        throw new Error('Onboarding session ID missing from server response. Please try again in a moment.');
+        throw new Error('Onboarding session ID missing from server response. This may indicate a server configuration issue.');
       }
       const onboardingSessionId = session.onboardingSessionId;
       const payload = buildShortcutPayload({
