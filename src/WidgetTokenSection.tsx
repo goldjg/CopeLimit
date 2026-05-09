@@ -487,6 +487,88 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
 
   useEffect(() => () => clearShortcutTimers(), [clearShortcutTimers]);
 
+  // On iOS the shortcut callback URL and the Scriptable callback URL are both
+  // opened by Safari (not the standalone PWA). The standalone PWA therefore
+  // never receives the ?shortcut=complete / ?onboarding=complete query params.
+  //
+  // To handle this we listen for the PWA regaining the foreground:
+  //   • shortcut-waiting          → assume scripts installed; advance to token-config
+  //   • shortcut-token-waiting /  → poll token status; advance on success
+  //     waiting (manual)
+  useEffect(() => {
+    if (
+      onboardingStep !== 'shortcut-waiting'
+      && onboardingStep !== 'shortcut-token-waiting'
+      && onboardingStep !== 'waiting'
+    ) return;
+
+    let cancelled = false;
+
+    function handleVisible() {
+      if (document.visibilityState !== 'visible') return;
+
+      if (onboardingStep === 'shortcut-waiting') {
+        // Shortcut completed (or user returned before it did). Assume scripts
+        // are installed and proceed to token configuration.
+        clearShortcutTimers();
+        clearFastSetupRecoveryState();
+        setShowSlowHint(false);
+        setOnboardingError(null);
+        setShortcutErrorReason(null);
+        setShortcutErrorDetails(null);
+        setOnboardingNotice('Scripts installed (or assumed). Next, configure your token in Scriptable.');
+        setStatusAnnouncement('Shortcut finished. Configure token in Scriptable.');
+        storeOnboardingStep('shortcut-awaiting-token-config');
+        return;
+      }
+
+      // shortcut-token-waiting / waiting: Scriptable token exchange may have
+      // completed – check whether the token is now active.
+      const capturedStep = onboardingStep;
+      setOnboardingNotice('Checking setup…');
+      setStatusAnnouncement('Checking setup…');
+      void refreshStatus()
+        .then((latest) => {
+          if (cancelled) return;
+          if (latest?.hasActiveToken) {
+            setOnboardingNotice('Widget token installed in Scriptable.');
+            if (capturedStep === 'shortcut-token-waiting') {
+              storeOnboardingStep('shortcut-success');
+              setStatusAnnouncement('Fast setup complete.');
+            } else {
+              storeOnboardingStep('idle');
+            }
+          } else {
+            setTokenConfigurationFailureState('Token configuration could not be confirmed yet. Please try again.');
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setTokenConfigurationFailureState('Network error checking token status. Please try again.');
+        });
+    }
+
+    // pageshow fires when a page is restored from the bfcache (persisted: true).
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted) handleVisible();
+    }
+
+    document.addEventListener('visibilitychange', handleVisible);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [
+    onboardingStep,
+    clearFastSetupRecoveryState,
+    clearShortcutTimers,
+    refreshStatus,
+    setTokenConfigurationFailureState,
+    storeOnboardingStep
+  ]);
+
   useEffect(() => {
     if (!isIos || !isStandalone) return;
     if (setupMode !== 'fast') return;
