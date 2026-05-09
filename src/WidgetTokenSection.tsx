@@ -298,6 +298,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     clearLocalStorage(ONBOARDING_PHASE_STORAGE_KEY);
     clearLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
     clearLocalStorage(SHORTCUT_PENDING_STATE_KEY);
+    setShortcutOnboardingSessionId(null);
   }, []);
 
   const markAwaitingReturnRecoveryState = useCallback((onboardingSessionId: string) => {
@@ -556,18 +557,17 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
 
   const ensureShortcutPayload = useCallback(async (forceRefresh = false): Promise<{ payload: string; onboardingSessionId: string }> => {
     const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS;
-    if (!forceRefresh && isPayloadFresh) {
-      if (!shortcutOnboardingSessionId) {
-        // Cached payload without a correlated onboarding id is incomplete;
-        // clear cache and fall through to fetch a fresh onboarding session.
-        setShortcutPayload(null);
-        setShortcutPayloadFetchedAt(null);
-      } else {
-        return {
-          payload: shortcutPayload,
-          onboardingSessionId: shortcutOnboardingSessionId
-        };
-      }
+    if (!forceRefresh && isPayloadFresh && shortcutPayload && shortcutOnboardingSessionId) {
+      return {
+        payload: shortcutPayload,
+        onboardingSessionId: shortcutOnboardingSessionId
+      };
+    }
+    if (!forceRefresh && isPayloadFresh && shortcutPayload && !shortcutOnboardingSessionId) {
+      // Cached payload without a correlated onboarding id is incomplete;
+      // clear cache before requesting a fresh onboarding session below.
+      setShortcutPayload(null);
+      setShortcutPayloadFetchedAt(null);
     }
     setShortcutPreparing(true);
     try {
