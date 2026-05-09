@@ -496,14 +496,16 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   //   • shortcut-token-waiting /  → poll token status; advance on success
   //     waiting (manual)
   useEffect(() => {
-    const isWaitingForShortcut = onboardingStep === 'shortcut-waiting';
-    const isWaitingForToken = onboardingStep === 'shortcut-token-waiting' || onboardingStep === 'waiting';
-    if (!isWaitingForShortcut && !isWaitingForToken) return;
+    if (
+      onboardingStep !== 'shortcut-waiting'
+      && onboardingStep !== 'shortcut-token-waiting'
+      && onboardingStep !== 'waiting'
+    ) return;
 
     function handleVisible() {
       if (document.visibilityState !== 'visible') return;
 
-      if (isWaitingForShortcut) {
+      if (onboardingStep === 'shortcut-waiting') {
         // Shortcut completed (or user returned before it did). Assume scripts
         // are installed and proceed to token configuration.
         clearShortcutTimers();
@@ -518,7 +520,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
         return;
       }
 
-      // Waiting for Scriptable token exchange – check if the token is now active.
+      // shortcut-token-waiting / waiting: Scriptable token exchange may have
+      // completed – check whether the token is now active.
       setOnboardingNotice('Checking setup…');
       setStatusAnnouncement('Checking setup…');
       void refreshStatus()
@@ -540,6 +543,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
         });
     }
 
+    // pageshow fires when a page is restored from the bfcache (persisted: true).
     function handlePageShow(event: PageTransitionEvent) {
       if (event.persisted) handleVisible();
     }
