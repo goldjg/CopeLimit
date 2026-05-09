@@ -184,7 +184,13 @@ function createOnboardingSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `onb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const randomHex = Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `onb_${randomHex}`;
+  }
+  return `onb_${Date.now()}`;
 }
 
 function readPendingShortcutState(): PendingShortcutState | null {
@@ -394,8 +400,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     const savedOrigin = readLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
     const pendingState = readPendingShortcutState();
     const launchedAtRaw = readSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
-    const launchedAtFromSession = launchedAtRaw ? Number(launchedAtRaw) : NaN;
-    const launchedAt = Number.isFinite(launchedAtFromSession) ? launchedAtFromSession : pendingState?.launchedAt ?? NaN;
+    const sessionLaunchedAt = launchedAtRaw ? Number(launchedAtRaw) : NaN;
+    const launchedAt = Number.isFinite(sessionLaunchedAt) ? sessionLaunchedAt : pendingState?.launchedAt ?? NaN;
     if (savedPhase !== 'AWAITING_RETURN' || Number.isNaN(launchedAt)) return;
     const expectedOrigin = pendingState?.origin ?? savedOrigin;
     if (expectedOrigin && expectedOrigin !== window.location.origin) {
