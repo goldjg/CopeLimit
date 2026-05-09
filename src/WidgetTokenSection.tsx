@@ -190,7 +190,7 @@ function createOnboardingSessionId(): string {
     const randomHex = Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
     return `onb_${randomHex}`;
   }
-  throw new Error('Secure random generator unavailable');
+  throw new Error('Secure random generator unavailable. Update to a browser that supports the Web Crypto API and try again.');
 }
 
 function readPendingShortcutState(): PendingShortcutState | null {
@@ -557,12 +557,16 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const ensureShortcutPayload = useCallback(async (forceRefresh = false): Promise<{ payload: string; onboardingSessionId: string }> => {
     const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS;
     if (!forceRefresh && isPayloadFresh) {
-      return {
-        payload: shortcutPayload,
-        onboardingSessionId: shortcutOnboardingSessionId ?? createOnboardingSessionId()
-      };
+      if (!shortcutOnboardingSessionId) {
+        setShortcutPayload(null);
+        setShortcutPayloadFetchedAt(null);
+      } else {
+        return {
+          payload: shortcutPayload,
+          onboardingSessionId: shortcutOnboardingSessionId
+        };
+      }
     }
-
     setShortcutPreparing(true);
     try {
       const session = await requestOnboardingSession();
@@ -588,6 +592,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       setShortcutPayload(null);
       setShortcutOnboardingSessionId(null);
       setShortcutPayloadFetchedAt(null);
+      clearLocalStorage(SHORTCUT_PENDING_STATE_KEY);
       setShortcutError('session_failed', err instanceof Error ? err.message : null);
     });
   }, [ensureShortcutPayload, onboardingStep, setShortcutError]);
