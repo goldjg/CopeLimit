@@ -9,18 +9,20 @@
  * CopeLimit supports two modes for setting up the Scriptable iOS widget:
  *
  * ### Fast Setup (recommended, iOS + Standalone PWA only)
- * 1. PWA calls `POST /api/onboarding/session` to obtain a bootstrap token.
- * 2. The bootstrap token is serialised into a JSON payload and written to the
+ * 1. The PWA serialises script URLs into a JSON payload and writes it to the
  *    clipboard.
- * 3. The `CopeLimitInstaller` iOS Shortcut is launched via the
+ * 2. The `CopeLimitInstaller` iOS Shortcut is launched via the
  *    `shortcuts://run-shortcut?name=CopeLimitInstaller&input=Clipboard` URL.
- * 4. The Shortcut reads the clipboard, runs `CopeLimitInstall.js` in
- *    Scriptable, which calls `POST /api/onboarding/exchange` to obtain a
- *    long-lived widget token and stores it in the iOS Keychain.
- * 5. Scriptable/Shortcuts redirects back to the PWA callback URL
- *    (`/?shortcut=complete`).
- * 6. The PWA verifies `GET /api/onboarding/status?sessionId=...` for the
- *    specific onboarding session to confirm setup completion.
+ * 3. The Shortcut reads the clipboard, installs/updates `CopeLimit` and
+ *    `CopeLimitInstall` scripts in Scriptable, then returns to the PWA.
+ * 4. The PWA prompts the user to explicitly run `CopeLimitInstall.js`.
+ * 5. On CTA tap, the PWA calls `POST /api/onboarding/session` and launches:
+ *    `scriptable:///run?scriptName=CopeLimitInstall&bt=<token>`.
+ * 6. `CopeLimitInstall.js` exchanges the bootstrap token and stores the
+ *    widget token in the iOS Keychain.
+ * 7. Scriptable redirects back to the PWA callback URL
+ *    (`/?onboarding=complete` by default).
+ * 8. The PWA verifies token readiness via `GET /api/widget-token`.
  *
  * ### Manual Setup (fallback)
  * The user copies each script source (widget + installer) from the PWA to
@@ -50,12 +52,8 @@ export type OnboardingCallback = {
 export type ShortcutPayloadInput = {
   /** The PWA's origin (e.g. `https://copelimit.netlify.app`). */
   origin: string;
-  /** The single-use bootstrap token from `POST /api/onboarding/session`. */
-  bootstrapToken: string;
   /** URL the Shortcut should redirect to on completion (defaults to `/?shortcut=complete`). */
   callbackPath?: string;
-  /** Optional unique onboarding session identifier for diagnostics/state correlation. */
-  onboardingSessionId?: string;
 };
 
 /**
@@ -85,6 +83,9 @@ export type FastSetupProgress = {
  * - `shortcut-ready`          – Shortcut installed; payload being prepared
  * - `shortcut-launching`      – About to open the Shortcuts app
  * - `shortcut-waiting`        – Waiting for the Shortcut to complete and return
+ * - `shortcut-awaiting-token-config` – Scripts installed/assumed; waiting for token CTA
+ * - `shortcut-token-requesting` – Requesting a fresh bootstrap token for Scriptable CTA
+ * - `shortcut-token-waiting`  – Waiting for Scriptable token configuration return
  * - `shortcut-success`        – Shortcut returned and token was confirmed
  * - `shortcut-error`          – Shortcut flow failed
  */
@@ -98,6 +99,9 @@ export type OnboardingStep =
   | 'shortcut-ready'
   | 'shortcut-launching'
   | 'shortcut-waiting'
+  | 'shortcut-awaiting-token-config'
+  | 'shortcut-token-requesting'
+  | 'shortcut-token-waiting'
   | 'shortcut-success'
   | 'shortcut-error';
 
@@ -111,12 +115,18 @@ export type OnboardingPhase =
   | 'SHORTCUT_READY'
   | 'SHORTCUT_LAUNCHED'
   | 'AWAITING_RETURN'
+  | 'AWAITING_TOKEN_CONFIGURATION'
   | 'VERIFYING_SETUP'
   | 'SETUP_PARTIAL'
   | 'SETUP_COMPLETE'
   | 'SETUP_FAILED';
 
 const DEFAULT_CALLBACK_PATH = '/?shortcut=complete';
+const POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS: readonly OnboardingStep[] = [
+  'shortcut-awaiting-token-config',
+  'shortcut-token-requesting',
+  'shortcut-token-waiting'
+];
 
 /**
  * Returns `true` when the provided navigator-like object matches known iOS
@@ -148,24 +158,17 @@ function normaliseOrigin(origin: string): string {
  * @param input - {@link ShortcutPayloadInput} with origin and bootstrap token.
  * @returns A JSON string safe to write to the system clipboard.
  */
-export function buildShortcutPayload({ origin, bootstrapToken, callbackPath = DEFAULT_CALLBACK_PATH, onboardingSessionId }: ShortcutPayloadInput): string {
+export function buildShortcutPayload({ origin, callbackPath = DEFAULT_CALLBACK_PATH }: ShortcutPayloadInput): string {
   const safeOrigin = normaliseOrigin(origin);
   const payload: {
     widgetUrl: string;
     installerUrl: string;
     callbackUrl: string;
-    bootstrapToken: string;
-    onboardingSessionId?: string;
   } = {
     widgetUrl: `${safeOrigin}/scriptable/CopeLimitWidget.js`,
     installerUrl: `${safeOrigin}/scriptable/CopeLimitInstall.js`,
-    callbackUrl: `${safeOrigin}${callbackPath}`,
-    bootstrapToken
+    callbackUrl: `${safeOrigin}${callbackPath}`
   };
-
-  if (typeof onboardingSessionId === 'string' && onboardingSessionId.length > 0) {
-    payload.onboardingSessionId = onboardingSessionId;
-  }
 
   return JSON.stringify(payload);
 }
@@ -239,6 +242,9 @@ export function deriveOnboardingPhase(
   if (step === 'shortcut-ready') return 'SHORTCUT_READY';
   if (step === 'shortcut-launching') return 'SHORTCUT_LAUNCHED';
   if (step === 'shortcut-waiting') return 'AWAITING_RETURN';
+  if (POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS.includes(step)) {
+    return 'AWAITING_TOKEN_CONFIGURATION';
+  }
   if (step === 'shortcut-success') return 'SETUP_COMPLETE';
   if (step === 'shortcut-error') return hasActiveToken ? 'SETUP_PARTIAL' : 'SETUP_FAILED';
   return 'IDLE';
@@ -258,10 +264,14 @@ export function getFastSetupProgress(
   shortcutInstalled: boolean,
   hasActiveToken: boolean
 ): FastSetupProgress {
+  const postShortcutStates: readonly OnboardingStep[] = [...POST_SHORTCUT_TOKEN_CONFIGURATION_STEPS, 'shortcut-success'];
   const hasReachedShortcutFlow = shortcutInstalled || [
     'shortcut-ready',
     'shortcut-launching',
     'shortcut-waiting',
+    'shortcut-awaiting-token-config',
+    'shortcut-token-requesting',
+    'shortcut-token-waiting',
     'shortcut-success',
     'shortcut-error'
   ].includes(onboardingStep);
@@ -272,7 +282,7 @@ export function getFastSetupProgress(
 
   return {
     shortcutInstalled: hasReachedShortcutFlow,
-    scriptsInstalled: verifiedSetup,
+    scriptsInstalled: verifiedSetup || postShortcutStates.includes(onboardingStep),
     tokenConfigured: verifiedSetup,
     widgetReady: completedFastSetup
   };

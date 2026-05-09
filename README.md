@@ -280,8 +280,9 @@ The iOS widget requires [Scriptable](https://scriptable.app).
 2. Sign in with GitHub.
 3. Tap **Set Up Widget →** in the Widget Token section.
 4. Tap **Set Up Widget →** again to install the `CopeLimitInstaller` Shortcut if prompted.
-5. Follow the on-screen prompts — the Shortcut will install both scripts and your token automatically.
-6. Add a Scriptable widget to your home screen and select `CopeLimit`.
+5. Follow the on-screen prompts — the Shortcut installs/updates `CopeLimit` and `CopeLimitInstall` scripts.
+6. Back in the PWA, tap **Configure token in Scriptable** to run `CopeLimitInstall`.
+7. Add a Scriptable widget to your home screen and select `CopeLimit`.
 
 ### Manual Setup
 
