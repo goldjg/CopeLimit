@@ -502,6 +502,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       && onboardingStep !== 'waiting'
     ) return;
 
+    let cancelled = false;
+
     function handleVisible() {
       if (document.visibilityState !== 'visible') return;
 
@@ -522,13 +524,15 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
 
       // shortcut-token-waiting / waiting: Scriptable token exchange may have
       // completed – check whether the token is now active.
+      const capturedStep = onboardingStep;
       setOnboardingNotice('Checking setup…');
       setStatusAnnouncement('Checking setup…');
       void refreshStatus()
         .then((latest) => {
+          if (cancelled) return;
           if (latest?.hasActiveToken) {
             setOnboardingNotice('Widget token installed in Scriptable.');
-            if (onboardingStep === 'shortcut-token-waiting') {
+            if (capturedStep === 'shortcut-token-waiting') {
               storeOnboardingStep('shortcut-success');
               setStatusAnnouncement('Fast setup complete.');
             } else {
@@ -539,6 +543,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
           }
         })
         .catch(() => {
+          if (cancelled) return;
           setTokenConfigurationFailureState('Network error checking token status. Please try again.');
         });
     }
@@ -551,6 +556,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     document.addEventListener('visibilitychange', handleVisible);
     window.addEventListener('pageshow', handlePageShow);
     return () => {
+      cancelled = true;
       document.removeEventListener('visibilitychange', handleVisible);
       window.removeEventListener('pageshow', handlePageShow);
     };
