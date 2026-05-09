@@ -190,7 +190,7 @@ function createOnboardingSessionId(): string {
     const randomHex = Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
     return `onb_${randomHex}`;
   }
-  return `onb_${Date.now()}`;
+  throw new Error('Secure random generator unavailable');
 }
 
 function readPendingShortcutState(): PendingShortcutState | null {
