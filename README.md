@@ -242,7 +242,7 @@ Issues a 15-minute single-use bootstrap token for the iOS setup flow. Requires a
 
 **Response**
 ```json
-{ "bootstrapToken": "<token>", "expiresAt": "...", "ttlSeconds": 900 }
+{ "onboardingSessionId": "<session-id>", "bootstrapToken": "<token>", "expiresAt": "...", "ttlSeconds": 900 }
 ```
 
 #### `POST /api/onboarding/exchange`
@@ -257,6 +257,15 @@ Exchanges a bootstrap token for a long-lived widget token. Called by `CopeLimitI
 **Response**
 ```json
 { "widgetToken": "<token>", "expiresAt": "...", "ttlDays": 90, "login": "octocat" }
+```
+
+#### `GET /api/onboarding/status?sessionId=<session-id>`
+
+Returns completion status for a specific onboarding session owned by the authenticated user.
+
+**Response**
+```json
+{ "sessionId": "<session-id>", "completed": true, "completedAt": "...", "scriptableConfigured": true }
 ```
 
 ---

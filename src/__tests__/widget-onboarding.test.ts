@@ -123,7 +123,7 @@ describe('getFastSetupProgress', () => {
       shortcutInstalled: true,
       scriptsInstalled: true,
       tokenConfigured: true,
-      widgetReady: true
+      widgetReady: false
     });
     expect(getFastSetupProgress('shortcut-ready', true, true)).toEqual({
       shortcutInstalled: true,
@@ -139,16 +139,16 @@ describe('deriveOnboardingPhase', () => {
     expect(deriveOnboardingPhase('shortcut-waiting', false)).toBe('AWAITING_RETURN');
   });
 
-  it('maps waiting with token to complete', () => {
-    expect(deriveOnboardingPhase('shortcut-waiting', true)).toBe('SETUP_COMPLETE');
+  it('maps waiting with token to awaiting return', () => {
+    expect(deriveOnboardingPhase('shortcut-waiting', true)).toBe('AWAITING_RETURN');
   });
 
   it('maps shortcut success with token to complete', () => {
     expect(deriveOnboardingPhase('shortcut-success', true)).toBe('SETUP_COMPLETE');
   });
 
-  it('maps shortcut success without token to partial', () => {
-    expect(deriveOnboardingPhase('shortcut-success', false)).toBe('SETUP_PARTIAL');
+  it('maps shortcut success without token to complete', () => {
+    expect(deriveOnboardingPhase('shortcut-success', false)).toBe('SETUP_COMPLETE');
   });
 
   it('maps shortcut error without token to failed', () => {

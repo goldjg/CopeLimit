@@ -1,45 +1,14 @@
-/**
- * @file Netlify Function: `onboarding-session`
- *
- * Issues a short-lived, single-use bootstrap token that bridges the browser
- * session to the on-device Scriptable environment during iOS widget onboarding.
- *
- * ## Endpoint
- * `POST /api/onboarding/session` — requires a valid session cookie.
- *
- * ## Behaviour
- * 1. Verifies the session cookie.
- * 2. Issues an opaque bootstrap token (default TTL: 15 minutes) tied to the
- *    authenticated user's session.
- * 3. Any previous bootstrap token for the user is revoked.
- * 4. The token is embedded in the clipboard payload that the PWA hands to the
- *    iOS Shortcuts app, which in turn runs `CopeLimitInstall.js` to exchange
- *    it for a long-lived widget token.
- *
- * ## Response
- * ```json
- * {
- *   "onboardingSessionId": "<uuid>",
- *   "bootstrapToken": "<opaque-token>",
- *   "expiresAt": "2026-05-07T22:00:00.000Z",
- *   "ttlSeconds": 900
- * }
- * ```
- *
- * ## Required environment variables
- * - `SESSION_SECRET`         – Session verification
- * - `SESSION_ENCRYPTION_KEY` – (optional) Encrypted sessions
- * - `BLOB_ENCRYPTION_KEY`    – Encrypting bootstrap token records
- * - `ONBOARDING_BOOTSTRAP_TTL_SECONDS` – (optional) Override TTL; default 900
- */
 import type { Handler } from '@netlify/functions';
 import { parseCookies, verifySession } from './lib/session';
 import {
   isOnboardingStoreNotConfiguredError,
   isOnboardingStoreUnavailableError,
-  issueBootstrapToken,
-  onboardingBootstrapTtlSeconds
+  readOnboardingSessionStatus
 } from './lib/onboarding-store';
+
+function isValidSessionId(value: string | null): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_\-]{16,128}$/.test(value);
+}
 
 async function requireSession(event: Parameters<Handler>[0]) {
   const sessionSecret = process.env.SESSION_SECRET;
@@ -81,10 +50,10 @@ async function requireSession(event: Parameters<Handler>[0]) {
 export const handler: Handler = async (event) => {
   const baseHeaders = { 'content-type': 'application/json; charset=utf-8' };
 
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'GET') {
     return {
       statusCode: 405,
-      headers: { ...baseHeaders, allow: 'POST' },
+      headers: { ...baseHeaders, allow: 'GET' },
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
@@ -94,17 +63,29 @@ export const handler: Handler = async (event) => {
     return { ...auth.error, headers: baseHeaders };
   }
 
+  const sessionId = event.queryStringParameters?.sessionId ?? null;
+  if (!isValidSessionId(sessionId)) {
+    return {
+      statusCode: 400,
+      headers: baseHeaders,
+      body: JSON.stringify({ error: 'Invalid sessionId' })
+    };
+  }
+
   try {
-    const issued = await issueBootstrapToken(auth.session);
+    const status = await readOnboardingSessionStatus(sessionId, auth.session.id);
+    if (!status) {
+      return {
+        statusCode: 404,
+        headers: baseHeaders,
+        body: JSON.stringify({ error: 'Onboarding session not found' })
+      };
+    }
+
     return {
       statusCode: 200,
       headers: baseHeaders,
-      body: JSON.stringify({
-        onboardingSessionId: issued.onboardingSessionId,
-        bootstrapToken: issued.token,
-        expiresAt: issued.expiresAt,
-        ttlSeconds: onboardingBootstrapTtlSeconds()
-      })
+      body: JSON.stringify(status)
     };
   } catch (error) {
     if (isOnboardingStoreNotConfiguredError(error)) {

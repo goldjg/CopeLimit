@@ -26,6 +26,7 @@
  * All records are AES-256-GCM encrypted at rest via {@link encryptBlob}.
  */
 import { getStore } from '@netlify/blobs';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { SessionPayload } from './session';
 import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
 import { generateOpaqueWidgetToken, hashWidgetToken } from './widget-token';
@@ -40,6 +41,8 @@ export type BootstrapTokenRecord = {
   login: string;
   /** The OAuth access token used to call the Copilot API once the token is exchanged. */
   githubAccessToken: string;
+  /** Correlated onboarding session identifier for Fast Setup verification. */
+  onboardingSessionId?: string;
   /** ISO 8601 timestamp when this bootstrap token was issued. */
   createdAt: string;
   /** ISO 8601 timestamp when this bootstrap token expires (default: 15 minutes). */
@@ -53,6 +56,23 @@ type BootstrapUserIndex = {
   updatedAt: string;
 };
 
+export type OnboardingSessionRecord = {
+  sessionId: string;
+  userId: number;
+  login: string;
+  createdAt: string;
+  expiresAt: string;
+  completedAt: string | null;
+  scriptableConfigured: boolean;
+};
+
+export type OnboardingSessionStatus = {
+  sessionId: string;
+  completed: boolean;
+  completedAt: string | null;
+  scriptableConfigured: boolean;
+};
+
 const STORE_NAME = 'onboarding-sessions';
 const STORE_UNAVAILABLE_ERROR = 'Onboarding store unavailable';
 const STORE_NOT_CONFIGURED_ERROR = 'Onboarding store not configured';
@@ -64,6 +84,18 @@ function bootstrapTokenKey(tokenHash: string): string {
 
 function onboardingUserKey(userId: number): string {
   return `onboarding-user/${userId}`;
+}
+
+function onboardingSessionKey(sessionId: string): string {
+  return `session/${sessionId}`;
+}
+
+function createOnboardingSessionId(): string {
+  try {
+    return randomUUID();
+  } catch {
+    return `onb_${randomBytes(16).toString('hex')}`;
+  }
 }
 
 function getOnboardingStore() {
@@ -137,6 +169,14 @@ async function setBootstrapRecord(record: BootstrapTokenRecord): Promise<void> {
   await writeEncryptedRecord(bootstrapTokenKey(record.tokenHash), record);
 }
 
+async function setOnboardingSessionRecord(record: OnboardingSessionRecord): Promise<void> {
+  await writeEncryptedRecord(onboardingSessionKey(record.sessionId), record);
+}
+
+async function getOnboardingSessionRecord(sessionId: string): Promise<OnboardingSessionRecord | null> {
+  return readEncryptedRecord<OnboardingSessionRecord>(onboardingSessionKey(sessionId));
+}
+
 async function deleteBootstrapRecord(tokenHash: string): Promise<void> {
   const store = getOnboardingStore();
   await store.delete(bootstrapTokenKey(tokenHash));
@@ -193,12 +233,14 @@ export async function revokeBootstrapTokenForUser(userId: number): Promise<void>
  * @param session - The verified session payload of the requesting user.
  * @returns The raw bootstrap token and its expiry timestamp.
  */
-export async function issueBootstrapToken(session: SessionPayload): Promise<{ token: string; expiresAt: string }> {
+export async function issueBootstrapToken(session: SessionPayload): Promise<{ token: string; expiresAt: string; onboardingSessionId: string }> {
   const existing = await getUserIndex(session.id);
 
   const token = generateOpaqueWidgetToken();
   const tokenHash = hashWidgetToken(token);
+  const onboardingSessionId = createOnboardingSessionId();
   const now = Date.now();
+  const createdAt = new Date(now).toISOString();
   const expiresAt = new Date(now + bootstrapTtlSeconds() * 1000).toISOString();
 
   const record: BootstrapTokenRecord = {
@@ -206,23 +248,33 @@ export async function issueBootstrapToken(session: SessionPayload): Promise<{ to
     userId: session.id,
     login: session.login,
     githubAccessToken: session.accessToken,
-    createdAt: new Date(now).toISOString(),
+    onboardingSessionId,
+    createdAt,
     expiresAt
   };
 
   await setBootstrapRecord(record);
+  await setOnboardingSessionRecord({
+    sessionId: onboardingSessionId,
+    userId: session.id,
+    login: session.login,
+    createdAt,
+    expiresAt,
+    completedAt: null,
+    scriptableConfigured: false
+  });
   await setUserIndex({
     userId: session.id,
     activeTokenHash: tokenHash,
     expiresAt,
-    updatedAt: new Date(now).toISOString()
+    updatedAt: createdAt
   });
 
   if (existing?.activeTokenHash) {
     await deleteBootstrapRecord(existing.activeTokenHash);
   }
 
-  return { token, expiresAt };
+  return { token, expiresAt, onboardingSessionId };
 }
 
 /**
@@ -263,4 +315,43 @@ export async function resolveAndConsumeBootstrapToken(rawToken: string): Promise
   }
 
   return record;
+}
+
+/**
+ * Marks an onboarding session as completed after successful bootstrap token exchange.
+ */
+export async function markOnboardingSessionCompleted(
+  sessionId: string,
+  options?: { scriptableConfigured?: boolean }
+): Promise<boolean> {
+  if (!sessionId) return false;
+  const existing = await getOnboardingSessionRecord(sessionId);
+  if (!existing) return false;
+
+  const completedAt = existing.completedAt ?? new Date().toISOString();
+  await setOnboardingSessionRecord({
+    ...existing,
+    completedAt,
+    scriptableConfigured: options?.scriptableConfigured ?? existing.scriptableConfigured
+  });
+  return true;
+}
+
+/**
+ * Returns status for an onboarding session owned by a specific user.
+ */
+export async function readOnboardingSessionStatus(
+  sessionId: string,
+  userId: number
+): Promise<OnboardingSessionStatus | null> {
+  if (!sessionId) return null;
+  const record = await getOnboardingSessionRecord(sessionId);
+  if (!record || record.userId !== userId) return null;
+
+  return {
+    sessionId: record.sessionId,
+    completed: record.completedAt !== null,
+    completedAt: record.completedAt,
+    scriptableConfigured: Boolean(record.scriptableConfigured)
+  };
 }

@@ -37,6 +37,7 @@ import type { Handler } from '@netlify/functions';
 import {
   isOnboardingStoreNotConfiguredError,
   isOnboardingStoreUnavailableError,
+  markOnboardingSessionCompleted,
   resolveAndConsumeBootstrapToken
 } from './lib/onboarding-store';
 import { issueWidgetTokenForUser, isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError } from './lib/widget-store';
@@ -96,6 +97,12 @@ export const handler: Handler = async (event) => {
       login: bootstrapRecord.login,
       accessToken: bootstrapRecord.githubAccessToken
     });
+
+    if (bootstrapRecord.onboardingSessionId) {
+      await markOnboardingSessionCompleted(bootstrapRecord.onboardingSessionId, {
+        scriptableConfigured: true
+      });
+    }
 
     return {
       statusCode: 200,
