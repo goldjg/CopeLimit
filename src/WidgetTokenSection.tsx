@@ -558,6 +558,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS;
     if (!forceRefresh && isPayloadFresh) {
       if (!shortcutOnboardingSessionId) {
+        // Cached payload without a correlated onboarding id is incomplete;
+        // clear cache and fall through to fetch a fresh onboarding session.
         setShortcutPayload(null);
         setShortcutPayloadFetchedAt(null);
       } else {
