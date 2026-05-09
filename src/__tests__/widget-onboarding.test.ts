@@ -11,37 +11,33 @@ import {
 describe('buildShortcutPayload', () => {
   it('builds shortcut payload json with expected fields', () => {
     const payload = buildShortcutPayload({
-      origin: 'https://copelimit.netlify.app',
-      bootstrapToken: 'abc123token'
+      origin: 'https://copelimit.netlify.app'
     });
 
     expect(JSON.parse(payload)).toEqual({
       widgetUrl: 'https://copelimit.netlify.app/scriptable/CopeLimitWidget.js',
       installerUrl: 'https://copelimit.netlify.app/scriptable/CopeLimitInstall.js',
-      callbackUrl: 'https://copelimit.netlify.app/?shortcut=complete',
-      bootstrapToken: 'abc123token'
+      callbackUrl: 'https://copelimit.netlify.app/?shortcut=complete'
     });
   });
 
   it('normalizes trailing slash in origin', () => {
     const payload = buildShortcutPayload({
-      origin: 'https://copelimit.netlify.app/',
-      bootstrapToken: 'abc123token'
+      origin: 'https://copelimit.netlify.app/'
     });
 
     const parsed = JSON.parse(payload) as { callbackUrl: string };
     expect(parsed.callbackUrl).toBe('https://copelimit.netlify.app/?shortcut=complete');
   });
 
-  it('includes onboarding session id when provided', () => {
+  it('does not include onboarding token fields', () => {
     const payload = buildShortcutPayload({
-      origin: 'https://copelimit.netlify.app',
-      bootstrapToken: 'abc123token',
-      onboardingSessionId: 'onb_123'
+      origin: 'https://copelimit.netlify.app'
     });
 
-    const parsed = JSON.parse(payload) as { onboardingSessionId?: string };
-    expect(parsed.onboardingSessionId).toBe('onb_123');
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty('bootstrapToken');
+    expect(parsed).not.toHaveProperty('onboardingSessionId');
   });
 });
 
@@ -132,6 +128,15 @@ describe('getFastSetupProgress', () => {
       widgetReady: false
     });
   });
+
+  it('marks scripts installed after shortcut returns but before token configuration', () => {
+    expect(getFastSetupProgress('shortcut-awaiting-token-config', true, false)).toEqual({
+      shortcutInstalled: true,
+      scriptsInstalled: true,
+      tokenConfigured: false,
+      widgetReady: false
+    });
+  });
 });
 
 describe('deriveOnboardingPhase', () => {
@@ -141,6 +146,10 @@ describe('deriveOnboardingPhase', () => {
 
   it('maps waiting with token to awaiting return', () => {
     expect(deriveOnboardingPhase('shortcut-waiting', true)).toBe('AWAITING_RETURN');
+  });
+
+  it('maps post-shortcut state to awaiting token configuration', () => {
+    expect(deriveOnboardingPhase('shortcut-awaiting-token-config', false)).toBe('AWAITING_TOKEN_CONFIGURATION');
   });
 
   it('maps shortcut success with token to complete', () => {
