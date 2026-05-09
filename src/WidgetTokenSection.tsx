@@ -55,7 +55,7 @@ type OnboardingSessionResult = {
   bootstrapToken: string;
   expiresAt: string;
   ttlSeconds: number;
-  onboardingSessionId: string;
+  onboardingSessionId?: string;
 };
 
 type OnboardingStatusResult = {
@@ -597,8 +597,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     setShortcutPreparing(true);
     try {
       const session = await requestOnboardingSession();
-      if (!session.onboardingSessionId || session.onboardingSessionId.length === 0) {
-        throw new Error('Onboarding session ID missing from server response');
+      if (!session.onboardingSessionId) {
+        throw new Error('Onboarding session ID missing from server response. Please try again in a moment.');
       }
       const onboardingSessionId = session.onboardingSessionId;
       const payload = buildShortcutPayload({

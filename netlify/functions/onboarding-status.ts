@@ -7,7 +7,7 @@ import {
 } from './lib/onboarding-store';
 
 function isValidSessionId(value: string | null): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(value);
+  return typeof value === 'string' && /^[A-Za-z0-9_\-]{16,128}$/.test(value);
 }
 
 async function requireSession(event: Parameters<Handler>[0]) {

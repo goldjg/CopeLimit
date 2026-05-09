@@ -350,7 +350,7 @@ export async function readOnboardingSessionStatus(
 
   return {
     sessionId: record.sessionId,
-    completed: typeof record.completedAt === 'string' && record.completedAt.length > 0,
+    completed: record.completedAt !== null,
     completedAt: record.completedAt,
     scriptableConfigured: Boolean(record.scriptableConfigured)
   };
