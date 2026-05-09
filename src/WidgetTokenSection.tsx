@@ -55,6 +55,7 @@ type OnboardingSessionResult = {
   bootstrapToken: string;
   expiresAt: string;
   ttlSeconds: number;
+  onboardingSessionId?: string;
 };
 
 type ScriptablePasteDialog = {
@@ -66,6 +67,13 @@ type ScriptablePasteDialog = {
 
 type ShortcutErrorReason = 'session_failed' | 'clipboard_denied' | 'timeout' | 'shortcut_error' | 'network' | 'unknown';
 
+type PendingShortcutState = {
+  phase: 'AWAITING_RETURN';
+  origin: string;
+  launchedAt: number;
+  onboardingSessionId: string;
+};
+
 const SHORTCUT_INSTALL_URL = 'https://www.icloud.com/shortcuts/d4993ae3c7ee4bf4aa966d724de2856b';
 const SHORTCUT_RUN_URL = 'shortcuts://run-shortcut?name=CopeLimitInstaller&input=Clipboard';
 const STEP_STORAGE_KEY = 'copelimit-onboarding-step';
@@ -74,6 +82,7 @@ const SHORTCUT_INSTALLED_STORAGE_KEY = 'copelimit-shortcut-installed';
 const SHORTCUT_LAUNCHED_AT_KEY = 'copelimit-shortcut-launched-at';
 const ONBOARDING_PHASE_STORAGE_KEY = 'copelimit-onboarding-phase';
 const SHORTCUT_PAYLOAD_ORIGIN_KEY = 'copelimit-shortcut-origin';
+const SHORTCUT_PENDING_STATE_KEY = 'copelimit-shortcut-pending-state';
 const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES = 14;
 const BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS = BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MINUTES * 60 * 1000;
 const SHORTCUT_WAIT_TIMEOUT_MS = 90 * 1000;
@@ -171,6 +180,41 @@ function readSessionStorage(key: string): string | null {
   }
 }
 
+function createOnboardingSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `onb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readPendingShortcutState(): PendingShortcutState | null {
+  const raw = readLocalStorage(SHORTCUT_PENDING_STATE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingShortcutState>;
+    if (
+      parsed.phase === 'AWAITING_RETURN'
+      && typeof parsed.origin === 'string'
+      && typeof parsed.launchedAt === 'number'
+      && Number.isFinite(parsed.launchedAt)
+      && typeof parsed.onboardingSessionId === 'string'
+      && parsed.onboardingSessionId.length > 0
+    ) {
+      return {
+        phase: parsed.phase,
+        origin: parsed.origin,
+        launchedAt: parsed.launchedAt,
+        onboardingSessionId: parsed.onboardingSessionId
+      };
+    }
+  } catch {
+    // non-fatal
+  }
+
+  return null;
+}
+
 function buildScriptablePasteDialog(scriptFriendlyName: string, targetScriptName: string): ScriptablePasteDialog {
   return {
     title: `${scriptFriendlyName} has been copied.`,
@@ -219,6 +263,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [shortcutErrorReason, setShortcutErrorReason] = useState<ShortcutErrorReason | null>(null);
   const [shortcutErrorDetails, setShortcutErrorDetails] = useState<string | null>(null);
   const [shortcutPayload, setShortcutPayload] = useState<string | null>(null);
+  const [shortcutOnboardingSessionId, setShortcutOnboardingSessionId] = useState<string | null>(null);
   const [shortcutPayloadFetchedAt, setShortcutPayloadFetchedAt] = useState<number | null>(null);
   const [shortcutPreparing, setShortcutPreparing] = useState(false);
   const [showSlowHint, setShowSlowHint] = useState(false);
@@ -246,12 +291,20 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     clearSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
     clearLocalStorage(ONBOARDING_PHASE_STORAGE_KEY);
     clearLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
+    clearLocalStorage(SHORTCUT_PENDING_STATE_KEY);
   }, []);
 
-  const markAwaitingReturnRecoveryState = useCallback(() => {
-    writeSessionStorage(SHORTCUT_LAUNCHED_AT_KEY, String(Date.now()));
+  const markAwaitingReturnRecoveryState = useCallback((onboardingSessionId: string) => {
+    const launchedAt = Date.now();
+    writeSessionStorage(SHORTCUT_LAUNCHED_AT_KEY, String(launchedAt));
     writeLocalStorage(ONBOARDING_PHASE_STORAGE_KEY, 'AWAITING_RETURN');
     writeLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY, window.location.origin);
+    writeLocalStorage(SHORTCUT_PENDING_STATE_KEY, JSON.stringify({
+      phase: 'AWAITING_RETURN',
+      origin: window.location.origin,
+      launchedAt,
+      onboardingSessionId
+    } satisfies PendingShortcutState));
   }, []);
 
   const clearShortcutTimers = useCallback(() => {
@@ -339,10 +392,13 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     }
     const savedPhase = readLocalStorage(ONBOARDING_PHASE_STORAGE_KEY);
     const savedOrigin = readLocalStorage(SHORTCUT_PAYLOAD_ORIGIN_KEY);
+    const pendingState = readPendingShortcutState();
     const launchedAtRaw = readSessionStorage(SHORTCUT_LAUNCHED_AT_KEY);
-    const launchedAt = launchedAtRaw ? Number(launchedAtRaw) : NaN;
+    const launchedAtFromSession = launchedAtRaw ? Number(launchedAtRaw) : NaN;
+    const launchedAt = Number.isFinite(launchedAtFromSession) ? launchedAtFromSession : pendingState?.launchedAt ?? NaN;
     if (savedPhase !== 'AWAITING_RETURN' || Number.isNaN(launchedAt)) return;
-    if (savedOrigin && savedOrigin !== window.location.origin) {
+    const expectedOrigin = pendingState?.origin ?? savedOrigin;
+    if (expectedOrigin && expectedOrigin !== window.location.origin) {
       clearFastSetupRecoveryState();
       return;
     }
@@ -410,13 +466,23 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   useEffect(() => {
     if (onboardingStep !== 'shortcut-waiting') return;
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
+    const verifyIfVisible = () => {
+      if (document.visibilityState === 'hidden') return;
       void verifySetupAndPromote();
     };
 
+    const handleVisibilityChange = () => verifyIfVisible();
+    const handleWindowFocus = () => verifyIfVisible();
+    const handlePageShow = () => verifyIfVisible();
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
   }, [onboardingStep, verifySetupAndPromote]);
 
   useEffect(() => {
@@ -482,32 +548,39 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     return response.json() as Promise<OnboardingSessionResult>;
   }, []);
 
-  const ensureShortcutPayload = useCallback(async (forceRefresh = false): Promise<string> => {
+  const ensureShortcutPayload = useCallback(async (forceRefresh = false): Promise<{ payload: string; onboardingSessionId: string }> => {
     const isPayloadFresh = shortcutPayload && shortcutPayloadFetchedAt && (Date.now() - shortcutPayloadFetchedAt) < BOOTSTRAP_TOKEN_CACHE_MAX_AGE_MS;
     if (!forceRefresh && isPayloadFresh) {
-      return shortcutPayload;
+      return {
+        payload: shortcutPayload,
+        onboardingSessionId: shortcutOnboardingSessionId ?? createOnboardingSessionId()
+      };
     }
 
     setShortcutPreparing(true);
     try {
       const session = await requestOnboardingSession();
+      const onboardingSessionId = session.onboardingSessionId ?? createOnboardingSessionId();
       const payload = buildShortcutPayload({
         origin: window.location.origin,
-        bootstrapToken: session.bootstrapToken
+        bootstrapToken: session.bootstrapToken,
+        onboardingSessionId
       });
       setShortcutPayload(payload);
+      setShortcutOnboardingSessionId(onboardingSessionId);
       setShortcutPayloadFetchedAt(Date.now());
-      return payload;
+      return { payload, onboardingSessionId };
     } finally {
       setShortcutPreparing(false);
     }
-  }, [requestOnboardingSession, shortcutPayload, shortcutPayloadFetchedAt]);
+  }, [requestOnboardingSession, shortcutOnboardingSessionId, shortcutPayload, shortcutPayloadFetchedAt]);
 
   useEffect(() => {
     if (onboardingStep !== 'shortcut-ready') return;
 
     ensureShortcutPayload().catch((err) => {
       setShortcutPayload(null);
+      setShortcutOnboardingSessionId(null);
       setShortcutPayloadFetchedAt(null);
       setShortcutError('session_failed', err instanceof Error ? err.message : null);
     });
@@ -646,7 +719,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     storeOnboardingStep('shortcut-launching');
 
     try {
-      const payload = await ensureShortcutPayload();
+      const { payload, onboardingSessionId } = await ensureShortcutPayload();
       try {
         await navigator.clipboard.writeText(payload);
       } catch {
@@ -655,8 +728,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
       }
 
       storeOnboardingStep('shortcut-waiting');
-      markAwaitingReturnRecoveryState();
-      setOnboardingNotice('Switch to Shortcuts to complete setup. Return here when it is done — this page will update automatically.');
+      markAwaitingReturnRecoveryState(onboardingSessionId);
+      setOnboardingNotice('Switch to Shortcuts to complete setup. Return here after Shortcuts finishes.');
       setStatusAnnouncement('Fast setup started. Waiting for Shortcut callback.');
       startShortcutWaiting();
       window.location.href = SHORTCUT_RUN_URL;
@@ -761,15 +834,15 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                     </li>
                     <li className={scriptsStateClass}>
                       <span className="stateDot" aria-hidden="true">{fastSetupProgress.scriptsInstalled ? '✓' : (scriptsStateClass === 'stateInProgress' ? '…' : '•')}</span>
-                      <span>Scripts installed (CopeLimit and CopeLimitInstall)</span>
+                      <span>Scripts installed (inferred from active token)</span>
                     </li>
                     <li className={tokenStateClass}>
                       <span className="stateDot" aria-hidden="true">{fastSetupProgress.tokenConfigured ? '✓' : (tokenStateClass === 'stateInProgress' ? '…' : '•')}</span>
-                      <span>Token configured</span>
+                      <span>Token configured (confirmed)</span>
                     </li>
                     <li className={fastSetupProgress.widgetReady ? 'stateDone' : 'statePending'}>
                       <span className="stateDot" aria-hidden="true">{fastSetupProgress.widgetReady ? '✓' : '•'}</span>
-                      <span>Widget ready</span>
+                      <span>Widget ready (final manual step)</span>
                     </li>
                   </ul>
 
@@ -820,7 +893,7 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
                       {onboardingPhase === 'VERIFYING_SETUP' ? (
                         <p className="widgetTokenMeta">Checking setup… this takes a moment.</p>
                       ) : (
-                        <p className="widgetTokenMeta">Switch to Shortcuts to complete setup. Return here when it&apos;s done — this page will update automatically.</p>
+                        <p className="widgetTokenMeta">Switch to Shortcuts to complete setup. Return here after Shortcuts finishes.</p>
                       )}
                       {showSlowHint && <p className="widgetTokenMeta">Taking too long? The Shortcut may still be running in the background.</p>}
                       <div className="widgetTokenActions">

@@ -32,6 +32,17 @@ describe('buildShortcutPayload', () => {
     const parsed = JSON.parse(payload) as { callbackUrl: string };
     expect(parsed.callbackUrl).toBe('https://copelimit.netlify.app/?shortcut=complete');
   });
+
+  it('includes onboarding session id when provided', () => {
+    const payload = buildShortcutPayload({
+      origin: 'https://copelimit.netlify.app',
+      bootstrapToken: 'abc123token',
+      onboardingSessionId: 'onb_123'
+    });
+
+    const parsed = JSON.parse(payload) as { onboardingSessionId?: string };
+    expect(parsed.onboardingSessionId).toBe('onb_123');
+  });
 });
 
 describe('parseOnboardingCallback', () => {

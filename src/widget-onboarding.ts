@@ -53,6 +53,8 @@ export type ShortcutPayloadInput = {
   bootstrapToken: string;
   /** URL the Shortcut should redirect to on completion (defaults to `/?shortcut=complete`). */
   callbackPath?: string;
+  /** Optional unique onboarding session identifier for diagnostics/state correlation. */
+  onboardingSessionId?: string;
 };
 
 /**
@@ -145,14 +147,26 @@ function normaliseOrigin(origin: string): string {
  * @param input - {@link ShortcutPayloadInput} with origin and bootstrap token.
  * @returns A JSON string safe to write to the system clipboard.
  */
-export function buildShortcutPayload({ origin, bootstrapToken, callbackPath = DEFAULT_CALLBACK_PATH }: ShortcutPayloadInput): string {
+export function buildShortcutPayload({ origin, bootstrapToken, callbackPath = DEFAULT_CALLBACK_PATH, onboardingSessionId }: ShortcutPayloadInput): string {
   const safeOrigin = normaliseOrigin(origin);
-  return JSON.stringify({
+  const payload: {
+    widgetUrl: string;
+    installerUrl: string;
+    callbackUrl: string;
+    bootstrapToken: string;
+    onboardingSessionId?: string;
+  } = {
     widgetUrl: `${safeOrigin}/scriptable/CopeLimitWidget.js`,
     installerUrl: `${safeOrigin}/scriptable/CopeLimitInstall.js`,
     callbackUrl: `${safeOrigin}${callbackPath}`,
     bootstrapToken
-  });
+  };
+
+  if (typeof onboardingSessionId === 'string' && onboardingSessionId.length > 0) {
+    payload.onboardingSessionId = onboardingSessionId;
+  }
+
+  return JSON.stringify(payload);
 }
 
 /**
