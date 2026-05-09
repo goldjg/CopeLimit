@@ -50,6 +50,11 @@
   to = "/.netlify/functions/onboarding-exchange"
   status = 200
 
+[[redirects]]
+  from = "/api/onboarding/status"
+  to = "/.netlify/functions/onboarding-status"
+  status = 200
+
 [[headers]]
   for = "/sw.js"
   [headers.values]

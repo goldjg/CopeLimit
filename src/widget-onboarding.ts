@@ -19,7 +19,8 @@
  *    long-lived widget token and stores it in the iOS Keychain.
  * 5. Scriptable/Shortcuts redirects back to the PWA callback URL
  *    (`/?shortcut=complete`).
- * 6. The PWA polls `GET /api/widget-token` to confirm the token is active.
+ * 6. The PWA verifies `GET /api/onboarding/status?sessionId=...` for the
+ *    specific onboarding session to confirm setup completion.
  *
  * ### Manual Setup (fallback)
  * The user copies each script source (widget + installer) from the PWA to
@@ -237,8 +238,8 @@ export function deriveOnboardingPhase(
   if (step === 'shortcut-prompt-install') return 'SHORTCUT_INSTALL_REQUIRED';
   if (step === 'shortcut-ready') return 'SHORTCUT_READY';
   if (step === 'shortcut-launching') return 'SHORTCUT_LAUNCHED';
-  if (step === 'shortcut-waiting') return hasActiveToken ? 'SETUP_COMPLETE' : 'AWAITING_RETURN';
-  if (step === 'shortcut-success') return hasActiveToken ? 'SETUP_COMPLETE' : 'SETUP_PARTIAL';
+  if (step === 'shortcut-waiting') return 'AWAITING_RETURN';
+  if (step === 'shortcut-success') return 'SETUP_COMPLETE';
   if (step === 'shortcut-error') return hasActiveToken ? 'SETUP_PARTIAL' : 'SETUP_FAILED';
   return 'IDLE';
 }
