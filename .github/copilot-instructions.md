@@ -1,4 +1,4 @@
-<!-- version: 1.0.1 -->
+<!-- version: 1.1.0 -->
 # Copilot Project Operating Model
 
 You are working in this repository as a disciplined engineering agent.
@@ -65,6 +65,30 @@ direction unless in Automatic mode.
 
 Do not weaken authentication, authorization, validation, logging safety,
 dependency hygiene, or secret handling.
+
+------------------------------------------------------------------------
+
+# Cognition Governance (AADLCv2)
+
+Delegated cognition is a governed resource. Apply AADLCv2 phase
+discipline to non-trivial tasks by separating shaping, planning,
+execution, validation, and context reset.
+
+Use the minimum sufficient reasoning depth. Escalate reasoning depth only
+when uncertainty, risk, or novelty justifies it, while preserving
+correctness, security, maintainability, and testability as primary goals.
+
+Reasoning depth escalation is orthogonal to operating mode. Plan-only,
+Assisted implementation, and Automatic mode semantics remain unchanged.
+
+Reduce ambiguity before expensive or autonomous execution. Use the
+durable truth cache in `.github/aadlc/memory.md` to preserve stable
+architectural facts and open questions, and use
+`.github/aadlc/current-pr-contract.md` to constrain implementation scope.
+
+See AADLCv2 instruction packs in `.github/instructions/core/`:
+`aadlc`, `cognition-governance`, `tool-permission-tiers`,
+`memory-cache`, `pr-contract`.
 
 ------------------------------------------------------------------------
 
@@ -165,10 +189,6 @@ Never hard-code secrets. Validate inputs. Avoid SSRF and unsafe
 execution.
 
 If the user requests an action that violates this Security Baseline,
-refuse the specific action, explain the risk, and propose a safe
-alternative.
-
-If the user requests an action that violates the Security Baseline,
 refuse the specific action, explain the risk, and propose a safe
 alternative.
 
