@@ -39,3 +39,23 @@ invariants:
     name: Invariant amendment governance
     rule: Agents must preserve invariants unless the user explicitly amends the invariant or opens a separate governance change.
     severity: high
+
+  - id: no-surprise-spend
+    name: No surprise-spend assumptions
+    rule: CopeLimit must not assume that additional or pay-as-you-go Copilot usage is enabled. Included credits must be clearly distinguished from additional usage where the data supports it; no additional usage should be surfaced without data evidence.
+    severity: high
+
+  - id: billing-mode-compatibility
+    name: Billing mode compatibility
+    rule: The normalisation layer must retain compatibility with legacy premium_requests fields (entitlement, remaining, reset date) while supporting ai_credits mode detection via token_based_billing markers. Neither mode must be silently dropped or assumed exclusively.
+    severity: high
+
+  - id: token-never-exposed
+    name: GitHub access token never exposed
+    rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
+    severity: critical
+
+  - id: blobs-always-encrypted
+    name: Netlify Blobs always encrypted
+    rule: All sensitive Netlify Blob records must be AES-256-GCM encrypted via BLOB_ENCRYPTION_KEY. This covers widget token records (widget-tokens store), bootstrap/onboarding token records (onboarding-sessions store), and optional provider-capture records. Records must not be written unencrypted.
+    severity: critical
