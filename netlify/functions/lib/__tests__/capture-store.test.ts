@@ -173,47 +173,47 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
     await expect(maybeCapture(VALID_INPUT)).resolves.toBeUndefined()
   })
 
-  it('logs errorCode blob_forbidden for 403 failure', async () => {
+  it('emits index_recovered warn when store.get throws 403 on read', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(
       new Error(MOCK_403_ERROR_MESSAGE)
     )
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
-      '[capture-store] Failed to persist provider capture',
-      expect.objectContaining({ errorCode: 'blob_forbidden' })
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered', storeName: 'provider-captures' })
     )
   })
 
-  it('logs operation readIndex for index read failure', async () => {
+  it('does not emit failed-to-persist warn when readIndex 403 is recovered via list', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(
       new Error(MOCK_403_ERROR_MESSAGE)
     )
     await maybeCapture(VALID_INPUT)
-    expect(warnSpy).toHaveBeenCalledWith(
-      '[capture-store] Failed to persist provider capture',
-      expect.objectContaining({ operation: 'readIndex' })
+    const failureWarn = warnSpy.mock.calls.find(
+      (call) => call[0] === '[capture-store] Failed to persist provider capture'
     )
+    expect(failureWarn).toBeUndefined()
   })
 
-  it('classifies 401 errors as blob_unavailable', async () => {
+  it('emits index_recovered warn when store.get throws 401', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(new Error('401 unauthorized'))
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
-      '[capture-store] Failed to persist provider capture',
-      expect.objectContaining({ errorCode: 'blob_unavailable' })
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered' })
     )
   })
 
-  it('classifies unauthorized errors as blob_unavailable', async () => {
+  it('emits index_recovered warn when store.get throws Unauthorized', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(new Error('Request is Unauthorized'))
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
-      '[capture-store] Failed to persist provider capture',
-      expect.objectContaining({ errorCode: 'blob_unavailable' })
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered' })
     )
   })
 
@@ -302,13 +302,13 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
     await expect(maybeCapture(VALID_INPUT)).resolves.toBeUndefined()
   })
 
-  it('classifies non-blob readIndex failure as index_read_failure', async () => {
+  it('emits index_recovered warn for generic readIndex failure', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(new Error('network timeout'))
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
-      '[capture-store] Failed to persist provider capture',
-      expect.objectContaining({ errorCode: 'index_read_failure', operation: 'readIndex' })
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered' })
     )
   })
 
@@ -501,7 +501,7 @@ describe('maybeCapture — log suppression', () => {
   it('emits warn logs for the first 5 failures then suppresses', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'info').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('403 status code'))
+    mockStore.setJSON.mockRejectedValue(new Error('403 status code'))
 
     for (let i = 0; i < 7; i++) {
       await maybeCapture(VALID_INPUT)
@@ -513,7 +513,7 @@ describe('maybeCapture — log suppression', () => {
   it('emits a single info log when suppression begins (6th failure)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('403 status code'))
+    mockStore.setJSON.mockRejectedValue(new Error('403 status code'))
 
     for (let i = 0; i < 7; i++) {
       await maybeCapture(VALID_INPUT)
@@ -529,7 +529,7 @@ describe('maybeCapture — log suppression', () => {
   it('does not emit further info logs beyond the first suppression notice', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('403 status code'))
+    mockStore.setJSON.mockRejectedValue(new Error('403 status code'))
 
     for (let i = 0; i < 10; i++) {
       await maybeCapture(VALID_INPUT)
@@ -632,11 +632,14 @@ describe('maybeCapture — CaptureStageError cause diagnostics', () => {
     vi.restoreAllMocks()
   })
 
-  it('includes causeIsErrorInstance, causeClass, causeHasErrorMessage and causeErrorSummary for a readIndex failure with safe cause message', async () => {
+  it('includes causeIsErrorInstance, causeClass, causeHasErrorMessage and causeErrorSummary for a captureWrite failure with safe cause message', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error(MOCK_403_ERROR_MESSAGE))
+    // get returns null (Level 2 normal path); first setJSON (captureWrite) throws with a safe message
+    mockStore.setJSON.mockRejectedValueOnce(new Error(MOCK_403_ERROR_MESSAGE))
     await maybeCapture(VALID_INPUT)
-    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    const loggedObj = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'captureWrite'
+    )?.[1] as Record<string, unknown>
     expect(loggedObj).toHaveProperty('errorClass', 'CaptureStageError')
     expect(loggedObj).toHaveProperty('causeIsErrorInstance', true)
     expect(loggedObj).toHaveProperty('causeClass', 'Error')
@@ -645,20 +648,26 @@ describe('maybeCapture — CaptureStageError cause diagnostics', () => {
     expect(loggedObj).not.toHaveProperty('causeMessageSuppressed')
   })
 
-  it('produces causeErrorSummary matching the underlying cause message for safe messages', async () => {
+  it('produces causeErrorSummary matching the underlying cause message for captureWrite safe messages', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('network timeout'))
+    // get returns null (Level 2); captureWrite throws with a safe message
+    mockStore.setJSON.mockRejectedValueOnce(new Error('network timeout'))
     await maybeCapture(VALID_INPUT)
-    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    const loggedObj = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'captureWrite'
+    )?.[1] as Record<string, unknown>
     expect(loggedObj).toHaveProperty('causeErrorSummary', 'network timeout')
     expect(loggedObj).not.toHaveProperty('causeMessageSuppressed')
   })
 
-  it('omits causeErrorSummary and sets causeMessageSuppressed: true for sensitive cause messages', async () => {
+  it('omits causeErrorSummary and sets causeMessageSuppressed: true for sensitive captureWrite cause messages', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('invalid auth token was rejected'))
+    // get returns null (Level 2); captureWrite throws with a sensitive message
+    mockStore.setJSON.mockRejectedValueOnce(new Error('invalid auth token was rejected'))
     await maybeCapture(VALID_INPUT)
-    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    const loggedObj = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'captureWrite'
+    )?.[1] as Record<string, unknown>
     expect(loggedObj).toHaveProperty('causeIsErrorInstance', true)
     expect(loggedObj).toHaveProperty('causeMessageSuppressed', true)
     expect(loggedObj).not.toHaveProperty('causeErrorSummary')
@@ -682,7 +691,8 @@ describe('maybeCapture — CaptureStageError cause diagnostics', () => {
   it('existing suppression behaviour is unaffected by cause diagnostics', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'info').mockImplementation(() => {})
-    mockStore.get.mockRejectedValue(new Error('network timeout'))
+    // captureWrite always fails → logCaptureFailure is called on each iteration
+    mockStore.setJSON.mockRejectedValue(new Error('403 status code'))
 
     for (let i = 0; i < 7; i++) {
       await maybeCapture(VALID_INPUT)
@@ -703,5 +713,142 @@ describe('maybeCapture — CaptureStageError cause diagnostics', () => {
     expect(loggedObj).not.toHaveProperty('causeIsErrorInstance')
     expect(loggedObj).not.toHaveProperty('causeClass')
     expect(loggedObj).not.toHaveProperty('causeErrorSummary')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// readIndex recovery cascade
+// ---------------------------------------------------------------------------
+
+describe('readIndex recovery cascade', () => {
+  let mockStore: MockStore
+  const TODAY = new Date().toISOString().slice(0, 10)
+
+  beforeEach(() => {
+    mockStore = makeMockStore()
+    vi.mocked(getStore).mockReturnValue(mockStore as ReturnType<typeof getStore>)
+    _resetCaptureStoreForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('rebuilds count from listed captures when store.get throws', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('JSON parse error'))
+    // First list call is the recovery list (date-scoped); second is cleanup (user-scoped)
+    mockStore.list.mockResolvedValueOnce({
+      blobs: [
+        { key: 'github-copilot-internal/user1/2024-01-15/1000.json' },
+        { key: 'github-copilot-internal/user1/2024-01-15/2000.json' },
+        { key: 'github-copilot-internal/user1/2024-01-15/3000.json' },
+        { key: 'github-copilot-internal/user1/2024-01-15/_index.json' },
+      ],
+    })
+    await maybeCapture(VALID_INPUT)
+    // Recovery write: index written with count: 3
+    const setJsonCalls = mockStore.setJSON.mock.calls
+    const recoveryWrite = setJsonCalls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 3
+    )
+    expect(recoveryWrite).toBeDefined()
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered', rebuiltCount: 3 })
+    )
+  })
+
+  it('treats only _index.json blob in list as zero captures', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('JSON parse error'))
+    mockStore.list.mockResolvedValueOnce({
+      blobs: [{ key: 'github-copilot-internal/user1/2024-01-15/_index.json' }],
+    })
+    await maybeCapture(VALID_INPUT)
+    const setJsonCalls = mockStore.setJSON.mock.calls
+    const recoveryWrite = setJsonCalls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 0
+    )
+    expect(recoveryWrite).toBeDefined()
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Index read failed; count rebuilt from listed captures',
+      expect.objectContaining({ event: 'index_recovered', rebuiltCount: 0 })
+    )
+  })
+
+  it('emits index_reset_fallback and resets count to 0 when both get and list throw', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('JSON parse error'))
+    mockStore.list.mockRejectedValueOnce(new Error('503 service unavailable'))
+    const result = await maybeCapture(VALID_INPUT)
+    expect(result).toBeUndefined()
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Index read and list both failed; resetting count to 0',
+      expect.objectContaining({ event: 'index_reset_fallback' })
+    )
+  })
+
+  it('proceeds with capture after index_reset_fallback (setJSON called for capture)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('JSON parse error'))
+    mockStore.list.mockRejectedValueOnce(new Error('503 service unavailable'))
+    await maybeCapture(VALID_INPUT)
+    // At least one setJSON call should be for a capture record (not _index.json)
+    const captureWrite = mockStore.setJSON.mock.calls.find(
+      (call) => typeof call[0] === 'string' && !call[0].includes('_index.json')
+    )
+    expect(captureWrite).toBeDefined()
+  })
+
+  it('respects maxPerDay cap when rebuilt count equals limit', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('JSON parse error'))
+    // Rebuild returns 3 non-index blobs; use maxPerDay: 3 to hit the cap
+    mockStore.list.mockResolvedValueOnce({
+      blobs: [
+        { key: 'github-copilot-internal/user1/2024-01-15/1000.json' },
+        { key: 'github-copilot-internal/user1/2024-01-15/2000.json' },
+        { key: 'github-copilot-internal/user1/2024-01-15/3000.json' },
+      ],
+    })
+    const cappedInput = { ...VALID_INPUT, config: { ...VALID_INPUT.config, maxPerDay: 3 } }
+    await maybeCapture(cappedInput)
+    // Only the recovery index write happens; no capture write (cap respected)
+    const captureWrite = mockStore.setJSON.mock.calls.find(
+      (call) => typeof call[0] === 'string' && !call[0].includes('_index.json')
+    )
+    expect(captureWrite).toBeUndefined()
+  })
+
+  it('resets count to 0 for NaN index.count (Level 2 extended guard)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockResolvedValue({ count: NaN, date: TODAY })
+    await maybeCapture(VALID_INPUT)
+    // New index should be written with count: 1 (reset to 0, then incremented)
+    const indexWrite = mockStore.setJSON.mock.calls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
+    )
+    expect(indexWrite).toBeDefined()
+  })
+
+  it('resets count to 0 for negative index.count (Level 2 extended guard)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockResolvedValue({ count: -1, date: TODAY })
+    await maybeCapture(VALID_INPUT)
+    const indexWrite = mockStore.setJSON.mock.calls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
+    )
+    expect(indexWrite).toBeDefined()
+  })
+
+  it('resets count to 0 for fractional index.count (Level 2 extended guard)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockResolvedValue({ count: 1.5, date: TODAY })
+    await maybeCapture(VALID_INPUT)
+    const indexWrite = mockStore.setJSON.mock.calls.find(
+      (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
+    )
+    expect(indexWrite).toBeDefined()
   })
 })
