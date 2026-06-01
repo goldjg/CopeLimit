@@ -60,7 +60,8 @@ import {
   readNumber,
   readNumberAtPath,
   readString,
-  getUnsupportedUsage
+  getUnsupportedUsage,
+  detectMode
 } from './lib/copilot';
 import { maybeCapture } from './lib/capture-store';
 import { readCaptureConfig } from './lib/capture-config';
@@ -301,7 +302,7 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
 
   return {
     usage: normaliseUsage({
-      mode: 'premium_requests',
+      mode: detectMode(body),
       used,
       quota: safeQuota,
       resetAt,

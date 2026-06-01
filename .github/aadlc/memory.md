@@ -92,7 +92,7 @@ CopeLimit-specific boundaries:
   preserve the active PR contract.
 - Repeated corrective prompting is a failure signal; reset the session
   or switch model instead of continuing prompt ping-pong.
-- `npm run lint` currently fails on TS5107 (deprecated
+- `npm run lint` fails on TS5107 (deprecated
   `moduleResolution: Node` in `tsconfig.json`). Do not treat as a
   blocking gate until resolved. `npm run build` and `npm test` both pass.
 - iOS standalone PWA never sees `?shortcut=complete` because Shortcuts
@@ -117,10 +117,11 @@ CopeLimit-specific boundaries:
   `token_based_billing: true` and/or
   `quota_snapshots.premium_interactions.token_based_billing: true` to
   signal that credit-based billing is active.
-- **Current implementation gap:** `getCopilotInternalUsage` in
-  `netlify/functions/usage.ts` currently hardcodes
-  `mode: 'premium_requests'`. It does not yet read
-  `token_based_billing` markers to select `mode: 'ai_credits'`.
+- **Current implementation:** `getCopilotInternalUsage` in
+  `netlify/functions/usage.ts` and `getWidgetCopilotInternalUsage` in
+  `netlify/functions/widget-usage.ts` now call `detectMode(body)` to
+  select `mode: 'ai_credits'` when `token_based_billing` markers are
+  detected, falling back to `mode: 'premium_requests'` otherwise.
 - **Pay-as-you-go:** Additional / pay-as-you-go usage may be disabled
   and should not be assumed enabled. CopeLimit should not surface
   assumed additional usage without data support.
@@ -130,13 +131,11 @@ CopeLimit-specific boundaries:
 
 ## Canonical validation commands
 
-- `npm run build` — TypeScript compilation + Vite bundle. Currently
-  passes.
+- `npm run build` — TypeScript compilation + Vite bundle. Last known validation state: passes.
 - `npm test` — Vitest unit tests covering `netlify/functions/lib/`
-  backend and `src/` frontend utilities. Currently passes.
-- `npm run lint` — TypeScript `--noEmit` check. Currently fails on
-  TS5107 (deprecated `moduleResolution: Node` in `tsconfig.json`). Not
-  a blocking gate until tsconfig is updated.
+  backend and `src/` frontend utilities. Last known validation state: passes.
+- `npm run lint` — TypeScript `--noEmit` check. Last known validation state: fails on TS5107
+  (deprecated `moduleResolution: Node` in `tsconfig.json`). Not a blocking gate until tsconfig is updated.
 
 ## Current operating assumptions
 
@@ -158,10 +157,6 @@ modes.
 - Are the numeric values in `premium_interactions.entitlement` and
   `remaining` now expressed in AI Credit units (e.g. integers up to
   ~7,000) rather than premium request units (e.g. integers up to ~500)?
-- Should `getCopilotInternalUsage` be updated to set
-  `mode: 'ai_credits'` when `token_based_billing` is detected? The
-  product interpretation is yes, but this is a follow-up PR, not part
-  of semantic hydration.
 - Is additional/pay-as-you-go usage data exposed anywhere in the
   `copilot_internal/user` response under the new billing model? If so,
   what is the field path and how should CopeLimit present it?
@@ -171,4 +166,4 @@ modes.
 
 ## Last updated
 
-2026-06-01 by semantic-hydration agent
+2026-06-01 by ai-credits-billing-mode-detection PR agent

@@ -10,8 +10,9 @@
 /**
  * The billing mode reported by GitHub's Copilot APIs.
  *
- * - `premium_requests` – the current quota model (counted interactions)
- * - `ai_credits`       – the upcoming credit-based model (from 1 June 2026)
+ * - `premium_requests` – the legacy quota model (counted interactions); used as fallback
+ * - `ai_credits`       – the credit-based model (active from 1 June 2026); selected when
+ *                        `token_based_billing` markers are detected in the API payload
  */
 export type Mode = 'premium_requests' | 'ai_credits';
 
@@ -156,6 +157,30 @@ export function readNumberAtPath(input: JsonObject, path: string[]): number | un
   }
 
   return undefined;
+}
+
+/**
+ * Detects the billing {@link Mode} from a raw Copilot internal API payload by
+ * checking for `token_based_billing` markers.
+ *
+ * The API may expose the marker at:
+ * - top-level `token_based_billing: true`
+ * - nested `quota_snapshots.premium_interactions.token_based_billing: true`
+ *
+ * When either marker is `true`, the mode is `ai_credits`. Otherwise the mode
+ * falls back to `premium_requests` for compatibility with legacy payloads.
+ *
+ * @param body - The raw JSON response object from `copilot_internal/user`.
+ * @returns `'ai_credits'` when token-based billing is detected; `'premium_requests'` otherwise.
+ */
+export function detectMode(body: JsonObject): Mode {
+  if (body['token_based_billing'] === true) return 'ai_credits';
+  const snapshots = body['quota_snapshots'];
+  if (isObject(snapshots)) {
+    const pi = snapshots['premium_interactions'];
+    if (isObject(pi) && pi['token_based_billing'] === true) return 'ai_credits';
+  }
+  return 'premium_requests';
 }
 
 /**
