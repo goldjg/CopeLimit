@@ -79,10 +79,12 @@ export type CaptureErrorCode =
 /** @internal Tagged error that carries an operation label through `persistCapture`. */
 class CaptureStageError extends Error {
   readonly operation: string
+  readonly causeValue: unknown
   constructor(operation: string, cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause))
     this.name = 'CaptureStageError'
     this.operation = operation
+    this.causeValue = cause
   }
 }
 
@@ -172,6 +174,47 @@ function buildErrorDiagnostics(error: unknown): {
 }
 
 /**
+ * Returns safe diagnostic metadata for the underlying cause of a {@link CaptureStageError}.
+ * Applies the same sensitive-term filter as {@link buildErrorDiagnostics}.
+ *
+ * Returned fields:
+ * - `causeIsErrorInstance`  – whether the cause was an `Error` instance.
+ * - `causeClass`            – safe constructor name of the cause.
+ * - `causeHasErrorMessage`  – whether the cause carried a non-empty message.
+ * - `causeMessageSuppressed`– `true` when the cause message was omitted due to sensitive-term filtering.
+ * - `causeErrorSummary`     – safe subset of the cause message when present and not sensitive.
+ */
+function buildCauseDiagnostics(cause: unknown): {
+  causeIsErrorInstance: boolean
+  causeClass?: string
+  causeHasErrorMessage?: boolean
+  causeMessageSuppressed?: boolean
+  causeErrorSummary?: string
+} {
+  if (!(cause instanceof Error)) {
+    return { causeIsErrorInstance: false }
+  }
+
+  const causeClass = cause.constructor?.name || 'Error'
+  const msg = cause.message
+  const causeHasErrorMessage = msg.length > 0
+
+  if (!causeHasErrorMessage) {
+    return { causeIsErrorInstance: true, causeClass, causeHasErrorMessage: false }
+  }
+
+  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) {
+    return { causeIsErrorInstance: true, causeClass, causeHasErrorMessage: true, causeMessageSuppressed: true }
+  }
+
+  const causeErrorSummary = msg.length > MAX_ERROR_SUMMARY_LENGTH
+    ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026`
+    : msg
+
+  return { causeIsErrorInstance: true, causeClass, causeHasErrorMessage: true, causeErrorSummary }
+}
+
+/**
  * Logs a classified capture failure and suppresses repeated entries.
  *
  * Safe fields logged: `provider`, `userId`, `errorCode`, `operation`,
@@ -212,6 +255,15 @@ function logCaptureFailure(
   if (hasErrorMessage !== undefined) fields.hasErrorMessage = hasErrorMessage
   if (messageSuppressed === true) fields.messageSuppressed = true
   if (errorSummary !== undefined) fields.errorSummary = errorSummary
+
+  if (error instanceof CaptureStageError) {
+    const { causeIsErrorInstance, causeClass, causeHasErrorMessage, causeMessageSuppressed, causeErrorSummary } = buildCauseDiagnostics(error.causeValue)
+    fields.causeIsErrorInstance = causeIsErrorInstance
+    if (causeClass !== undefined) fields.causeClass = causeClass
+    if (causeHasErrorMessage !== undefined) fields.causeHasErrorMessage = causeHasErrorMessage
+    if (causeMessageSuppressed === true) fields.causeMessageSuppressed = true
+    if (causeErrorSummary !== undefined) fields.causeErrorSummary = causeErrorSummary
+  }
 
   console.warn('[capture-store] Failed to persist provider capture', fields)
 }
