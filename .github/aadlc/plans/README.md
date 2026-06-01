@@ -21,6 +21,10 @@ or live credentials.
 Recommended naming:
 
 `.github/aadlc/plans/prN-short-description.md`
+`.github/aadlc/plans/prN-short-description.plan.yml`
+
+Use `.plan.yml` for machine-readable execution contracts. Keep `.md` plans for
+narrative or legacy prompt-as-code documents.
 
 ## When to use prompt-as-code
 
