@@ -1,4 +1,4 @@
-<!-- version: 1.3.0 -->
+<!-- version: 1.4.0 -->
 # Durable Architectural Truth Cache
 
 This cache stores durable project truths that should persist beyond a
@@ -242,6 +242,251 @@ later iteration without changing the conceptual model or the storage tier.
 - Do not assume enterprise/org/business usage uses the same API shape as
   personal usage.
 
+
+## Horizon 3 FinOps / AADLC attribution model
+
+### Goal
+
+Add a bounded FinOps layer that helps answer five questions without
+pretending exact attribution exists where it does not: how many AI
+Credits were consumed, which repo/branch/PR/run probably consumed them,
+which AADLC phase likely burned the most, how confident that
+attribution is, and whether the spend was bounded, intentional, and
+useful.
+
+Core principle: the agent describes activity, CopeLimit observes balance
+changes, and the FinOps layer reconciles the two with explicit
+confidence labels plus separate contamination status.
+
+### Horizon 3 glossary
+
+| Term | Definition |
+|---|---|
+| **AI Credit** | A GitHub Copilot consumption unit under token-based billing. Live CopeLimit counters are treated as observed numeric balances, not exact per-action cost records. |
+| **Usage checkpoint** | A point-in-time snapshot of remaining/used/quota/mode data captured from CopeLimit live state, GitHub UI, a future GitHub usage report import, or manual entry. |
+| **AADLC run manifest** | A compact structured summary of one governed AADLC run. It describes what the agent did; it does not claim exact billing attribution on its own. |
+| **AADLC phase event** | A labelled sub-segment inside a run (for example hydration, planning, implementation, validation, review-fix, docs). |
+| **Attribution confidence** | How strong the evidence is that a delta belongs to a run or phase: `observed`, `declared`, `inferred`, or `unknown`. |
+| **Contamination status** | Separate status indicating whether attribution is overlapped or otherwise mixed with other activity. Contamination is not a confidence label. |
+| **Observation/timing noise** | Small ambiguity introduced by checkpoint timing, UI refresh cadence, or capture lag. This should be recorded as caveat text, not presented as evidence of extra credit consumption. |
+| **Reconciliation** | Comparison between checkpoint-backed observations and future imported GitHub usage-report summaries. Conflicts should be retained and shown, not silently collapsed. |
+
+### Canonical object model
+
+Horizon 3 should treat the following as the canonical bounded FinOps
+objects:
+
+- `UsageCheckpoint` — first-class point-in-time observation.
+- `AADLCRunManifest` — agent-declared run summary.
+- `AADLCPhaseEvent` — agent-declared phase summary nested within a run.
+- `AttributionRecord` — CopeLimit-derived reconciliation object linking
+  checkpoint deltas to runs/phases with confidence plus contamination
+  status.
+
+A checkpoint can exist without a run. A run can exist without
+checkpoints. Phase costs are only `observed` when they have their own
+checkpoint backing; otherwise phase costs are `inferred` from broader
+run data.
+
+### AADLC Run Manifest v0.1 (minimum viable)
+
+```typescript
+type AADLCRunManifest = {
+  schemaVersion: '0.1';
+  manifestId: string;
+  repo: string;
+  branch?: string;
+  prNumber?: number;
+  prUrl?: string;
+  runType:
+    | 'planning'
+    | 'implementation'
+    | 'review_fix'
+    | 'investigation'
+    | 'debugging'
+    | 'documentation'
+    | 'mixed'
+    | 'unknown';
+  taskTitle: string;
+  taskIntent: string;
+  startedAt?: string;
+  endedAt?: string;
+  modelDeclared?: string;
+  beforeCheckpointId?: string;
+  afterCheckpointId?: string;
+  filesRead?: string[];
+  filesChanged?: string[];
+  commandsRun?: string[];
+  validationResults?: Array<{
+    command: string;
+    passed: boolean;
+    notes?: string;
+  }>;
+  phases?: AADLCPhaseEvent[];
+  explicitNonGoals?: string[];
+  userSteeringEvents?: string[];
+  attributionConfidenceDeclared?:
+    | 'observed'
+    | 'declared'
+    | 'inferred'
+    | 'unknown';
+  contaminationStatusDeclared?:
+    | 'clean'
+    | 'overlapped'
+    | 'external_activity'
+    | 'unknown';
+  notesCaveats?: string[];
+  emittedAt: string;
+};
+```
+
+**Required fields:** `schemaVersion`, `manifestId`, `repo`, `runType`,
+`taskTitle`, `taskIntent`, `emittedAt`.
+
+**Optional fields:** branch/PR references, timestamps, declared model,
+checkpoint IDs, file/command summaries, validation summaries,
+phase events, non-goals, user-steering notes, caveats.
+
+**Explicitly forbidden fields:** raw GitHub OAuth tokens, widget tokens,
+bootstrap tokens, Blob encryption keys, cookies/session identifiers, raw
+provider payloads, raw GitHub usage reports, file contents, command
+stdout/stderr, or any secret-bearing free text.
+
+**Emission policy:** in Horizon 3 MVP, manifests should be emitted in the
+final agent response when operating under an AADLC PR contract or when
+the user explicitly requests a run summary. They should not be required
+for every trivial interaction. Default path is output-only manifest
+summary first, manual paste/import later, and no repo-committed run
+artefact by default.
+
+### AADLC Phase Event v0.1 (minimum viable)
+
+```typescript
+type AADLCPhaseEvent = {
+  phaseId: string;
+  phaseName: string;
+  phaseType:
+    | 'hydration'
+    | 'planning'
+    | 'implementation'
+    | 'test_debug'
+    | 'review_fix'
+    | 'docs'
+    | 'validation'
+    | 'user_steering'
+    | 'pr_creation'
+    | 'unknown';
+  startedAt?: string;
+  endedAt?: string;
+  beforeCheckpointId?: string;
+  afterCheckpointId?: string;
+  actions?: string[];
+  filesRead?: string[];
+  filesChanged?: string[];
+  commandsRun?: string[];
+  attributionConfidenceDeclared?:
+    | 'observed'
+    | 'declared'
+    | 'inferred'
+    | 'unknown';
+  contaminationStatusDeclared?:
+    | 'clean'
+    | 'overlapped'
+    | 'external_activity'
+    | 'unknown';
+  notesCaveats?: string[];
+};
+```
+
+Minimum viable requirement: enough structure to distinguish planning,
+implementation, test/debug, review-fix, docs, validation, and user
+steering. Planning-only work may use a single phase event. Phase-level
+attribution is `observed` only when phase-specific checkpoints exist;
+otherwise any per-phase cost is `inferred`.
+
+### Usage checkpoint model
+
+```typescript
+type UsageCheckpoint = {
+  checkpointId: string;
+  usageContextId?: string;
+  source:
+    | 'copelimit_live'
+    | 'github_ui'
+    | 'github_report'
+    | 'manual'
+    | 'unknown';
+  remaining: number;
+  used: number;
+  quota: number;
+  mode: 'ai_credits' | 'premium_requests' | 'unknown';
+  resetAt?: string;
+  capturedAt: string;
+  confidence: 'high' | 'medium' | 'low' | 'unknown';
+  freshness: 'fresh' | 'stale' | 'unknown';
+  notes?: string;
+};
+```
+
+Checkpoint capture priority for MVP:
+
+1. Manual start/end checkpoints recorded from CopeLimit live state.
+2. Manual checkpoints entered from GitHub UI when needed.
+3. Future import/reconciliation from GitHub usage reports.
+
+Do not assume one GitHub account equals one billing context. Preserve
+optional `usageContextId` for later Horizon 2 integration.
+
+### Attribution and contamination model
+
+**Confidence labels:**
+
+- `observed` — checkpoint-backed delta for the run or phase.
+- `declared` — agent described the activity, but checkpoint support is
+  partial or user-supplied.
+- `inferred` — CopeLimit estimated a phase allocation from broader
+  checkpoint-backed run data.
+- `unknown` — insufficient evidence.
+
+**Contamination status (separate from confidence):**
+
+- `clean` — no known overlapping declared activity.
+- `overlapped` — two or more runs/phases share the same checkpoint
+  window.
+- `external_activity` — the user reports other GitHub/agent activity in
+  the same window.
+- `unknown` — overlap status is not known.
+
+A run-level delta can still be `observed` and carry contamination status
+`unknown` or `external_activity` if the checkpoints are real but the
+window is not fully isolated. Observation/timing noise should be
+recorded in notes/caveats; it does not by itself disqualify an
+attribution from being checkpoint-backed.
+
+### Horizon 3 storage and delivery boundaries
+
+- Prefer Netlify Blobs plus existing architecture for Horizon 3 MVP.
+- FinOps records are Tier 2 sanitized append-only telemetry.
+- A future mutable FinOps index blob would be Tier 3 recoverable control
+  state.
+- Do not require a new database for the MVP.
+- Do not require agents to commit run artefacts into the repository by
+  default.
+- Do not broaden sanitizer allowlists.
+- Do not store or log raw GitHub usage-report files; future import should
+  retain only sanitized summaries plus reconciliation state.
+
+### Horizon 3 explicit non-goals
+
+- No all-at-once FinOps platform.
+- No exact model-level billing attribution unless GitHub exposes it.
+- No assumption that GitHub usage-report schema is stable.
+- No multi-account implementation in Horizon 3.
+- No budget enforcement in Horizon 3 MVP.
+- No API/UI/storage implementation in this governance phase.
+- No requirement that every trivial agent interaction emits a manifest.
+
+
 ## Canonical validation commands
 
 - `npm run build` — TypeScript compilation + Vite bundle. Last known validation state: passes.
@@ -287,7 +532,15 @@ modes.
   user explicitly reconfigures the widget?
 - **Multi-context (Horizon 2):** Should evidence-capture consent be stored
   per-user (one-time) or per-capture?
+- **Horizon 3 FinOps:** Should contamination status remain a small fixed enum
+  (`clean` / `overlapped` / `external_activity` / `unknown`) in the MVP, or
+  should timing caveats become a separate structured field later?
+- **Horizon 3 FinOps:** Should future GitHub usage-report reconciliation store
+  decimal/money values separately from integer live counters rather than
+  coercing them into a single number?
+- **Horizon 3 FinOps:** Should manifest import remain manual-first until the
+  output-only summary format proves stable across agents/models?
 
 ## Last updated
 
-2026-06-01 by horizon-2-domain-model PR agent
+2026-06-01 by horizon-3-finops-docs PR agent
