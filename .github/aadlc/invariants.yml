@@ -55,7 +55,16 @@ invariants:
     rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
     severity: critical
 
-  - id: blobs-always-encrypted
-    name: Netlify Blobs always encrypted
-    rule: All sensitive Netlify Blob records must be AES-256-GCM encrypted via BLOB_ENCRYPTION_KEY. This covers widget token records (widget-tokens store), bootstrap/onboarding token records (onboarding-sessions store), and optional provider-capture records. Records must not be written unencrypted.
+  - id: blobs-encryption-by-tier
+    name: Netlify Blobs encryption by record tier
+    rule: |
+      Netlify Blob records are governed by the following tiered rules:
+
+      Tier 1 — Sensitive credential records (widget-tokens store: token/<hash>, user/<userId>; onboarding-sessions store: bt/<hash>, onboarding-user/<userId>, session/<sessionId>): MUST be AES-256-GCM encrypted at rest via BLOB_ENCRYPTION_KEY. These records contain GitHub OAuth access tokens. Application-level encryption is non-negotiable here and supplements Netlify's platform access controls.
+
+      Tier 2 — Sanitized append-only telemetry records (provider-captures store: <provider>/<userId>/<date>/<timestamp>.json): These records are sanitized by sanitizeProviderPayload before storage; no secrets are present. Application-level AES-256-GCM encryption is NOT required. Platform Blob access controls (Netlify site/token) are sufficient. These records must remain append-only within a given key; overwriting is not permitted.
+
+      Tier 3 — Mutable control blobs (provider-captures store: <provider>/<userId>/<date>/_index.json): These records hold derived, reconstructible state (daily capture counters). They are NOT encrypted. Because they are mutable and may become incompatible with the current reader after any format or storage change, ALL code reading a Tier 3 blob MUST tolerate any read failure gracefully and recover to a safe default or a rebuilt value WITHOUT blocking Tier 2 writes.
+
+      Tier 4 — Legacy plaintext migration (applies to Tier 1 stores only): Any Tier 1 record that pre-dates AES-256-GCM encryption must be migrated automatically on first read (see widget-store.ts readStoredRecord). Any future format change to a Tier 1 store must provide an equivalent migration path. Tier 2 and Tier 3 records have no migration obligation.
     severity: critical

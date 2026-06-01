@@ -68,13 +68,12 @@ const captureFailureCounts = new Map<string, number>()
  * Safe to log; never contains raw payload or credential data.
  */
 export type CaptureErrorCode =
-  | 'blob_forbidden'        // Netlify Blobs returned 403
-  | 'blob_unavailable'      // Netlify Blobs returned 401 or is otherwise inaccessible
-  | 'config_invalid'        // Environment misconfiguration detected before attempting I/O
-  | 'index_read_failure'    // readIndex threw an unclassified error
-  | 'capture_write_failure' // capture setJSON threw an unclassified error
-  | 'index_write_failure'   // index setJSON threw an unclassified error
-  | 'unknown'               // Unclassified error
+  | 'blob_forbidden'             // Netlify Blobs returned 403
+  | 'blob_unavailable'           // Netlify Blobs returned 401 or is otherwise inaccessible
+  | 'config_invalid'             // Environment misconfiguration detected before attempting I/O
+  | 'capture_write_failure'      // capture setJSON threw an unclassified error
+  | 'index_write_failure'        // index setJSON threw an unclassified error
+  | 'unknown'                    // Unclassified error
 
 /** @internal Tagged error that carries an operation label through `persistCapture`. */
 class CaptureStageError extends Error {
@@ -124,7 +123,6 @@ function classifyCaptureFailure(error: unknown): CaptureErrorCode {
   if (blobCode !== 'unknown') return blobCode
 
   if (error instanceof CaptureStageError) {
-    if (error.operation === 'readIndex') return 'index_read_failure'
     if (error.operation === 'captureWrite') return 'capture_write_failure'
     if (error.operation === 'indexWrite') return 'index_write_failure'
   }
@@ -317,18 +315,111 @@ export function buildIndexKey(provider: string, userId: number, dateUtc: string)
   return `${provider}/${userId}/${dateUtc}/_index.json`
 }
 
-async function readIndex(key: string, date: string): Promise<CaptureIndex> {
+/**
+ * Reads the daily capture index for the given key and date, recovering
+ * gracefully from any read failure.
+ *
+ * `_index.json` is a mutable Tier 3 control blob (see `invariants.yml`). It
+ * holds derived, reconstructible state (the daily capture counter) and may
+ * become incompatible with the current reader after any storage or format
+ * change. This function is therefore designed to **never throw**; it always
+ * returns a usable `CaptureIndex` via a four-level recovery cascade:
+ *
+ * - **Level 1 (normal):** `store.get` succeeds and the result is a valid
+ *   `CaptureIndex`. Returned as-is.
+ * - **Level 2 (null/invalid):** `store.get` returns `null` or a record that
+ *   fails the shape guard. Returns `{ count: 0, date }`.
+ * - **Level 3 (read throws):** `store.get` throws for any reason (e.g. format
+ *   incompatibility, Netlify internal error). The count is rebuilt by listing
+ *   the date partition and counting non-index blobs. Emits `index_recovered`.
+ * - **Level 4 (read and list both throw):** Falls back to `{ count: 0, date }`
+ *   and emits `index_reset_fallback`. The counter may undercount for this day,
+ *   which is acceptable for telemetry where reliability beats exact cap precision.
+ */
+async function readIndex(
+  key: string,
+  date: string,
+  provider: string,
+  userId: number
+): Promise<CaptureIndex> {
   const store = getCaptureStore()
-  const index = await store.get(key, { type: 'json' }) as CaptureIndex | null
 
-  if (!index || typeof index.count !== 'number' || index.date !== date) {
-    return { count: 0, date }
+  // Level 1 & 2: normal read path
+  let readError: unknown = null
+  try {
+    const index = await store.get(key, { type: 'json' }) as CaptureIndex | null
+
+    if (
+      !index ||
+      typeof index.count !== 'number' ||
+      !Number.isFinite(index.count) ||
+      !Number.isInteger(index.count) ||
+      index.count < 0 ||
+      index.date !== date
+    ) {
+      return { count: 0, date }
+    }
+
+    return index
+  } catch (err) {
+    readError = err
   }
 
-  return index
+  // Level 3: read threw — rebuild count from listed captures
+  const datePrefix = `${provider}/${userId}/${date}/`
+  try {
+    const result = await store.list({ prefix: datePrefix })
+    // Each date prefix contains only capture blobs (<timestamp>.json) and the
+    // single control blob (_index.json). Filter the control blob to count captures.
+    const rebuiltCount = result.blobs.filter(b => !b.key.endsWith('_index.json')).length
+
+    const recovered: CaptureIndex = { count: rebuiltCount, date }
+
+    // Best-effort write of the recovered index; failure here is non-blocking
+    try {
+      await store.setJSON(key, recovered)
+    } catch (writeErr) {
+      console.warn('[capture-store] Failed to write recovered index', {
+        event: 'index_recovery_write_failure',
+        provider,
+        userId,
+        date,
+        storeName: CAPTURE_STORE,
+        ...buildErrorDiagnostics(writeErr)
+      })
+    }
+
+    console.warn('[capture-store] Index read failed; count rebuilt from listed captures', {
+      event: 'index_recovered',
+      provider,
+      userId,
+      date,
+      storeName: CAPTURE_STORE,
+      rebuiltCount,
+      ...buildErrorDiagnostics(readError)
+    })
+
+    return recovered
+  } catch (listErr) {
+    // Level 4: both read and list failed — safe reset
+    console.warn('[capture-store] Index read and list both failed; resetting count to 0', {
+      event: 'index_reset_fallback',
+      provider,
+      userId,
+      date,
+      storeName: CAPTURE_STORE,
+      ...buildErrorDiagnostics(readError)
+    })
+
+    return { count: 0, date }
+  }
 }
 
 async function writeIndex(key: string, index: CaptureIndex): Promise<void> {
+  // The counter is best-effort; two concurrent invocations may both read the
+  // same count and both write count + 1. This is an accepted limitation
+  // (Netlify Blobs has no atomic CAS). For telemetry, reliability beats exact
+  // cap precision.
   const store = getCaptureStore()
   await store.setJSON(key, index)
 }
@@ -438,12 +529,8 @@ async function persistCapture(capture: ProviderCapture, config: CaptureConfig): 
   const dateUtc = buildDateFromIso(capture.capturedAt)
   const indexKey = buildIndexKey(capture.provider, capture.userId, dateUtc)
 
-  let index: CaptureIndex
-  try {
-    index = await readIndex(indexKey, dateUtc)
-  } catch (cause) {
-    throw new CaptureStageError('readIndex', cause)
-  }
+  // readIndex never throws — it recovers gracefully via the Level 3/4 cascade
+  const index = await readIndex(indexKey, dateUtc, capture.provider, capture.userId)
 
   if (index.count >= config.maxPerDay) {
     return
