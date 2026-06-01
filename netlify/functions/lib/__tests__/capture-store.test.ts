@@ -579,9 +579,9 @@ describe('maybeCapture — env pre-flight', () => {
     vi.restoreAllMocks()
   })
 
-  it('logs config_invalid and skips Blob I/O when NETLIFY_AUTH_TOKEN is empty string', async () => {
+  it('logs config_invalid and skips Blob I/O when BLOBS_USE_EXPLICIT_CREDENTIALS=true and NETLIFY_AUTH_TOKEN is empty string', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    process.env = { ...originalEnv, NETLIFY_SITE_ID: 'site123', NETLIFY_AUTH_TOKEN: '' }
+    process.env = { ...originalEnv, BLOBS_USE_EXPLICIT_CREDENTIALS: 'true', NETLIFY_SITE_ID: 'site123', NETLIFY_AUTH_TOKEN: '' }
 
     await maybeCapture(VALID_INPUT)
 

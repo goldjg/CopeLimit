@@ -25,7 +25,7 @@
  *
  * All records are AES-256-GCM encrypted at rest via {@link encryptBlob}.
  */
-import { getStore } from '@netlify/blobs';
+import { getBlobStore } from './blob-store';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { SessionPayload } from './session';
 import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
@@ -100,14 +100,7 @@ function createOnboardingSessionId(): string {
 
 function getOnboardingStore() {
   try {
-    const siteID = process.env.NETLIFY_SITE_ID;
-    const token = process.env.NETLIFY_AUTH_TOKEN;
-
-    if (siteID && token) {
-      return getStore({ name: STORE_NAME, siteID, token });
-    }
-
-    return getStore({ name: STORE_NAME });
+    return getBlobStore(STORE_NAME);
   } catch (error) {
     throw new Error(STORE_UNAVAILABLE_ERROR, { cause: error });
   }

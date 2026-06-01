@@ -23,7 +23,7 @@
  * 3. `DELETE /api/widget-token` → {@link revokeWidgetTokenForUser}
  *    - Removes both the token record and the user index entry.
  */
-import { getStore } from '@netlify/blobs';
+import { getBlobStore } from './blob-store';
 import { decryptBlob, encryptBlob, readBlobEncryptionKey } from './blob-crypto';
 import type { SessionPayload } from './session';
 import { generateOpaqueWidgetToken, hashWidgetToken, widgetTokenTtlSeconds } from './widget-token';
@@ -82,14 +82,7 @@ function userKey(userId: number): string {
 
 function getWidgetStore() {
   try {
-    const siteID = process.env.NETLIFY_SITE_ID;
-    const token = process.env.NETLIFY_AUTH_TOKEN;
-
-    if (siteID && token) {
-      return getStore({ name: STORE_NAME, siteID, token });
-    }
-
-    return getStore({ name: STORE_NAME });
+    return getBlobStore(STORE_NAME);
   } catch (error) {
     throw new Error(STORE_UNAVAILABLE_ERROR, { cause: error });
   }
