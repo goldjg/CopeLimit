@@ -614,3 +614,94 @@ describe('maybeCapture — env pre-flight', () => {
     expect(mockStore.get).toHaveBeenCalled()
   })
 })
+
+// ---------------------------------------------------------------------------
+// CaptureStageError cause diagnostics
+// ---------------------------------------------------------------------------
+
+describe('maybeCapture — CaptureStageError cause diagnostics', () => {
+  let mockStore: MockStore
+
+  beforeEach(() => {
+    mockStore = makeMockStore()
+    vi.mocked(getStore).mockReturnValue(mockStore as ReturnType<typeof getStore>)
+    _resetCaptureStoreForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('includes causeIsErrorInstance, causeClass, causeHasErrorMessage and causeErrorSummary for a readIndex failure with safe cause message', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error(MOCK_403_ERROR_MESSAGE))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('errorClass', 'CaptureStageError')
+    expect(loggedObj).toHaveProperty('causeIsErrorInstance', true)
+    expect(loggedObj).toHaveProperty('causeClass', 'Error')
+    expect(loggedObj).toHaveProperty('causeHasErrorMessage', true)
+    expect(loggedObj).toHaveProperty('causeErrorSummary')
+    expect(loggedObj).not.toHaveProperty('causeMessageSuppressed')
+  })
+
+  it('produces causeErrorSummary matching the underlying cause message for safe messages', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('causeErrorSummary', 'network timeout')
+    expect(loggedObj).not.toHaveProperty('causeMessageSuppressed')
+  })
+
+  it('omits causeErrorSummary and sets causeMessageSuppressed: true for sensitive cause messages', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('invalid auth token was rejected'))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('causeIsErrorInstance', true)
+    expect(loggedObj).toHaveProperty('causeMessageSuppressed', true)
+    expect(loggedObj).not.toHaveProperty('causeErrorSummary')
+  })
+
+  it('sets causeIsErrorInstance: false and does not serialize non-Error causes', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // captureWrite stage: get succeeds, first setJSON throws a non-Error
+    mockStore.setJSON.mockRejectedValueOnce({ code: 403, detail: 'secret-key=xyz' })
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('causeIsErrorInstance', false)
+    expect(loggedObj).not.toHaveProperty('causeClass')
+    expect(loggedObj).not.toHaveProperty('causeErrorSummary')
+    // The non-Error object must not be serialized into the log output
+    const loggedStr = JSON.stringify(warnSpy.mock.calls[0])
+    expect(loggedStr).not.toContain('secret-key')
+    expect(loggedStr).not.toContain('"detail"')
+  })
+
+  it('existing suppression behaviour is unaffected by cause diagnostics', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'info').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('network timeout'))
+
+    for (let i = 0; i < 7; i++) {
+      await maybeCapture(VALID_INPUT)
+    }
+
+    // Only 5 warn logs; suppression kicks in on 6th
+    expect(warnSpy).toHaveBeenCalledTimes(5)
+  })
+
+  it('non-wrapped errors (listBlobs, deleteBlob) do not include cause fields', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.list.mockRejectedValue(new Error('503 service unavailable'))
+    await maybeCapture(VALID_INPUT)
+    const listFailureCall = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'listBlobs'
+    )
+    const loggedObj = listFailureCall?.[1] as Record<string, unknown>
+    expect(loggedObj).not.toHaveProperty('causeIsErrorInstance')
+    expect(loggedObj).not.toHaveProperty('causeClass')
+    expect(loggedObj).not.toHaveProperty('causeErrorSummary')
+  })
+})
