@@ -37,7 +37,8 @@ import {
   readNumber,
   readNumberAtPath,
   readString,
-  getUnsupportedUsage
+  getUnsupportedUsage,
+  detectMode
 } from './lib/copilot';
 import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
 
@@ -110,7 +111,7 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
     nextMonthReset();
 
   return normaliseUsage({
-    mode: 'premium_requests',
+    mode: detectMode(body),
     used,
     quota: safeQuota,
     resetAt,

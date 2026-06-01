@@ -66,6 +66,7 @@ const BASE_ALLOWED_FIELDS = [
   'mode',
   'metric',
   'kind',
+  'token_based_billing',
   'entitlement',
   'remaining',
   'used',
