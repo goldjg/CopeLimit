@@ -126,6 +126,24 @@ function classifyBlobError(error: unknown): CaptureErrorCode {
 }
 
 /**
+ * Classifies a capture persistence failure into a stable {@link CaptureErrorCode}.
+ * Extends {@link classifyBlobError} by mapping unclassified {@link CaptureStageError}
+ * instances to stage-specific fallback codes so the exported type is not misleading.
+ */
+function classifyCaptureFailure(error: unknown): CaptureErrorCode {
+  const blobCode = classifyBlobError(error)
+  if (blobCode !== 'unknown') return blobCode
+
+  if (error instanceof CaptureStageError) {
+    if (error.operation === 'readIndex') return 'index_read_failure'
+    if (error.operation === 'captureWrite') return 'capture_write_failure'
+    if (error.operation === 'indexWrite') return 'index_write_failure'
+  }
+
+  return 'unknown'
+}
+
+/**
  * Returns a safe subset of an error message for diagnostic logging.
  * Returns `undefined` when the message may contain sensitive terms.
  */
@@ -281,11 +299,7 @@ async function runLazyCleanup(provider: string, userId: number, retentionDays: n
     const result = await store.list({ prefix })
     blobs = result.blobs
   } catch (error) {
-    console.warn('[capture-store] Failed to list blobs for lazy cleanup', {
-      provider,
-      storeName: CAPTURE_STORE,
-      errorSummary: safeErrorSummary(error)
-    })
+    logCaptureFailure(provider, userId, classifyBlobError(error), 'listBlobs', error)
     return
   }
 
@@ -298,12 +312,9 @@ async function runLazyCleanup(provider: string, userId: number, retentionDays: n
     })
 
   const deleteResults = await Promise.allSettled(keysToDelete.map(async (key) => store.delete(key)))
-  for (const [index, result] of deleteResults.entries()) {
+  for (const result of deleteResults) {
     if (result.status === 'rejected') {
-      console.warn('[capture-store] Failed to delete expired capture', {
-        key: keysToDelete[index],
-        error: result.reason instanceof Error ? result.reason.message : 'Unknown error'
-      })
+      logCaptureFailure(provider, userId, classifyBlobError(result.reason), 'deleteBlob', result.reason)
     }
   }
 }
@@ -431,7 +442,7 @@ export async function maybeCapture(input: {
     await persistCapture(capture, input.config)
   } catch (error) {
     const operation = error instanceof CaptureStageError ? error.operation : 'unknown'
-    const errorCode = classifyBlobError(error)
+    const errorCode = classifyCaptureFailure(error)
     logCaptureFailure(input.provider, input.userId, errorCode, operation, error)
   }
 }

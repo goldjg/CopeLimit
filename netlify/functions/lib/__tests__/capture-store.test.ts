@@ -300,6 +300,80 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
     // store.get succeeds (readIndex returns count:0), cleanup list fails but should not propagate
     await expect(maybeCapture(VALID_INPUT)).resolves.toBeUndefined()
   })
+
+  it('classifies non-blob readIndex failure as index_read_failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Failed to persist provider capture',
+      expect.objectContaining({ errorCode: 'index_read_failure', operation: 'readIndex' })
+    )
+  })
+
+  it('classifies non-blob captureWrite failure as capture_write_failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.setJSON.mockRejectedValueOnce(new Error('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Failed to persist provider capture',
+      expect.objectContaining({ errorCode: 'capture_write_failure', operation: 'captureWrite' })
+    )
+  })
+
+  it('classifies non-blob indexWrite failure as index_write_failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.setJSON
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Failed to persist provider capture',
+      expect.objectContaining({ errorCode: 'index_write_failure', operation: 'indexWrite' })
+    )
+  })
+
+  it('logs structured fields for list failure during cleanup', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.list.mockRejectedValue(new Error('503 service unavailable'))
+    await maybeCapture(VALID_INPUT)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[capture-store] Failed to persist provider capture',
+      expect.objectContaining({
+        provider: 'github-copilot-internal',
+        userId: 43296126,
+        storeName: 'provider-captures',
+        operation: 'listBlobs'
+      })
+    )
+  })
+
+  it('logs structured fields for delete failure during cleanup without raw key', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // Seed an expired key so cleanup tries to delete it
+    const expiredKey = 'github-copilot-internal/43296126/2020-01-01/2020-01-01T00:00:00.000Z.json'
+    mockStore.list.mockResolvedValue({ blobs: [{ key: expiredKey }] })
+    mockStore.delete.mockRejectedValue(new Error('503 service unavailable'))
+    await maybeCapture(VALID_INPUT)
+    const deleteFailureCall = warnSpy.mock.calls.find(
+      (call) => {
+        const fields = call[1] as Record<string, unknown>
+        return typeof fields === 'object' && fields.operation === 'deleteBlob'
+      }
+    )
+    expect(deleteFailureCall).toBeDefined()
+    const loggedFields = deleteFailureCall![1] as Record<string, unknown>
+    expect(loggedFields).toMatchObject({
+      provider: 'github-copilot-internal',
+      userId: 43296126,
+      storeName: 'provider-captures',
+      operation: 'deleteBlob'
+    })
+    // Raw key must not appear directly in log fields
+    expect(loggedFields).not.toHaveProperty('key')
+    // Raw error message must not appear directly (only safe errorSummary allowed)
+    expect(loggedFields).not.toHaveProperty('error')
+  })
 })
 
 // ---------------------------------------------------------------------------
