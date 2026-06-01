@@ -1,4 +1,4 @@
-<!-- version: 1.2.0 -->
+<!-- version: 1.3.0 -->
 # AADLCv2 Cognition Governance Pack
 
 Defines the AADLCv2 governance model that coordinates shaping, planning, execution, validation, and context reset.
@@ -18,3 +18,9 @@ Defines the AADLCv2 governance model that coordinates shaping, planning, executi
 -   **Archive temporary root plans before merge.** A temporary `PLAN.md` is acceptable on a feature branch, but it should be removed or archived before merge.
 -   **Stop prompt ping-pong early.** If more than one corrective prompt is required to understand the PR contract, reset the session or switch models instead of continuing to patch a failing mental frame.
 -   **Validate contract, implementation, and tests together.** During validation, compare the approved contract against the implementation and tests, reject tests that encode drift, and verify exact schema and failure semantics whenever the contract specifies them.
+
+-   **Emit manifests only for governed runs.** When operating under an active AADLC PR contract — or when the user explicitly requests a run summary — emit a compact `AADLCRunManifest` JSON block in the final response. Do not require this for every trivial interaction.
+-   **Keep manifests output-first and low-churn.** In Horizon 3 MVP, prefer final-response summaries that can be pasted/imported later. Do not require repo-committed run artefacts by default.
+-   **Use checkpoint-backed language precisely.** Treat `observed` attribution as checkpoint-backed. Track overlapping or mixed activity as separate contamination status, not as a replacement confidence label.
+-   **Do not invent attribution evidence.** If checkpoint IDs, timestamps, model choice, or PR references are unknown, omit them or mark them unknown. Never fabricate exact costs or exact model-level attribution.
+-   **Keep manifest content sanitized.** Include path lists, command names, phase labels, validation summaries, explicit non-goals, and caveats. Do not include tokens, cookies, encryption keys, raw provider payloads, raw usage reports, file contents, or command output.
