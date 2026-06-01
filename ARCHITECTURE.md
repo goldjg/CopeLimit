@@ -16,9 +16,11 @@ This document describes the design decisions, data flows, and component boundari
    - [iOS widget onboarding — Fast Setup](#ios-widget-onboarding--fast-setup)
    - [iOS widget usage fetch](#ios-widget-usage-fetch)
 6. [Storage design](#storage-design)
+   - [Blob record tiers](#blob-record-tiers)
 7. [Security model](#security-model)
 8. [Provider system](#provider-system)
 9. [iOS Scriptable scripts](#ios-scriptable-scripts)
+10. [Multi-context model (Horizon 2)](#multi-context-model-horizon-2)
 
 ---
 
@@ -54,9 +56,10 @@ This document describes the design decisions, data flows, and component boundari
 │                               │                              │
 │  ┌────────────────────────────▼────────────────────────────┐  │
 │  │  Netlify Blobs                                          │  │
-│  │  widget-tokens         (AES-256-GCM encrypted)          │  │
-│  │  onboarding-sessions   (AES-256-GCM encrypted)          │  │
-│  │  provider-captures     (optional telemetry)             │  │
+│  │  widget-tokens         (Tier 1 — AES-256-GCM encrypted)    │  │
+│  │  onboarding-sessions   (Tier 1 — AES-256-GCM encrypted)    │  │
+│  │  provider-captures     (Tier 2/3 — sanitized telemetry)    │  │
+│  │  usage-contexts        (Tier 1 — planned, Horizon 2)       │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
             │
@@ -233,9 +236,21 @@ Bootstrap tokens are deleted immediately on first use (single-use guarantee) and
 
 Old captures are deleted lazily when a new capture is written for the same provider/user prefix.
 
-### Encryption
+### Blob record tiers
 
-All sensitive blob records are encrypted with AES-256-GCM:
+Blob records are classified into tiers that determine their encryption
+requirements:
+
+| Tier | Description | Examples | Encryption |
+|---|---|---|---|
+| **Tier 1** | Sensitive credential records | `widget-tokens`, `onboarding-sessions`, `usage-contexts` (planned) | AES-256-GCM required via `BLOB_ENCRYPTION_KEY`. Must not be written unencrypted. |
+| **Tier 2** | Sanitized append-only telemetry | `provider-captures/<provider>/<userId>/<date>/<ts>.json` | App-level encryption not required. Records contain only allow-listed, redacted fields. |
+| **Tier 3** | Mutable provider-capture control blobs | `provider-captures/<provider>/<userId>/<date>/_index.json` | Recoverable and non-blocking. Loss does not affect live usage display. |
+| **Tier 4** | Legacy plaintext migration | Tier 1 records written before encryption was introduced | Migrated automatically on first read. Applies to Tier 1 records only. |
+
+### Encryption (Tier 1)
+
+AES-256-GCM parameters used for all Tier 1 records:
 
 - 12-byte random IV (nonce) per record
 - 16-byte GCM authentication tag
@@ -319,3 +334,147 @@ Token installation script that:
 2. Calls `POST /api/onboarding/exchange` with the bootstrap token.
 3. Stores the returned widget token in `Keychain.set("copelimit_widget_token", widgetToken)`.
 4. Redirects back to the PWA callback URL.
+
+---
+
+## Multi-context model (Horizon 2)
+
+This section documents the domain model and planned storage layout for
+Horizon 2 multi-account / multi-context support. **No code implementing
+this model exists yet.** This section establishes the canonical
+terminology and design constraints that implementation PRs must follow.
+
+### Glossary
+
+| Term | Definition |
+|---|---|
+| **GitHub account** | A GitHub principal identified by a unique `login` and numeric `userId`. May be personal, an enterprise-managed user (EMU), or a service account. |
+| **Authenticated identity** | The GitHub account that completed the OAuth flow in the current browser session. One per browser session; carries one `accessToken`. |
+| **Copilot billing entity** | The GitHub entity (personal account, org, or enterprise) that holds the Copilot subscription and quota. A single authenticated identity may relate to more than one billing entity. |
+| **Usage context** | The primary unit CopeLimit stores and displays. A pairing of (a) a resolvable credential path and (b) a billing entity. Carries `mode`, last-known usage snapshot, account-type hint, auth status, and capture support status. One authenticated identity may have one or more usage contexts. |
+| **Widget-selected context** | The single `UsageContext` the Scriptable widget is configured to poll. No aggregation in Horizon 2. |
+| **Context type** | An enumerated hint: `personal`, `org`, `enterprise`, or `unknown`. Used for display and evidence routing; not used to gate logic. |
+| **Auth status** | Polability state of a context: `active`, `expired`, `auth_unsupported`, or `unknown`. |
+| **Capture support status** | Whether provider-response capture is available for a context: `supported`, `unsupported`, `opted_out`, or `pending_evidence`. |
+
+### Domain model
+
+#### UsageContext — display/billing-context abstraction
+
+`UsageContext` is the display and billing-context abstraction. It carries
+**no credential material**:
+
+```typescript
+type ContextType = 'personal' | 'org' | 'enterprise' | 'unknown';
+type AuthStatus = 'active' | 'expired' | 'auth_unsupported' | 'unknown';
+type CaptureSupportStatus = 'supported' | 'unsupported' | 'opted_out' | 'pending_evidence';
+
+type UsageContext = {
+  contextId: string;           // Stable opaque identifier (UUID)
+  login: string;               // GitHub login of the owning authenticated identity
+  userId: number;              // Numeric GitHub user ID
+  billingEntity: string;       // Billing entity login (may differ for org/enterprise)
+  contextType: ContextType;
+  authStatus: AuthStatus;
+  captureSupportStatus: CaptureSupportStatus;
+  provider: string;            // e.g. 'github-copilot-internal'
+  lastMode?: Mode;             // Last observed billing mode
+  lastUsageSnapshot?: UsageSnapshot; // Last observed usage (no credential data)
+  isDefault: boolean;
+  createdAt: string;           // ISO 8601
+  updatedAt: string;           // ISO 8601
+  notes: string[];
+};
+```
+
+#### Credential material — separate concern
+
+GitHub access tokens associated with a usage context are **credential
+material** with stricter handling requirements than context metadata:
+
+- Must never be exposed to the browser or the iOS widget.
+- Must always be stored AES-256-GCM encrypted (Tier 1).
+- Modelled separately from the display/billing-context abstraction above.
+
+```typescript
+type UsageContextCredential = {
+  contextId: string;            // Foreign key to UsageContext
+  githubAccessToken: string;    // The GitHub OAuth access token
+  credentialIssuedAt: string;   // ISO 8601
+  credentialExpiresAt?: string; // ISO 8601, if known
+};
+```
+
+**Implementation choice vs. conceptual requirement:** The initial Horizon 2
+implementation may co-locate `UsageContext` metadata and its
+`UsageContextCredential` in a single AES-256-GCM-encrypted (Tier 1) blob
+record as a storage convenience. This is an **implementation choice**, not
+a conceptual requirement. The domain model treats them as distinct
+concerns; credential material can be split into a separate record key in a
+later iteration without changing the conceptual model or the storage tier.
+
+#### UsageSnapshot
+
+A snapshot of observed usage stored inside `UsageContext`. Contains no
+credential data:
+
+```typescript
+type UsageSnapshot = {
+  used: number;
+  quota: number;
+  remaining: number;
+  percentUsed: number;
+  resetAt: string;   // ISO 8601
+  mode: Mode;
+  warningLevel: WarningLevel;
+  capturedAt: string; // ISO 8601
+};
+```
+
+### Planned blob store: `usage-contexts`
+
+```
+context/<contextId>           ← Encrypted UsageContextRecord  (Tier 1)
+user/<userId>/index           ← Encrypted UsageContextUserIndex (Tier 1)
+```
+
+`UsageContextRecord` co-locates `UsageContext` metadata and its
+`UsageContextCredential` in a single encrypted Tier 1 blob. The credential
+fields are annotated as a distinct concern within the record.
+
+`UsageContextUserIndex` holds the ordered list of `contextId` values for a
+user and which one is the default.
+
+### Relationship to existing types
+
+| Existing type | Relationship |
+|---|---|
+| `Usage` (copilot.ts) | Remains the wire shape returned by `/api/usage` and `/api/widget-usage`. Not changed. |
+| `SessionPayload` (session.ts) | Continues to hold the single authenticated identity's credentials for the active session. Not changed. |
+| `WidgetTokenRecord` (widget-store.ts) | Gains an optional `contextId?: string` field (Horizon 2, PR 5). When absent, behaviour is unchanged. |
+| `UsageContext` | New type. Stored in `usage-contexts` blob store. Derived from `SessionPayload` at context registration time. |
+
+### Key invariants
+
+- `UsageContext` is the primary stored object. CopeLimit stores **usage
+  contexts**, not accounts.
+- Credential material must be stored separately from — or clearly annotated
+  as distinct from — the display/billing-context metadata.
+- **Cross-context contamination guard:** when resolving a widget token to a
+  context, validate that `UsageContext.userId === WidgetTokenRecord.userId`
+  before proceeding.
+- Adding a second context via OAuth must not overwrite the primary session
+  cookie. The callback must inspect a sentinel parameter (e.g.
+  `?add_context=true`) to distinguish context-addition from fresh login.
+- Unsupported/unknown context states (`auth_unsupported`) must be visible
+  in the UI and diagnosable, not silently hidden.
+- Evidence capture for unsupported contexts is opt-in and sanitized.
+
+### Horizon 2 non-goals
+
+- No FinOps / GitHub AI usage report ingestion.
+- No exact model-level cost attribution.
+- No enterprise API calls until a safe normalization path is established
+  from real observed payloads.
+- No widget aggregate view (one selected context only in Horizon 2).
+- No new paid infrastructure or new database.
