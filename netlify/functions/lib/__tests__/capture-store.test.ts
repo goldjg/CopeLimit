@@ -266,6 +266,7 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
     await maybeCapture(VALID_INPUT)
     const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
     expect(loggedObj).not.toHaveProperty('errorSummary')
+    expect(loggedObj).toHaveProperty('messageSuppressed', true)
   })
 
   it('does not log raw payload, sanitizedRaw, or token-adjacent fields', async () => {
@@ -377,6 +378,110 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Diagnostic metadata fields
+// ---------------------------------------------------------------------------
+
+describe('maybeCapture — diagnostic metadata', () => {
+  let mockStore: MockStore
+
+  beforeEach(() => {
+    mockStore = makeMockStore()
+    vi.mocked(getStore).mockReturnValue(mockStore as ReturnType<typeof getStore>)
+    _resetCaptureStoreForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('includes errorClass for a normal Error instance', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // list errors are passed to logCaptureFailure unwrapped, so errorClass reflects the real type
+    mockStore.list.mockRejectedValue(new TypeError('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    const listFailureCall = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'listBlobs'
+    )
+    const loggedObj = listFailureCall?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('errorClass', 'TypeError')
+    expect(loggedObj).toHaveProperty('isErrorInstance', true)
+  })
+
+  it('includes isErrorInstance: true for Error instances', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('network timeout'))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('isErrorInstance', true)
+  })
+
+  it('includes isErrorInstance: false for non-Error thrown values without serializing them', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // list errors are passed to logCaptureFailure unwrapped; throw a plain object
+    mockStore.list.mockRejectedValue({ status: 403, body: 'secret-token=abc' })
+    await maybeCapture(VALID_INPUT)
+    const listFailureCall = warnSpy.mock.calls.find(
+      (call) => (call[1] as Record<string, unknown>)?.operation === 'listBlobs'
+    )
+    const loggedObj = listFailureCall?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('isErrorInstance', false)
+    // The thrown object must not be serialized into the log string
+    const loggedStr = JSON.stringify(listFailureCall)
+    expect(loggedStr).not.toContain('secret-token')
+    expect(loggedStr).not.toContain('"status"')
+  })
+
+  it('reports hasErrorMessage: false when error has an empty message', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error())
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('hasErrorMessage', false)
+    expect(loggedObj).not.toHaveProperty('errorSummary')
+    expect(loggedObj).not.toHaveProperty('messageSuppressed')
+  })
+
+  it('includes hasErrorMessage: true alongside errorSummary for safe messages', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error(MOCK_403_ERROR_MESSAGE))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).toHaveProperty('hasErrorMessage', true)
+    expect(loggedObj).toHaveProperty('errorSummary')
+    expect(loggedObj).not.toHaveProperty('messageSuppressed')
+  })
+
+  it('omits messageSuppressed when message is safe', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockStore.get.mockRejectedValue(new Error('503 service unavailable'))
+    await maybeCapture(VALID_INPUT)
+    const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(loggedObj).not.toHaveProperty('messageSuppressed')
+  })
+
+  it('sets messageSuppressed: true and omits errorSummary for all sensitive term variants', async () => {
+    const sensitiveMessages = [
+      'invalid token supplied',
+      'auth failed',
+      'bad key in request',
+      'secret mismatch',
+      'bearer rejected',
+      'credential not valid',
+      'wrong password',
+      'cookie expired'
+    ]
+    for (const msg of sensitiveMessages) {
+      _resetCaptureStoreForTesting()
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      mockStore.get.mockRejectedValue(new Error(msg))
+      await maybeCapture(VALID_INPUT)
+      const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
+      expect(loggedObj, `msg: "${msg}"`).toHaveProperty('messageSuppressed', true)
+      expect(loggedObj, `msg: "${msg}"`).not.toHaveProperty('errorSummary')
+      vi.restoreAllMocks()
+    }
+  })
+})
 // Repeated-failure suppression
 // ---------------------------------------------------------------------------
 
@@ -474,9 +579,9 @@ describe('maybeCapture — env pre-flight', () => {
     vi.restoreAllMocks()
   })
 
-  it('logs config_invalid and skips Blob I/O when NETLIFY_AUTH_TOKEN is empty string', async () => {
+  it('logs config_invalid and skips Blob I/O when BLOBS_USE_EXPLICIT_CREDENTIALS=true and NETLIFY_AUTH_TOKEN is empty string', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    process.env = { ...originalEnv, NETLIFY_SITE_ID: 'site123', NETLIFY_AUTH_TOKEN: '' }
+    process.env = { ...originalEnv, BLOBS_USE_EXPLICIT_CREDENTIALS: 'true', NETLIFY_SITE_ID: 'site123', NETLIFY_AUTH_TOKEN: '' }
 
     await maybeCapture(VALID_INPUT)
 

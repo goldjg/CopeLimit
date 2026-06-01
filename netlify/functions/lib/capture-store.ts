@@ -24,8 +24,8 @@
  * stored for a given provider/user/day. If the count reaches `maxPerDay` the
  * capture is silently dropped to prevent runaway storage growth.
  */
-import { getStore } from '@netlify/blobs'
 import type { JsonObject, Usage } from './copilot'
+import { getBlobStore } from './blob-store'
 import { sanitizeProviderPayload } from './capture-sanitize'
 import type { CaptureConfig, CaptureIndex, ProviderCapture } from './capture-types'
 
@@ -59,8 +59,6 @@ const SENSITIVE_IN_MESSAGE_PATTERNS = [
 const BLOB_403_PATTERN = /\b403\b/
 const BLOB_401_PATTERN = /\b401\b/
 const BLOB_UNAUTHORIZED_PATTERN = /unauthorized/i
-
-let captureStore: ReturnType<typeof getStore> | null = null
 
 /** Per-error-code failure counts used to suppress repeated log entries. */
 const captureFailureCounts = new Map<string, number>()
@@ -99,18 +97,7 @@ function assertSafeProvider(provider: string): void {
 }
 
 function getCaptureStore() {
-  if (captureStore) return captureStore
-
-  const siteID = process.env.NETLIFY_SITE_ID
-  const token = process.env.NETLIFY_AUTH_TOKEN
-
-  if (siteID && token) {
-    captureStore = getStore({ name: CAPTURE_STORE, siteID, token })
-    return captureStore
-  }
-
-  captureStore = getStore({ name: CAPTURE_STORE })
-  return captureStore
+  return getBlobStore(CAPTURE_STORE)
 }
 
 /**
@@ -144,15 +131,44 @@ function classifyCaptureFailure(error: unknown): CaptureErrorCode {
 }
 
 /**
- * Returns a safe subset of an error message for diagnostic logging.
- * Returns `undefined` when the message may contain sensitive terms.
+ * Returns safe diagnostic metadata for an error value suitable for structured logging.
+ * Never serialises raw error messages that contain sensitive terms.
+ *
+ * Returned fields:
+ * - `isErrorInstance`  – whether the thrown value was an `Error` instance.
+ * - `errorClass`       – safe constructor name (e.g. `BlobsInternalError`, `TypeError`, `Error`).
+ * - `hasErrorMessage`  – whether the error carried a non-empty message.
+ * - `messageSuppressed`– `true` when the message existed but was omitted due to sensitive-term filtering.
+ * - `errorSummary`     – safe subset of the message when present and not sensitive.
  */
-function safeErrorSummary(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined
+function buildErrorDiagnostics(error: unknown): {
+  isErrorInstance: boolean
+  errorClass?: string
+  hasErrorMessage?: boolean
+  messageSuppressed?: boolean
+  errorSummary?: string
+} {
+  if (!(error instanceof Error)) {
+    return { isErrorInstance: false }
+  }
+
+  const errorClass = error.constructor?.name || 'Error'
   const msg = error.message
-  if (!msg) return undefined
-  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) return undefined
-  return msg.length > MAX_ERROR_SUMMARY_LENGTH ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026` : msg
+  const hasErrorMessage = msg.length > 0
+
+  if (!hasErrorMessage) {
+    return { isErrorInstance: true, errorClass, hasErrorMessage: false }
+  }
+
+  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) {
+    return { isErrorInstance: true, errorClass, hasErrorMessage: true, messageSuppressed: true }
+  }
+
+  const errorSummary = msg.length > MAX_ERROR_SUMMARY_LENGTH
+    ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026`
+    : msg
+
+  return { isErrorInstance: true, errorClass, hasErrorMessage: true, errorSummary }
 }
 
 /**
@@ -182,15 +198,20 @@ function logCaptureFailure(
     return
   }
 
+  const { isErrorInstance, errorClass, hasErrorMessage, messageSuppressed, errorSummary } = buildErrorDiagnostics(error)
+
   const fields: Record<string, unknown> = {
     provider,
     userId,
     errorCode,
     operation,
-    storeName: CAPTURE_STORE
+    storeName: CAPTURE_STORE,
+    isErrorInstance
   }
-  const summary = safeErrorSummary(error)
-  if (summary !== undefined) fields.errorSummary = summary
+  if (errorClass !== undefined) fields.errorClass = errorClass
+  if (hasErrorMessage !== undefined) fields.hasErrorMessage = hasErrorMessage
+  if (messageSuppressed === true) fields.messageSuppressed = true
+  if (errorSummary !== undefined) fields.errorSummary = errorSummary
 
   console.warn('[capture-store] Failed to persist provider capture', fields)
 }
@@ -200,11 +221,15 @@ function logCaptureFailure(
  * Returns a {@link CaptureErrorCode} if a problem is detected, otherwise `null`.
  */
 function checkCaptureEnv(): CaptureErrorCode | null {
-  const siteID = process.env.NETLIFY_SITE_ID
-  const token = process.env.NETLIFY_AUTH_TOKEN
-  // NETLIFY_AUTH_TOKEN set to an empty string is a misconfiguration: the
-  // explicit-auth path would receive no credentials and the request will fail.
-  if (siteID && token !== undefined && token.trim() === '') return 'config_invalid'
+  if (process.env.BLOBS_USE_EXPLICIT_CREDENTIALS === 'true') {
+    const siteID = process.env.NETLIFY_SITE_ID
+    const token = process.env.NETLIFY_AUTH_TOKEN
+    // Either credential set to an empty/whitespace string is a misconfiguration:
+    // the explicit-auth path in getBlobStore would not receive usable credentials.
+    if ((siteID !== undefined && siteID.trim() === '') || (token !== undefined && token.trim() === '')) {
+      return 'config_invalid'
+    }
+  }
   return null
 }
 
@@ -449,6 +474,5 @@ export async function maybeCapture(input: {
 
 /** @internal Reset module-level state between tests. Do not use in production code. */
 export function _resetCaptureStoreForTesting(): void {
-  captureStore = null
   captureFailureCounts.clear()
 }
