@@ -1,0 +1,118 @@
+schemaVersion: aadlc.plan.v0.2
+planId: horizon-4-plan-as-code-vnext
+project: CopeLimit
+status: active
+
+run:
+  type: documentation
+  horizon: 4
+  title: Plan-as-Code vNext
+  intent: >-
+    Define a machine-readable PR contract format for governed AADLC agent
+    execution with explicit scope, tool, mutation, validation, and approval
+    boundaries.
+  modelRecommendation:
+    planner: sonnet
+    executor: gpt-5.4
+    avoid:
+      - gpt-5.3-codex
+
+scope:
+  allowedFiles:
+    - .github/aadlc/plans/plan-schema-v0.2.yml
+    - .github/aadlc/plans/horizon-4-plan-as-code-vnext.plan.yml
+    - .github/aadlc/plans/README.md
+  forbiddenFiles:
+    - .github/aadlc/memory.md
+    - .github/aadlc/current-pr-contract.md
+    - .github/aadlc/tool-policy.yml
+    - .github/aadlc/invariants.yml
+    - .github/instructions/**
+    - src/**
+    - netlify/functions/**
+    - public/**
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+  allowedChangeTypes:
+    - docs
+    - governance
+    - schema-documentation
+  forbiddenChangeTypes:
+    - application-code
+    - auth
+    - oauth
+    - token-storage
+    - provider-fetch
+    - billing-mode-detection
+    - ui
+    - widget
+    - blob-storage-format
+    - dependency-addition
+    - ci-workflow
+
+toolPermissions:
+  readFiles: allowed
+  searchRepo: allowed
+  editFiles: allowed_within_scope
+  runTests: allowed_if_deps_available
+  runBuild: allowed_if_deps_available
+  runLint: optional
+  createBranch: forbidden
+  commitChanges: forbidden
+  createPullRequest: forbidden
+  callCodeReview: optional
+  deploy: forbidden
+  deleteFiles: forbidden
+  bulkReplaceAcrossFiles: forbidden
+
+mutationPermissions:
+  mayCreateFiles: true
+  mayEditFiles: true
+  mayDeleteFiles: false
+  mayRenameFiles: false
+  mayMoveFiles: false
+  mayEditOutsideScope: false
+
+approvalGates:
+  requireUserApprovalBefore:
+    - widening_scope
+    - touching_forbidden_files
+    - adding_dependencies
+    - changing_auth_or_token_storage
+
+validation:
+  required:
+    - changed_files_within_scope
+    - no_forbidden_change_types
+    - final_plan_compliance_summary
+  optional:
+    - npm test if dependencies are already installed
+    - npm run build if dependencies are already installed
+  knownNonBlocking:
+    - skip test and build when node_modules is absent for this docs-only task
+
+aadlc:
+  expectedPhaseTypes:
+    - hydration
+    - planning
+    - docs
+    - validation
+  emitRunManifest: false
+  manifestMode: final_response_only
+  phaseEventsRequired: false
+
+nonGoals:
+  - workflow-engine
+  - parser-implementation
+  - validator-script
+  - application-code-changes
+  - dependency-additions
+  - instruction-pack-rewrites
+  - memory-updates
+  - commits
+  - pull-requests
+
+openQuestions:
+  - Should future plans allow repo_committed manifestMode or remain final_response_only?
+  - Should draft status require explicit confirmation before execution?
