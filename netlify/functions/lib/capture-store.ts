@@ -35,13 +35,30 @@ const SANITIZER_VERSION = '1'
 const SKIPPED_PROVIDERS = new Set(['mock', 'unsupported', 'github'])
 const SAFE_PROVIDER_PATTERN = /^[a-z0-9_-]+$/i
 
-/** Number of warn-level log entries per error code before switching to suppressed mode. */
+/**
+ * Number of warn-level log entries per error code before switching to suppressed mode.
+ * Five occurrences is enough to surface the issue in log monitoring without drowning
+ * repeated-request traffic in identical warnings.
+ */
 const SUPPRESS_AFTER = 5
+
+/** Maximum characters retained from an error message in structured log output. */
+const MAX_ERROR_SUMMARY_LENGTH = 200
 
 /** Patterns that suggest an error message may contain sensitive data. */
 const SENSITIVE_IN_MESSAGE_PATTERNS = [
   /token/i, /auth/i, /key/i, /secret/i, /bearer/i, /credential/i, /password/i, /cookie/i
 ]
+
+/**
+ * Patterns that identify specific Netlify Blobs HTTP failure codes in error messages.
+ * Netlify Blobs surfaces status codes in messages of the form:
+ *   "Netlify Blobs has generated an internal error (<N> status code)"
+ * These patterns are intentionally narrow to avoid false-positive classification.
+ */
+const BLOB_403_PATTERN = /\b403\b/
+const BLOB_401_PATTERN = /\b401\b/
+const BLOB_UNAUTHORIZED_PATTERN = /unauthorized/i
 
 let captureStore: ReturnType<typeof getStore> | null = null
 
@@ -103,8 +120,8 @@ function getCaptureStore() {
 function classifyBlobError(error: unknown): CaptureErrorCode {
   if (!(error instanceof Error)) return 'unknown'
   const msg = error.message
-  if (/\b403\b/.test(msg)) return 'blob_forbidden'
-  if (/\b401\b/.test(msg) || /unauthorized/i.test(msg)) return 'blob_unavailable'
+  if (BLOB_403_PATTERN.test(msg)) return 'blob_forbidden'
+  if (BLOB_401_PATTERN.test(msg) || BLOB_UNAUTHORIZED_PATTERN.test(msg)) return 'blob_unavailable'
   return 'unknown'
 }
 
@@ -117,7 +134,7 @@ function safeErrorSummary(error: unknown): string | undefined {
   const msg = error.message
   if (!msg) return undefined
   if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) return undefined
-  return msg.length > 200 ? `${msg.slice(0, 200)}\u2026` : msg
+  return msg.length > MAX_ERROR_SUMMARY_LENGTH ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026` : msg
 }
 
 /**

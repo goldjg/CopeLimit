@@ -26,6 +26,9 @@ function makeMockStore(): MockStore {
   }
 }
 
+/** Matches the actual Netlify Blobs error message format for HTTP 403 failures. */
+const MOCK_403_ERROR_MESSAGE = 'Netlify Blobs has generated an internal error (403 status code)'
+
 const ENABLED_CONFIG = {
   enabled: true,
   retentionDays: 30,
@@ -165,7 +168,7 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
 
   it('resolves without rethrowing when readIndex throws 403', async () => {
     mockStore.get.mockRejectedValue(
-      new Error('Netlify Blobs has generated an internal error (403 status code)')
+      new Error(MOCK_403_ERROR_MESSAGE)
     )
     await expect(maybeCapture(VALID_INPUT)).resolves.toBeUndefined()
   })
@@ -173,7 +176,7 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
   it('logs errorCode blob_forbidden for 403 failure', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(
-      new Error('Netlify Blobs has generated an internal error (403 status code)')
+      new Error(MOCK_403_ERROR_MESSAGE)
     )
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
@@ -185,7 +188,7 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
   it('logs operation readIndex for index read failure', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(
-      new Error('Netlify Blobs has generated an internal error (403 status code)')
+      new Error(MOCK_403_ERROR_MESSAGE)
     )
     await maybeCapture(VALID_INPUT)
     expect(warnSpy).toHaveBeenCalledWith(
@@ -249,7 +252,7 @@ describe('maybeCapture — Blob error classification and safe logging', () => {
   it('includes safe error summary when message contains no sensitive terms', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockRejectedValue(
-      new Error('Netlify Blobs has generated an internal error (403 status code)')
+      new Error(MOCK_403_ERROR_MESSAGE)
     )
     await maybeCapture(VALID_INPUT)
     const loggedObj = warnSpy.mock.calls[0]?.[1] as Record<string, unknown>
