@@ -77,6 +77,22 @@ describe('detectMode', () => {
     expect(detectMode(payload)).toBe('premium_requests')
   })
 
+  it('returns premium_requests when top-level token_based_billing is string "true"', () => {
+    expect(detectMode({ token_based_billing: 'true' })).toBe('premium_requests')
+  })
+
+  it('returns premium_requests when top-level token_based_billing is string "false"', () => {
+    expect(detectMode({ token_based_billing: 'false' })).toBe('premium_requests')
+  })
+
+  it('returns premium_requests when top-level token_based_billing is numeric 1', () => {
+    expect(detectMode({ token_based_billing: 1 })).toBe('premium_requests')
+  })
+
+  it('returns premium_requests when top-level token_based_billing is numeric 0', () => {
+    expect(detectMode({ token_based_billing: 0 })).toBe('premium_requests')
+  })
+
   it('display label for ai_credits mode is "AI credits"', () => {
     // Verify that the mode string produced by detectMode is the expected value
     // consumed by the UI's labelForMode function.
