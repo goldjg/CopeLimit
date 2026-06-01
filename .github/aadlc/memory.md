@@ -88,7 +88,7 @@ CopeLimit-specific boundaries:
     not be written unencrypted.
   - **Tier 2** (sanitized append-only telemetry — provider captures):
     application-level encryption is not required. Records contain only
-    allow-listed, redacted fields.
+    allowlisted, redacted fields.
   - **Tier 3** (mutable provider-capture control blobs — e.g.
     `_index.json`): recoverable and non-blocking. Loss does not affect
     live usage display.
@@ -163,7 +163,7 @@ attribution. Current single-account personal Pro behaviour must not break.
 | **Usage context** | The primary unit CopeLimit stores and displays. A pairing of (a) a resolvable credential path and (b) a billing entity. Carries `mode`, last-known usage snapshot, account-type hint, auth status, and capture support status. One authenticated identity may have one or more usage contexts. |
 | **Widget-selected context** | The single `UsageContext` the Scriptable widget is configured to poll. No aggregation in Horizon 2. |
 | **Context type** | An enumerated hint: `personal`, `org`, `enterprise`, or `unknown`. Used for display and evidence routing; not used to gate logic. |
-| **Auth status** | Polability state of a context: `active`, `expired`, `auth_unsupported`, or `unknown`. |
+| **Auth status** | Pollability state of a context: `active`, `expired`, `auth_unsupported`, or `unknown`. |
 | **Capture support status** | Whether provider-response capture is available for a context: `supported`, `unsupported`, `opted_out`, or `pending_evidence`. |
 
 ### UsageContext — display/billing-context abstraction

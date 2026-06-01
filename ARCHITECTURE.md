@@ -244,7 +244,7 @@ requirements:
 | Tier | Description | Examples | Encryption |
 |---|---|---|---|
 | **Tier 1** | Sensitive credential records | `widget-tokens`, `onboarding-sessions`, `usage-contexts` (planned) | AES-256-GCM required via `BLOB_ENCRYPTION_KEY`. Must not be written unencrypted. |
-| **Tier 2** | Sanitized append-only telemetry | `provider-captures/<provider>/<userId>/<date>/<ts>.json` | App-level encryption not required. Records contain only allow-listed, redacted fields. |
+| **Tier 2** | Sanitized append-only telemetry | `provider-captures/<provider>/<userId>/<date>/<ts>.json` | App-level encryption not required. Records contain only allowlisted, redacted fields. |
 | **Tier 3** | Mutable provider-capture control blobs | `provider-captures/<provider>/<userId>/<date>/_index.json` | Recoverable and non-blocking. Loss does not affect live usage display. |
 | **Tier 4** | Legacy plaintext migration | Tier 1 records written before encryption was introduced | Migrated automatically on first read. Applies to Tier 1 records only. |
 
@@ -354,7 +354,7 @@ terminology and design constraints that implementation PRs must follow.
 | **Usage context** | The primary unit CopeLimit stores and displays. A pairing of (a) a resolvable credential path and (b) a billing entity. Carries `mode`, last-known usage snapshot, account-type hint, auth status, and capture support status. One authenticated identity may have one or more usage contexts. |
 | **Widget-selected context** | The single `UsageContext` the Scriptable widget is configured to poll. No aggregation in Horizon 2. |
 | **Context type** | An enumerated hint: `personal`, `org`, `enterprise`, or `unknown`. Used for display and evidence routing; not used to gate logic. |
-| **Auth status** | Polability state of a context: `active`, `expired`, `auth_unsupported`, or `unknown`. |
+| **Auth status** | Pollability state of a context: `active`, `expired`, `auth_unsupported`, or `unknown`. |
 | **Capture support status** | Whether provider-response capture is available for a context: `supported`, `unsupported`, `opted_out`, or `pending_evidence`. |
 
 ### Domain model
