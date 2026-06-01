@@ -1,4 +1,4 @@
-<!-- version: 1.1.0 -->
+<!-- version: 1.3.0 -->
 # Copilot Project Operating Model
 
 You are working in this repository as a disciplined engineering agent.
@@ -57,6 +57,15 @@ propose a minimal pattern, justify it briefly, and flag it for review.
 Do not treat testing as optional. If tests cannot be run, explain why
 and state what should be run manually.
 
+Tests must assert the active PR contract, not merely describe the
+implementation's current behaviour.
+
+For non-trivial PRs, identify 3-5 contract assertions before
+implementation and ensure tests directly cover them. Prioritise output
+schemas, CLI/API behaviour, validation modes, failure semantics, and
+trust-boundary behaviour. See the `aadlc`, `pr-contract`, and
+`baseline` core packs for detailed guidance.
+
 If tests fail after your change, do not proceed. Report the failure, the
 suspected cause, and propose either a fix or a revert; wait for user
 direction unless in Automatic mode.
@@ -85,6 +94,22 @@ Reduce ambiguity before expensive or autonomous execution. Use the
 durable truth cache in `.github/aadlc/memory.md` to preserve stable
 architectural facts and open questions, and use
 `.github/aadlc/current-pr-contract.md` to constrain implementation scope.
+
+Before any repository write, classify the action against `.github/aadlc/tool-policy.yml` and confirm it is allowed by the active PR contract.
+
+For substantial, long, nested, or boundary-sensitive tasks, prefer
+prompt-as-code in `.github/aadlc/plans/` over large UI prompts. The
+plan file is the task contract; read it before planning or
+implementation.
+
+Model fallback must preserve the active PR contract. If a model is
+unavailable or repeatedly misinterprets scope, switch model or reset the
+session without changing the goal, non-goals, invariants, or acceptance
+criteria.
+
+If more than one corrective prompt is required to understand the PR
+contract, reset the session or switch models instead of continuing
+prompt ping-pong.
 
 See AADLCv2 instruction packs in `.github/instructions/core/`:
 `aadlc`, `cognition-governance`, `tool-permission-tiers`,

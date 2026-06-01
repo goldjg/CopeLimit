@@ -1,18 +1,32 @@
-<!-- version: 1.0.0 -->
+<!-- version: 1.1.0 -->
 # Current PR Contract
 
 This contract constrains implementation scope for the active PR. Update
 it when scope is explicitly amended. If a requested action falls outside
 approved scope, stop and escalate before proceeding.
 
+Use this contract to distinguish active PR constraints, completed PR
+constraints, durable invariants, and intentional amendments. Completed
+PR constraints are historical evidence unless they are explicitly
+promoted to durable invariants.
+
 ## Goal
 <!-- One outcome-focused objective for this PR. -->
+
+## Contract status
+<!-- draft | active | closed | superseded -->
 
 ## Non-goals
 <!-- Explicitly list what this PR will not change. -->
 
+## Carry-forward rules
+<!-- State which constraints are durable invariants and which are only scoped to this PR. Completed PR constraints are historical evidence unless explicitly promoted to invariants. -->
+
 ## Approved scope
 <!-- Bounded capabilities and behavior changes allowed in this PR. -->
+
+## Intentional amendments
+<!-- Explicitly record any intentional changes to previous PR constraints, trust boundaries, or assumptions. -->
 
 ## Forbidden scope
 <!-- Explicitly forbidden behavior, files, and operational changes. -->
