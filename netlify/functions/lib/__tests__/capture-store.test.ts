@@ -822,7 +822,7 @@ describe('readIndex recovery cascade', () => {
   })
 
   it('resets count to 0 for NaN index.count (Level 2 extended guard)', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockResolvedValue({ count: NaN, date: TODAY })
     await maybeCapture(VALID_INPUT)
     // New index should be written with count: 1 (reset to 0, then incremented)
@@ -830,25 +830,32 @@ describe('readIndex recovery cascade', () => {
       (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
     )
     expect(indexWrite).toBeDefined()
+    // Level 2 reset is silent — no recovery cascade warnings
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_recovered' }))
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_reset_fallback' }))
   })
 
   it('resets count to 0 for negative index.count (Level 2 extended guard)', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockResolvedValue({ count: -1, date: TODAY })
     await maybeCapture(VALID_INPUT)
     const indexWrite = mockStore.setJSON.mock.calls.find(
       (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
     )
     expect(indexWrite).toBeDefined()
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_recovered' }))
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_reset_fallback' }))
   })
 
   it('resets count to 0 for fractional index.count (Level 2 extended guard)', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockStore.get.mockResolvedValue({ count: 1.5, date: TODAY })
     await maybeCapture(VALID_INPUT)
     const indexWrite = mockStore.setJSON.mock.calls.find(
       (call) => typeof call[0] === 'string' && call[0].includes('_index.json') && (call[1] as Record<string, unknown>)?.count === 1
     )
     expect(indexWrite).toBeDefined()
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_recovered' }))
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ event: 'index_reset_fallback' }))
   })
 })

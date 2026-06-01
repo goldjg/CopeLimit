@@ -71,8 +71,6 @@ export type CaptureErrorCode =
   | 'blob_forbidden'             // Netlify Blobs returned 403
   | 'blob_unavailable'           // Netlify Blobs returned 401 or is otherwise inaccessible
   | 'config_invalid'             // Environment misconfiguration detected before attempting I/O
-  | 'index_read_failure'         // readIndex read threw; count was rebuilt from listed captures (Level 3 recovery)
-  | 'index_read_unrecoverable'   // readIndex read AND list both threw; count reset to 0 (Level 4 fallback)
   | 'capture_write_failure'      // capture setJSON threw an unclassified error
   | 'index_write_failure'        // index setJSON threw an unclassified error
   | 'unknown'                    // Unclassified error
@@ -371,6 +369,8 @@ async function readIndex(
   const datePrefix = `${provider}/${userId}/${date}/`
   try {
     const result = await store.list({ prefix: datePrefix })
+    // Each date prefix contains only capture blobs (<timestamp>.json) and the
+    // single control blob (_index.json). Filter the control blob to count captures.
     const rebuiltCount = result.blobs.filter(b => !b.key.endsWith('_index.json')).length
 
     const recovered: CaptureIndex = { count: rebuiltCount, date }
@@ -380,7 +380,7 @@ async function readIndex(
       await store.setJSON(key, recovered)
     } catch (writeErr) {
       console.warn('[capture-store] Failed to write recovered index', {
-        event: 'index_recovery_write_failed',
+        event: 'index_recovery_write_failure',
         provider,
         userId,
         date,
