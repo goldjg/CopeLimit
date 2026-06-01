@@ -1,0 +1,132 @@
+schemaVersion: aadlc.plan.v0.2
+planId: horizon-3-pr2-finops-types
+project: CopeLimit
+status: active
+
+run:
+  type: implementation
+  horizon: 3
+  title: Horizon 3 PR 2 FinOps types
+  intent: >-
+    Add a type-only TypeScript anchor for Horizon 3 FinOps and AADLC attribution
+    objects, plus a minimal structural compile/example test, without changing any
+    application runtime behaviour.
+  modelRecommendation:
+    planner: sonnet
+    executor: gpt-5.4
+    avoid:
+      - gpt-5.3-codex
+
+scope:
+  allowedFiles:
+    - .github/aadlc/plans/horizon-3-pr2-finops-types.plan.yml
+    - netlify/functions/lib/finops-types.ts
+    - netlify/functions/lib/__tests__/finops-types.test.ts
+  forbiddenFiles:
+    - .github/aadlc/memory.md
+    - .github/aadlc/current-pr-contract.md
+    - .github/aadlc/tool-policy.yml
+    - .github/aadlc/invariants.yml
+    - .github/instructions/**
+    - src/**
+    - public/**
+    - netlify/functions/usage.ts
+    - netlify/functions/widget-usage.ts
+    - netlify/functions/lib/copilot.ts
+    - netlify/functions/lib/session.ts
+    - netlify/functions/lib/widget-store.ts
+    - netlify/functions/lib/onboarding-store.ts
+    - netlify/functions/lib/capture-store.ts
+    - netlify/functions/lib/capture-sanitize.ts
+    - netlify/functions/lib/blob-store.ts
+    - netlify/functions/lib/blob-crypto.ts
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+    - netlify.toml
+    - .github/workflows/**
+  allowedChangeTypes:
+    - type-definitions
+    - tests
+    - governance
+  forbiddenChangeTypes:
+    - application-code
+    - auth
+    - oauth
+    - token-storage
+    - provider-fetch
+    - billing-mode-detection
+    - ui
+    - widget
+    - blob-storage-format
+    - dependency-addition
+    - ci-workflow
+
+toolPermissions:
+  readFiles: allowed
+  searchRepo: allowed
+  editFiles: allowed_within_scope
+  runTests: allowed_if_deps_available
+  runBuild: allowed_if_deps_available
+  runLint: optional
+  createBranch: forbidden
+  commitChanges: requires_explicit_user_approval
+  createPullRequest: requires_explicit_user_approval
+  callCodeReview: optional
+  deploy: forbidden
+  deleteFiles: forbidden
+  bulkReplaceAcrossFiles: forbidden
+
+mutationPermissions:
+  mayCreateFiles: true
+  mayEditFiles: true
+  mayDeleteFiles: false
+  mayRenameFiles: false
+  mayMoveFiles: false
+  mayEditOutsideScope: false
+
+approvalGates:
+  requireUserApprovalBefore:
+    - widening_scope
+    - touching_forbidden_files
+    - adding_dependencies
+    - changing_auth_or_token_storage
+    - creating_pull_request
+    - committing_changes
+
+validation:
+  required:
+    - npm test
+    - npm run build
+    - npm run lint
+    - changed_files_within_scope
+    - no_forbidden_change_types
+    - final_plan_compliance_summary
+  knownNonBlocking:
+    - npm run lint may fail with TS5107 from deprecated moduleResolution Node in tsconfig.json
+
+aadlc:
+  expectedPhaseTypes:
+    - hydration
+    - planning
+    - implementation
+    - validation
+  emitRunManifest: false
+  manifestMode: final_response_only
+  phaseEventsRequired: false
+
+nonGoals:
+  - api-endpoints
+  - ui
+  - blob-read-write
+  - manifest-import
+  - checkpoint-capture
+  - run-ledger-display
+  - github-usage-report-import
+  - auth-session-provider-billing-changes
+  - runtime-validation
+  - dependency-changes
+  - commits
+  - pull-requests
+
+openQuestions: []
