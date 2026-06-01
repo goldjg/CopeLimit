@@ -144,15 +144,44 @@ function classifyCaptureFailure(error: unknown): CaptureErrorCode {
 }
 
 /**
- * Returns a safe subset of an error message for diagnostic logging.
- * Returns `undefined` when the message may contain sensitive terms.
+ * Returns safe diagnostic metadata for an error value suitable for structured logging.
+ * Never serialises raw error messages that contain sensitive terms.
+ *
+ * Returned fields:
+ * - `isErrorInstance`  – whether the thrown value was an `Error` instance.
+ * - `errorClass`       – safe constructor name (e.g. `BlobsInternalError`, `TypeError`, `Error`).
+ * - `hasErrorMessage`  – whether the error carried a non-empty message.
+ * - `messageSuppressed`– `true` when the message existed but was omitted due to sensitive-term filtering.
+ * - `errorSummary`     – safe subset of the message when present and not sensitive.
  */
-function safeErrorSummary(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined
+function buildErrorDiagnostics(error: unknown): {
+  isErrorInstance: boolean
+  errorClass?: string
+  hasErrorMessage?: boolean
+  messageSuppressed?: boolean
+  errorSummary?: string
+} {
+  if (!(error instanceof Error)) {
+    return { isErrorInstance: false }
+  }
+
+  const errorClass = error.constructor?.name || 'Error'
   const msg = error.message
-  if (!msg) return undefined
-  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) return undefined
-  return msg.length > MAX_ERROR_SUMMARY_LENGTH ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026` : msg
+  const hasErrorMessage = msg.length > 0
+
+  if (!hasErrorMessage) {
+    return { isErrorInstance: true, errorClass, hasErrorMessage: false }
+  }
+
+  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) {
+    return { isErrorInstance: true, errorClass, hasErrorMessage: true, messageSuppressed: true }
+  }
+
+  const errorSummary = msg.length > MAX_ERROR_SUMMARY_LENGTH
+    ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026`
+    : msg
+
+  return { isErrorInstance: true, errorClass, hasErrorMessage: true, errorSummary }
 }
 
 /**
@@ -182,15 +211,20 @@ function logCaptureFailure(
     return
   }
 
+  const { isErrorInstance, errorClass, hasErrorMessage, messageSuppressed, errorSummary } = buildErrorDiagnostics(error)
+
   const fields: Record<string, unknown> = {
     provider,
     userId,
     errorCode,
     operation,
-    storeName: CAPTURE_STORE
+    storeName: CAPTURE_STORE,
+    isErrorInstance
   }
-  const summary = safeErrorSummary(error)
-  if (summary !== undefined) fields.errorSummary = summary
+  if (errorClass !== undefined) fields.errorClass = errorClass
+  if (hasErrorMessage !== undefined) fields.hasErrorMessage = hasErrorMessage
+  if (messageSuppressed === true) fields.messageSuppressed = true
+  if (errorSummary !== undefined) fields.errorSummary = errorSummary
 
   console.warn('[capture-store] Failed to persist provider capture', fields)
 }
