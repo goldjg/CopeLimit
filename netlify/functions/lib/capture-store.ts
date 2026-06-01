@@ -222,11 +222,13 @@ function logCaptureFailure(
  */
 function checkCaptureEnv(): CaptureErrorCode | null {
   if (process.env.BLOBS_USE_EXPLICIT_CREDENTIALS === 'true') {
+    const siteID = process.env.NETLIFY_SITE_ID
     const token = process.env.NETLIFY_AUTH_TOKEN
-    // NETLIFY_AUTH_TOKEN set to an empty string while BLOBS_USE_EXPLICIT_CREDENTIALS
-    // is enabled is a misconfiguration: the explicit-auth path would receive no
-    // credentials and the request will fail.
-    if (token !== undefined && token.trim() === '') return 'config_invalid'
+    // Either credential set to an empty/whitespace string is a misconfiguration:
+    // the explicit-auth path in getBlobStore would not receive usable credentials.
+    if ((siteID !== undefined && siteID.trim() === '') || (token !== undefined && token.trim() === '')) {
+      return 'config_invalid'
+    }
   }
   return null
 }

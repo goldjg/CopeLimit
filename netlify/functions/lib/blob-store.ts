@@ -23,12 +23,10 @@ import { getStore } from '@netlify/blobs'
  * @param name - The Netlify Blobs store name.
  */
 export function getBlobStore(name: string): ReturnType<typeof getStore> {
-  if (
-    process.env.BLOBS_USE_EXPLICIT_CREDENTIALS === 'true' &&
-    process.env.NETLIFY_SITE_ID &&
-    process.env.NETLIFY_AUTH_TOKEN
-  ) {
-    return getStore({ name, siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_AUTH_TOKEN })
+  const siteID = process.env.NETLIFY_SITE_ID?.trim()
+  const token = process.env.NETLIFY_AUTH_TOKEN?.trim()
+  if (process.env.BLOBS_USE_EXPLICIT_CREDENTIALS === 'true' && siteID && token) {
+    return getStore({ name, siteID, token })
   }
   return getStore({ name })
 }
