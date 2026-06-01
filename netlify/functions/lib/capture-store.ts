@@ -34,7 +34,59 @@ const CAPTURE_VERSION = '1'
 const SANITIZER_VERSION = '1'
 const SKIPPED_PROVIDERS = new Set(['mock', 'unsupported', 'github'])
 const SAFE_PROVIDER_PATTERN = /^[a-z0-9_-]+$/i
+
+/**
+ * Number of warn-level log entries per error code before switching to suppressed mode.
+ * Five occurrences is enough to surface the issue in log monitoring without drowning
+ * repeated-request traffic in identical warnings.
+ */
+const SUPPRESS_AFTER = 5
+
+/** Maximum characters retained from an error message in structured log output. */
+const MAX_ERROR_SUMMARY_LENGTH = 200
+
+/** Patterns that suggest an error message may contain sensitive data. */
+const SENSITIVE_IN_MESSAGE_PATTERNS = [
+  /token/i, /auth/i, /key/i, /secret/i, /bearer/i, /credential/i, /password/i, /cookie/i
+]
+
+/**
+ * Patterns that identify specific Netlify Blobs HTTP failure codes in error messages.
+ * Netlify Blobs surfaces status codes in messages of the form:
+ *   "Netlify Blobs has generated an internal error (<N> status code)"
+ * These patterns are intentionally narrow to avoid false-positive classification.
+ */
+const BLOB_403_PATTERN = /\b403\b/
+const BLOB_401_PATTERN = /\b401\b/
+const BLOB_UNAUTHORIZED_PATTERN = /unauthorized/i
+
 let captureStore: ReturnType<typeof getStore> | null = null
+
+/** Per-error-code failure counts used to suppress repeated log entries. */
+const captureFailureCounts = new Map<string, number>()
+
+/**
+ * Stable error codes for capture persistence failures.
+ * Safe to log; never contains raw payload or credential data.
+ */
+export type CaptureErrorCode =
+  | 'blob_forbidden'        // Netlify Blobs returned 403
+  | 'blob_unavailable'      // Netlify Blobs returned 401 or is otherwise inaccessible
+  | 'config_invalid'        // Environment misconfiguration detected before attempting I/O
+  | 'index_read_failure'    // readIndex threw an unclassified error
+  | 'capture_write_failure' // capture setJSON threw an unclassified error
+  | 'index_write_failure'   // index setJSON threw an unclassified error
+  | 'unknown'               // Unclassified error
+
+/** @internal Tagged error that carries an operation label through `persistCapture`. */
+class CaptureStageError extends Error {
+  readonly operation: string
+  constructor(operation: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'CaptureStageError'
+    this.operation = operation
+  }
+}
 
 function buildDateFromIso(iso: string): string {
   return iso.slice(0, 10)
@@ -59,6 +111,101 @@ function getCaptureStore() {
 
   captureStore = getStore({ name: CAPTURE_STORE })
   return captureStore
+}
+
+/**
+ * Classifies a Blob I/O error into a stable {@link CaptureErrorCode}.
+ * Inspects only the error message; never logs or exposes raw fields.
+ */
+function classifyBlobError(error: unknown): CaptureErrorCode {
+  if (!(error instanceof Error)) return 'unknown'
+  const msg = error.message
+  if (BLOB_403_PATTERN.test(msg)) return 'blob_forbidden'
+  if (BLOB_401_PATTERN.test(msg) || BLOB_UNAUTHORIZED_PATTERN.test(msg)) return 'blob_unavailable'
+  return 'unknown'
+}
+
+/**
+ * Classifies a capture persistence failure into a stable {@link CaptureErrorCode}.
+ * Extends {@link classifyBlobError} by mapping unclassified {@link CaptureStageError}
+ * instances to stage-specific fallback codes so the exported type is not misleading.
+ */
+function classifyCaptureFailure(error: unknown): CaptureErrorCode {
+  const blobCode = classifyBlobError(error)
+  if (blobCode !== 'unknown') return blobCode
+
+  if (error instanceof CaptureStageError) {
+    if (error.operation === 'readIndex') return 'index_read_failure'
+    if (error.operation === 'captureWrite') return 'capture_write_failure'
+    if (error.operation === 'indexWrite') return 'index_write_failure'
+  }
+
+  return 'unknown'
+}
+
+/**
+ * Returns a safe subset of an error message for diagnostic logging.
+ * Returns `undefined` when the message may contain sensitive terms.
+ */
+function safeErrorSummary(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined
+  const msg = error.message
+  if (!msg) return undefined
+  if (SENSITIVE_IN_MESSAGE_PATTERNS.some(p => p.test(msg))) return undefined
+  return msg.length > MAX_ERROR_SUMMARY_LENGTH ? `${msg.slice(0, MAX_ERROR_SUMMARY_LENGTH)}\u2026` : msg
+}
+
+/**
+ * Logs a classified capture failure and suppresses repeated entries.
+ *
+ * Safe fields logged: `provider`, `userId`, `errorCode`, `operation`,
+ * `storeName`, and optionally a sanitised `errorSummary`.
+ * Raw payload, stack traces, and credential-adjacent terms are never logged.
+ */
+function logCaptureFailure(
+  provider: string,
+  userId: number,
+  errorCode: CaptureErrorCode,
+  operation: string,
+  error: unknown
+): void {
+  const count = (captureFailureCounts.get(errorCode) ?? 0) + 1
+  captureFailureCounts.set(errorCode, count)
+
+  if (count > SUPPRESS_AFTER) {
+    if (count === SUPPRESS_AFTER + 1) {
+      console.info('[capture-store] Repeated capture failures suppressed', {
+        errorCode,
+        storeName: CAPTURE_STORE
+      })
+    }
+    return
+  }
+
+  const fields: Record<string, unknown> = {
+    provider,
+    userId,
+    errorCode,
+    operation,
+    storeName: CAPTURE_STORE
+  }
+  const summary = safeErrorSummary(error)
+  if (summary !== undefined) fields.errorSummary = summary
+
+  console.warn('[capture-store] Failed to persist provider capture', fields)
+}
+
+/**
+ * Checks for known environment misconfigurations before attempting Blob I/O.
+ * Returns a {@link CaptureErrorCode} if a problem is detected, otherwise `null`.
+ */
+function checkCaptureEnv(): CaptureErrorCode | null {
+  const siteID = process.env.NETLIFY_SITE_ID
+  const token = process.env.NETLIFY_AUTH_TOKEN
+  // NETLIFY_AUTH_TOKEN set to an empty string is a misconfiguration: the
+  // explicit-auth path would receive no credentials and the request will fail.
+  if (siteID && token !== undefined && token.trim() === '') return 'config_invalid'
+  return null
 }
 
 /**
@@ -146,7 +293,15 @@ function isValidUserId(userId: number | undefined): userId is number {
 async function runLazyCleanup(provider: string, userId: number, retentionDays: number): Promise<void> {
   const store = getCaptureStore()
   const prefix = `${provider}/${userId}/`
-  const { blobs } = await store.list({ prefix })
+
+  let blobs: Array<{ key: string }>
+  try {
+    const result = await store.list({ prefix })
+    blobs = result.blobs
+  } catch (error) {
+    logCaptureFailure(provider, userId, classifyBlobError(error), 'listBlobs', error)
+    return
+  }
 
   const keysToDelete = blobs
     .map((blob) => blob.key)
@@ -157,12 +312,9 @@ async function runLazyCleanup(provider: string, userId: number, retentionDays: n
     })
 
   const deleteResults = await Promise.allSettled(keysToDelete.map(async (key) => store.delete(key)))
-  for (const [index, result] of deleteResults.entries()) {
+  for (const result of deleteResults) {
     if (result.status === 'rejected') {
-      console.warn('[capture-store] Failed to delete expired capture', {
-        key: keysToDelete[index],
-        error: result.reason instanceof Error ? result.reason.message : 'Unknown error'
-      })
+      logCaptureFailure(provider, userId, classifyBlobError(result.reason), 'deleteBlob', result.reason)
     }
   }
 }
@@ -208,7 +360,13 @@ function buildCapture(
 async function persistCapture(capture: ProviderCapture, config: CaptureConfig): Promise<void> {
   const dateUtc = buildDateFromIso(capture.capturedAt)
   const indexKey = buildIndexKey(capture.provider, capture.userId, dateUtc)
-  const index = await readIndex(indexKey, dateUtc)
+
+  let index: CaptureIndex
+  try {
+    index = await readIndex(indexKey, dateUtc)
+  } catch (cause) {
+    throw new CaptureStageError('readIndex', cause)
+  }
 
   if (index.count >= config.maxPerDay) {
     return
@@ -219,11 +377,20 @@ async function persistCapture(capture: ProviderCapture, config: CaptureConfig): 
   const store = getCaptureStore()
   const captureKey = buildCaptureKey(capture.provider, capture.userId, capture.capturedAt)
 
-  await store.setJSON(captureKey, capture)
-  await writeIndex(indexKey, {
-    date: dateUtc,
-    count: index.count + 1
-  })
+  try {
+    await store.setJSON(captureKey, capture)
+  } catch (cause) {
+    throw new CaptureStageError('captureWrite', cause)
+  }
+
+  try {
+    await writeIndex(indexKey, {
+      date: dateUtc,
+      count: index.count + 1
+    })
+  } catch (cause) {
+    throw new CaptureStageError('indexWrite', cause)
+  }
 }
 
 /**
@@ -256,6 +423,12 @@ export async function maybeCapture(input: {
   if (!input.rawPayload) return
   if (!isValidUserId(input.userId)) return
 
+  const envError = checkCaptureEnv()
+  if (envError !== null) {
+    logCaptureFailure(input.provider, input.userId, envError, 'env_check', null)
+    return
+  }
+
   const capture = buildCapture(
     input.provider,
     input.userId,
@@ -268,11 +441,14 @@ export async function maybeCapture(input: {
   try {
     await persistCapture(capture, input.config)
   } catch (error) {
-    console.warn('[capture-store] Failed to persist provider capture', {
-      provider: input.provider,
-      userId: input.userId,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    })
+    const operation = error instanceof CaptureStageError ? error.operation : 'unknown'
+    const errorCode = classifyCaptureFailure(error)
+    logCaptureFailure(input.provider, input.userId, errorCode, operation, error)
   }
+}
+
+/** @internal Reset module-level state between tests. Do not use in production code. */
+export function _resetCaptureStoreForTesting(): void {
+  captureStore = null
+  captureFailureCounts.clear()
 }
