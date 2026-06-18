@@ -323,7 +323,7 @@ function App() {
               <div className="budgetGrid">
                 <div>
                   <span>Included quota used</span>
-                  <strong>{usage.used}</strong>
+                  <strong>{Math.min(usage.used, usage.quota)}</strong>
                 </div>
                 {usage.overageCount !== undefined && (
                   <div>
