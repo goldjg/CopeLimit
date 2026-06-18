@@ -47,6 +47,7 @@ Netlify Functions (netlify/functions/*.ts)
         ├── auth-logout         Session cookie deletion
         ├── me                  Current user info
         ├── usage               Copilot quota (provider-dispatched)
+        ├── history             Usage history snapshots (session-authenticated)
         ├── widget-token        Widget bearer token CRUD
         ├── widget-usage        Widget-token-authenticated quota endpoint
         ├── onboarding-session  Bootstrap token issuance (iOS setup)
@@ -176,6 +177,68 @@ Returns normalised Copilot quota data from the configured provider.
 ```
 
 `warningLevel` is one of: `normal` (< 75 %), `warm` (≥ 75 %), `hot` (≥ 90 %), `over` (≥ 100 %).
+
+---
+
+### `GET /api/history`
+
+Returns usage history snapshots for the authenticated user, ordered newest-first. Requires a valid session cookie; returns `401` when unauthenticated.
+
+**Query parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `limit` | integer ≥ 0 | Return at most this many snapshots. |
+| `from` | `YYYY-MM-DD` | Earliest UTC date to include (inclusive). |
+| `to` | `YYYY-MM-DD` | Latest UTC date to include (inclusive). |
+| `summary` | `true` | Include derived burn-rate metrics in the response. |
+
+**Response (without `?summary=true`)**
+```json
+{
+  "snapshots": [
+    {
+      "capturedAt": "2026-06-15T10:00:00.000Z",
+      "used": 3000,
+      "quota": 7000,
+      "remaining": 4000,
+      "billingPhase": "credits_available"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response (with `?summary=true`)**
+```json
+{
+  "snapshots": [...],
+  "count": 5,
+  "summary": {
+    "deltaUsed": 1500,
+    "creditsPerHour": 125.0,
+    "creditsPerDay": 3000.0,
+    "averageBurnRate": 130.0,
+    "snapshotCount": 5,
+    "oldestAt": "2026-06-15T02:00:00.000Z",
+    "newestAt": "2026-06-15T14:00:00.000Z"
+  }
+}
+```
+
+Derived metrics:
+
+| Field | Description |
+|---|---|
+| `deltaUsed` | Net credits consumed (sum of positive per-interval deltas; quota resets excluded). |
+| `creditsPerHour` | Overall burn rate: `deltaUsed / windowHours`. `null` if fewer than 2 snapshots. |
+| `creditsPerDay` | `creditsPerHour × 24`. `null` if fewer than 2 snapshots. |
+| `averageBurnRate` | Mean of per-interval burn rates. `null` if no qualifying intervals. |
+| `snapshotCount` | Number of snapshots in the returned window. |
+| `oldestAt` | ISO timestamp of the oldest snapshot. `null` if empty. |
+| `newestAt` | ISO timestamp of the newest snapshot. `null` if empty. |
+
+Snapshots contain no raw provider payloads, no `billingEntity`, and no credential data.
 
 ---
 

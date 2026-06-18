@@ -31,6 +31,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/history"
+  to = "/.netlify/functions/history"
+  status = 200
+
+[[redirects]]
   from = "/api/widget-usage"
   to = "/.netlify/functions/widget-usage"
   status = 200

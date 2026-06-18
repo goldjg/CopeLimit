@@ -664,3 +664,19 @@ usage snapshot ledger. Key facts:
 - Default config: `enabled=false`, `retentionDays=90`, `maxPerDay=48`.
 - Env vars: `USAGE_HISTORY_ENABLED`, `USAGE_HISTORY_RETENTION_DAYS`, `USAGE_HISTORY_MAX_PER_DAY`.
 - 39 contract tests in `__tests__/usage-history-store.test.ts`.
+
+## Usage history API endpoint (implemented)
+
+`GET /api/history` in `netlify/functions/history.ts`. Facts:
+
+- Auth: session cookie required (via `verifySession`); `401` when missing or invalid.
+- User scoping: uses `session.id` (numeric GitHub user ID) as blob prefix.
+- Query params: `limit` (integer ≥ 0), `from`/`to` (YYYY-MM-DD), `summary` (boolean).
+- Response: `{ snapshots: UsageHistorySnapshot[], count: number, summary?: HistorySummary }`.
+- Derived metrics via `computeHistorySummary` in `netlify/functions/lib/history-metrics.ts`
+  (pure function, no I/O): `deltaUsed`, `creditsPerHour`, `creditsPerDay`, `averageBurnRate`.
+- No raw provider payloads in snapshots; no `billingEntity`; no credential data.
+- Cache-Control: `private, no-store`.
+- Returns 405 for non-GET methods; 400 for bad params; 500 on unexpected store failure.
+- Netlify redirect: `/api/history` → `/.netlify/functions/history` in `netlify.toml`.
+- 17 contract tests in `__tests__/history-handler.test.ts`; 17 tests in `__tests__/history-metrics.test.ts`.
