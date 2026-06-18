@@ -143,16 +143,41 @@ function getDateFolderFromKey(userId: number, key: string): string | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns a deterministic, URL-safe fingerprint of the tracked state fields
+ * in a snapshot.  `capturedAt` is intentionally excluded so that two
+ * observations of the same billing state produce the same fingerprint
+ * regardless of when they were taken.
+ *
+ * The fingerprint is used as the filename component of the Blobs key so that
+ * concurrent writes of the same state all target the same key and overwrite
+ * each other idempotently, eliminating duplicate entries caused by Netlify
+ * Blobs eventual-consistency race conditions.
+ *
+ * @param snapshot - The snapshot whose state fields are fingerprinted.
+ * @returns A URL-safe fingerprint string.
+ */
+export function snapshotStateFingerprint(snapshot: UsageHistorySnapshot): string {
+  const overageCountStr = snapshot.overageCount === undefined ? 'u' : String(snapshot.overageCount)
+  const derivedOverageCreditsStr = snapshot.derivedOverageCredits === undefined ? 'u' : String(snapshot.derivedOverageCredits)
+  return `${snapshot.used}_${snapshot.quota}_${snapshot.remaining}_${snapshot.billingPhase}_${overageCountStr}_${derivedOverageCreditsStr}`
+}
+
+/**
  * Builds the Blobs key for a single history entry.
  *
- * Format: `<userId>/<YYYY-MM-DD>/<isoTimestamp>.json`
+ * Format: `<userId>/<YYYY-MM-DD>/<stateFingerprint>.json`
  *
- * @param userId       - Numeric GitHub user ID.
- * @param isoTimestamp - ISO 8601 timestamp of the snapshot.
+ * The filename is derived from the snapshot's billing state fields rather than
+ * its `capturedAt` timestamp.  This makes writes idempotent: concurrent
+ * requests that observe the same billing state will map to the same key and
+ * overwrite each other with equivalent data, preventing duplicate entries.
+ *
+ * @param userId   - Numeric GitHub user ID.
+ * @param snapshot - The snapshot to store.
  * @returns The Blobs key string.
  */
-export function buildHistoryKey(userId: number, isoTimestamp: string): string {
-  return `${userId}/${buildDateFromIso(isoTimestamp)}/${isoTimestamp}.json`
+export function buildHistoryKey(userId: number, snapshot: UsageHistorySnapshot): string {
+  return `${userId}/${buildDateFromIso(snapshot.capturedAt)}/${snapshotStateFingerprint(snapshot)}.json`
 }
 
 /**
@@ -318,17 +343,29 @@ export async function appendSnapshot(
 
   const dateUtc = buildDateFromIso(snapshot.capturedAt)
   const indexKey = buildHistoryIndexKey(userId, dateUtc)
+
+  // Deduplication: the entry key is derived from the snapshot's billing state
+  // (not its timestamp).  If a blob already exists at this key the state is
+  // unchanged — skip the write.  Because all concurrent requests with the same
+  // state map to the same key, this also makes concurrent writes idempotent
+  // and eliminates duplicates that arise from Netlify Blobs eventual-
+  // consistency read-your-writes gaps.
+  const store = getHistoryStore()
+  const entryKey = buildHistoryKey(userId, snapshot)
+
+  try {
+    const existing = await store.get(entryKey, { type: 'json' }) as UsageHistoryEntry | null
+    if (existing !== null && existing.snapshot !== null && typeof existing.snapshot === 'object') {
+      return
+    }
+  } catch {
+    // Fail-open: if the existence check throws, allow the write to proceed so
+    // that a transient Blobs error never silently drops a real state change.
+  }
+
   const dailyIndex = await readDailyIndex(indexKey, dateUtc, userId)
 
   if (dailyIndex.count >= config.maxPerDay) return
-
-  // Deduplication: skip the write when all tracked fields are unchanged from
-  // the most recent stored snapshot.  The first snapshot (empty history) is
-  // always preserved because `getLatestStoredSnapshot` returns `null`.
-  const latestSnapshot = await getLatestStoredSnapshot(userId)
-  if (latestSnapshot !== null && snapshotsAreEquivalent(snapshot, latestSnapshot)) {
-    return
-  }
 
   try {
     await runLazyHistoryCleanup(userId, config.retentionDays)
@@ -341,9 +378,6 @@ export async function appendSnapshot(
     userId,
     snapshot,
   }
-
-  const store = getHistoryStore()
-  const entryKey = buildHistoryKey(userId, snapshot.capturedAt)
 
   try {
     await store.setJSON(entryKey, entry)
@@ -467,7 +501,7 @@ export function calculateDelta(
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot deduplication
+// Snapshot deduplication helpers
 // ---------------------------------------------------------------------------
 
 /**
@@ -480,6 +514,10 @@ export function calculateDelta(
  * This is a pure function with no I/O; `capturedAt` is intentionally excluded
  * because the deduplication goal is to suppress writes when the *state* hasn't
  * changed, not when the wall-clock time differs.
+ *
+ * Note: the primary deduplication mechanism is the content-hash Blobs key
+ * produced by {@link buildHistoryKey}.  This function is provided for callers
+ * that need to compare two in-memory snapshots directly.
  *
  * @param a - First snapshot to compare.
  * @param b - Second snapshot to compare.
@@ -497,52 +535,6 @@ export function snapshotsAreEquivalent(
     a.overageCount === b.overageCount &&
     a.derivedOverageCredits === b.derivedOverageCredits
   )
-}
-
-/**
- * Retrieves the most recently stored snapshot for a user without loading the
- * entire history.
- *
- * Strategy: list all entry blobs, pick the lexicographically largest key
- * (which equals the chronologically latest because keys embed an ISO 8601
- * timestamp), then fetch just that one record.
- *
- * Returns `null` when:
- * - no snapshots are stored yet (first write),
- * - the blob list operation fails (allow the write to proceed), or
- * - the fetched entry cannot be parsed.
- *
- * @param userId - Numeric GitHub user ID.
- * @returns The latest `UsageHistorySnapshot`, or `null`.
- */
-async function getLatestStoredSnapshot(userId: number): Promise<UsageHistorySnapshot | null> {
-  const store = getHistoryStore()
-  const prefix = `${userId}/`
-
-  let blobs: Array<{ key: string }>
-  try {
-    const result = await store.list({ prefix })
-    blobs = result.blobs
-  } catch {
-    // Cannot determine latest snapshot; allow the write to proceed.
-    return null
-  }
-
-  const entryKeys = blobs.map(b => b.key).filter(isEntryKey)
-  if (entryKeys.length === 0) return null
-
-  // Keys follow `<userId>/<YYYY-MM-DD>/<ISO-timestamp>.json`.  Lexicographic
-  // ordering of ISO 8601 timestamps is chronological, so the max key is the
-  // most recent entry.
-  const latestKey = entryKeys.reduce((best, key) => (key > best ? key : best))
-
-  try {
-    const entry = await store.get(latestKey, { type: 'json' }) as UsageHistoryEntry | null
-    if (!entry || typeof entry.snapshot !== 'object' || entry.snapshot === null) return null
-    return entry.snapshot
-  } catch {
-    return null
-  }
 }
 
 /** @internal Reset module-level state between tests. Do not use in production code. */
