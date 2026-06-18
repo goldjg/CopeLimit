@@ -32,19 +32,19 @@ export type WarningLevel = 'normal' | 'warm' | 'hot' | 'over';
  * The billing phase captures where in the credit/budget lifecycle the
  * current usage falls.
  *
- * Detection priority (first match wins):
+ * Detection priority (first match wins, uses rawRemaining — the pre-clamp API value):
  *  1. `unlimited`         — `unlimited === true`
- *  2. `credits_available` — `remaining > 0`
- *  3. `budget_active`     — `overage_count > 0 && overage_permitted === true`
- *  4. `budget_available`  — `remaining === 0 && overage_permitted === true && overage_count === 0`
+ *  2. `credits_available` — `rawRemaining > 0`
+ *  3. `budget_active`     — `(overage_count > 0 || rawRemaining < 0) && overage_permitted === true`
+ *  4. `budget_available`  — `rawRemaining === 0 && overage_permitted === true && overage_count === 0`
  *  5. `hard_stop`         — `has_quota === false` (unlimited already ruled out at priority 1)
- *  6. `credits_exhausted` — `remaining === 0 && overage_permitted !== true` (default)
+ *  6. `credits_exhausted` — `rawRemaining <= 0 && overage_permitted !== true` (default)
  */
 export type BillingPhase =
   | 'credits_available'  // Included credits remaining; budget not yet needed
   | 'credits_exhausted'  // Included credits = 0; no budget configured or enabled
   | 'budget_available'   // Included credits = 0; budget enabled; no overage consumed yet
-  | 'budget_active'      // Budget spending in progress (overage_count > 0)
+  | 'budget_active'      // Budget spending in progress (overage_count > 0 OR rawRemaining < 0)
   | 'unlimited'          // Unlimited usage (unlimited === true)
   | 'hard_stop';         // No quota, no budget, no unlimited (has_quota === false)
 
@@ -81,6 +81,12 @@ export type Usage = {
   overageCount?: number;
   /** Budget allocation expressed in credit-equivalent units (present when a budget is configured). */
   overageEntitlement?: number;
+  /**
+   * Derived overage credits estimated from a negative `rawRemaining` value during the
+   * settlement-lag window (before `overage_count` updates). Equal to `Math.max(0, -rawRemaining)`.
+   * Present only when `rawRemaining < 0` at normalisation time.
+   */
+  derivedOverageCredits?: number;
 };
 
 /** A plain JSON object whose values are unknown at compile time. */
@@ -210,33 +216,38 @@ export function detectMode(body: JsonObject): Mode {
 }
 
 /**
- * Derives the {@link BillingPhase} from normalised usage and overage fields.
+ * Derives the {@link BillingPhase} from raw (pre-clamp) remaining and overage fields.
  *
- * Detection follows a fixed priority (first match wins):
+ * Detection follows a fixed priority (first match wins, uses rawRemaining):
  * 1. `unlimited`         — `unlimited === true`
- * 2. `credits_available` — `remaining > 0`
- * 3. `budget_active`     — `overageCount > 0 && overagePermitted === true`
- * 4. `budget_available`  — `remaining === 0 && overagePermitted === true && overageCount === 0`
+ * 2. `credits_available` — `rawRemaining > 0`
+ * 3. `budget_active`     — `(overageCount > 0 || rawRemaining < 0) && overagePermitted === true`
+ * 4. `budget_available`  — `rawRemaining === 0 && overagePermitted === true && overageCount === 0`
  * 5. `hard_stop`         — `hasQuota === false` (unlimited already ruled out at step 1)
- * 6. `credits_exhausted` — default (`remaining === 0 && overagePermitted !== true`)
+ * 6. `credits_exhausted` — default (`rawRemaining <= 0 && overagePermitted !== true`)
+ *
+ * Uses rawRemaining (pre-clamp API value) so that the settlement-lag window — where
+ * remaining goes negative before overage_count updates — is correctly detected as
+ * budget_active rather than budget_available.
  *
  * When overage fields are absent (e.g. for the `mock` or `copilot-local` providers),
- * the result is `credits_available` when credits remain, or `credits_exhausted` otherwise.
+ * the result is `credits_available` when rawRemaining > 0, or `credits_exhausted` otherwise.
  *
- * @param input - Normalised usage values plus optional overage flags from the API.
+ * @param input - Raw remaining value plus optional overage flags from the API.
  * @returns The detected {@link BillingPhase}.
  */
 export function detectBillingPhase(input: {
-  remaining: number;
+  rawRemaining: number;
   overageCount?: number;
   overagePermitted?: boolean;
   unlimited?: boolean;
   hasQuota?: boolean;
 }): BillingPhase {
   if (input.unlimited === true) return 'unlimited';
-  if (input.remaining > 0) return 'credits_available';
-  // remaining === 0 is guaranteed from here on (both early-return guards above have passed).
-  if ((input.overageCount ?? 0) > 0 && input.overagePermitted === true) return 'budget_active';
+  if (input.rawRemaining > 0) return 'credits_available';
+  // rawRemaining <= 0 is guaranteed from here on (both early-return guards above have passed).
+  // priority 3: budget_active fires when overageCount > 0 OR rawRemaining < 0 (settlement lag)
+  if (((input.overageCount ?? 0) > 0 || input.rawRemaining < 0) && input.overagePermitted === true) return 'budget_active';
   if (input.overagePermitted === true) return 'budget_available';
   if (input.hasQuota === false) return 'hard_stop';
   return 'credits_exhausted';
@@ -248,6 +259,10 @@ export function detectBillingPhase(input: {
  * `billingPhase`, `updatedAt`).
  *
  * @param input - Core usage fields from the provider (without derived values).
+ *   The optional `rawRemaining` field carries the pre-clamp API value (which may
+ *   be negative during the settlement-lag window). When present it is passed to
+ *   {@link detectBillingPhase} so that a negative balance is correctly detected
+ *   as `budget_active`. When absent, the value is inferred from `quota - used`.
  *   The optional `overageCount`, `overageEntitlement`, `overagePermitted`,
  *   `unlimited`, and `hasQuota` fields are used to detect the {@link BillingPhase};
  *   `overageCount` and `overageEntitlement` are also carried through to the
@@ -262,21 +277,30 @@ export function normaliseUsage(input: {
   billingEntity: string;
   source: string;
   notes?: string[];
+  /** Pre-clamp API remaining value; may be negative (settlement lag). */
+  rawRemaining?: number;
   overageCount?: number;
   overageEntitlement?: number;
   overagePermitted?: boolean;
   unlimited?: boolean;
   hasQuota?: boolean;
 }): Usage {
-  const remaining = Math.max(0, input.quota - input.used);
+  // Use rawRemaining when explicitly provided (may be negative); fall back to
+  // computing from quota - used for backward-compatible callers that do not supply it.
+  const rawRemaining = input.rawRemaining ?? (input.quota - input.used);
+  const remaining = Math.max(0, rawRemaining);
   const percentUsed = input.quota > 0 ? Math.round((input.used / input.quota) * 100) : 0;
   const billingPhase = detectBillingPhase({
-    remaining,
+    rawRemaining,
     overageCount: input.overageCount,
     overagePermitted: input.overagePermitted,
     unlimited: input.unlimited,
     hasQuota: input.hasQuota
   });
+  // During the settlement-lag window rawRemaining < 0 means credits were consumed
+  // beyond the quota before overage_count updated. Expose the estimated overage so
+  // the UI can show real-time consumption.
+  const derivedOverageCredits = rawRemaining < 0 ? Math.max(0, -rawRemaining) : undefined;
 
   // Fields are listed explicitly (rather than spreading ...input) so that
   // overagePermitted, unlimited, and hasQuota — which are computation inputs,
@@ -295,7 +319,8 @@ export function normaliseUsage(input: {
     notes: input.notes ?? [],
     billingPhase,
     ...(input.overageCount !== undefined ? { overageCount: input.overageCount } : {}),
-    ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {})
+    ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {}),
+    ...(derivedOverageCredits !== undefined ? { derivedOverageCredits } : {})
   };
 }
 
