@@ -8,6 +8,7 @@ import {
   calculateDelta,
   getHistory,
   isDateExpired,
+  snapshotsAreEquivalent,
 } from '../usage-history-store'
 import type { UsageHistoryConfig, UsageHistoryEntry, UsageHistorySnapshot } from '../usage-history-types'
 
@@ -554,5 +555,198 @@ describe('getHistory', () => {
       '[usage-history] History store operation failed',
       expect.objectContaining({ operation: 'listBlobs', storeName: 'usage-history' })
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Contract assertion 7: snapshotsAreEquivalent — pure function
+// ---------------------------------------------------------------------------
+
+describe('snapshotsAreEquivalent', () => {
+  const base: UsageHistorySnapshot = {
+    capturedAt: '2026-06-15T10:00:00.000Z',
+    used: 3000,
+    quota: 7000,
+    remaining: 4000,
+    billingPhase: 'credits_available',
+  }
+
+  it('returns true for snapshots with identical tracked fields', () => {
+    const other: UsageHistorySnapshot = { ...base, capturedAt: '2026-06-15T11:00:00.000Z' }
+    expect(snapshotsAreEquivalent(base, other)).toBe(true)
+  })
+
+  it('returns false when used differs', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, used: 3001 })).toBe(false)
+  })
+
+  it('returns false when quota differs', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, quota: 7001 })).toBe(false)
+  })
+
+  it('returns false when remaining differs', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, remaining: 3999 })).toBe(false)
+  })
+
+  it('returns false when billingPhase differs', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, billingPhase: 'budget_active' })).toBe(false)
+  })
+
+  it('returns false when overageCount differs (undefined vs number)', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, overageCount: 0 })).toBe(false)
+  })
+
+  it('returns false when overageCount differs (different values)', () => {
+    expect(snapshotsAreEquivalent(
+      { ...base, overageCount: 100 },
+      { ...base, overageCount: 150 },
+    )).toBe(false)
+  })
+
+  it('returns true when overageCount is identical on both', () => {
+    expect(snapshotsAreEquivalent(
+      { ...base, overageCount: 100 },
+      { ...base, overageCount: 100 },
+    )).toBe(true)
+  })
+
+  it('returns false when derivedOverageCredits differs (undefined vs number)', () => {
+    expect(snapshotsAreEquivalent(base, { ...base, derivedOverageCredits: 0 })).toBe(false)
+  })
+
+  it('returns false when derivedOverageCredits differs (different values)', () => {
+    expect(snapshotsAreEquivalent(
+      { ...base, derivedOverageCredits: 200 },
+      { ...base, derivedOverageCredits: 473 },
+    )).toBe(false)
+  })
+
+  it('ignores capturedAt when comparing snapshots', () => {
+    // Two snapshots with same state but different timestamps are equivalent
+    const earlier: UsageHistorySnapshot = { ...base, capturedAt: '2026-06-15T09:00:00.000Z' }
+    const later: UsageHistorySnapshot = { ...base, capturedAt: '2026-06-15T10:00:00.000Z' }
+    expect(snapshotsAreEquivalent(earlier, later)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Contract assertion 8: appendSnapshot — deduplication
+// ---------------------------------------------------------------------------
+
+describe('appendSnapshot — deduplication', () => {
+  let mockStore: MockStore
+
+  beforeEach(() => {
+    mockStore = makeMockStore()
+    vi.mocked(getStore).mockReturnValue(mockStore as ReturnType<typeof getStore>)
+    _resetHistoryStoreForTesting()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /**
+   * Helper: configure mockStore so the daily index is empty and the most recent
+   * stored snapshot has the given fields (or none, if null).
+   */
+  function setupLatestSnapshot(latest: UsageHistorySnapshot | null): void {
+    const existingEntryKey = buildHistoryKey(USER_ID, '2026-06-15T09:00:00.000Z')
+
+    mockStore.get.mockImplementation(async (key: string) => {
+      if (key.endsWith('_index.json')) return { count: 0, date: '2026-06-15' }
+      if (latest !== null) {
+        return { historyVersion: '1', userId: USER_ID, snapshot: latest } satisfies UsageHistoryEntry
+      }
+      return null
+    })
+
+    mockStore.list.mockResolvedValue(
+      latest !== null
+        ? { blobs: [{ key: existingEntryKey }] }
+        : { blobs: [] }
+    )
+  }
+
+  function entryWriteCount(): number {
+    return (mockStore.setJSON.mock.calls as Array<[string, unknown]>).filter(
+      ([key]) => !key.endsWith('_index.json')
+    ).length
+  }
+
+  it('skips write when all tracked fields are identical to the most recent snapshot', async () => {
+    setupLatestSnapshot(BASE_SNAPSHOT)
+    const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:30:00.000Z' }
+
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(0)
+  })
+
+  it('writes the first snapshot when no history exists (empty store)', async () => {
+    setupLatestSnapshot(null)
+
+    await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('writes snapshot when used value changes', async () => {
+    setupLatestSnapshot({ ...BASE_SNAPSHOT, used: 2999 })
+
+    await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG) // BASE_SNAPSHOT.used = 3000
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('writes snapshot when billing phase transitions', async () => {
+    setupLatestSnapshot({ ...BASE_SNAPSHOT, billingPhase: 'credits_available' })
+    const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, billingPhase: 'budget_active' }
+
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('writes snapshot when overageCount grows', async () => {
+    setupLatestSnapshot({ ...BASE_SNAPSHOT, billingPhase: 'budget_active', overageCount: 100 })
+    const incoming: UsageHistorySnapshot = {
+      ...BASE_SNAPSHOT,
+      billingPhase: 'budget_active',
+      overageCount: 150,
+    }
+
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('writes snapshot when derivedOverageCredits grows', async () => {
+    setupLatestSnapshot({ ...BASE_SNAPSHOT, derivedOverageCredits: 200 })
+    const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, derivedOverageCredits: 473 }
+
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('writes snapshot when overageCount appears for the first time (undefined → number)', async () => {
+    setupLatestSnapshot({ ...BASE_SNAPSHOT }) // no overageCount
+    const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, overageCount: 0 }
+
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
+
+    expect(entryWriteCount()).toBe(1)
+  })
+
+  it('proceeds to write when getLatestStoredSnapshot list fails (allow-write fallback)', async () => {
+    // Daily index get succeeds, but the blob list for the prefix throws
+    mockStore.get.mockResolvedValue({ count: 0, date: '2026-06-15' })
+    mockStore.list.mockRejectedValue(new Error('list failure'))
+
+    await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG)
+
+    // Entry write should still proceed (fail-open dedup)
+    expect(entryWriteCount()).toBe(1)
   })
 })

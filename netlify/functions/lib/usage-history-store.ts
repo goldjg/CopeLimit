@@ -322,6 +322,14 @@ export async function appendSnapshot(
 
   if (dailyIndex.count >= config.maxPerDay) return
 
+  // Deduplication: skip the write when all tracked fields are unchanged from
+  // the most recent stored snapshot.  The first snapshot (empty history) is
+  // always preserved because `getLatestStoredSnapshot` returns `null`.
+  const latestSnapshot = await getLatestStoredSnapshot(userId)
+  if (latestSnapshot !== null && snapshotsAreEquivalent(snapshot, latestSnapshot)) {
+    return
+  }
+
   try {
     await runLazyHistoryCleanup(userId, config.retentionDays)
   } catch {
@@ -455,6 +463,85 @@ export function calculateDelta(
     overageCountDelta,
     derivedOverageCreditsDelta,
     durationMs: toMs - fromMs,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot deduplication
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns `true` when every tracked field of two snapshots is identical.
+ *
+ * Tracked fields (same set as `UsageHistorySnapshot` minus `capturedAt`):
+ * `used`, `quota`, `remaining`, `billingPhase`, `overageCount`,
+ * `derivedOverageCredits`.
+ *
+ * This is a pure function with no I/O; `capturedAt` is intentionally excluded
+ * because the deduplication goal is to suppress writes when the *state* hasn't
+ * changed, not when the wall-clock time differs.
+ *
+ * @param a - First snapshot to compare.
+ * @param b - Second snapshot to compare.
+ * @returns `true` when all tracked fields are identical.
+ */
+export function snapshotsAreEquivalent(
+  a: UsageHistorySnapshot,
+  b: UsageHistorySnapshot,
+): boolean {
+  return (
+    a.used === b.used &&
+    a.quota === b.quota &&
+    a.remaining === b.remaining &&
+    a.billingPhase === b.billingPhase &&
+    a.overageCount === b.overageCount &&
+    a.derivedOverageCredits === b.derivedOverageCredits
+  )
+}
+
+/**
+ * Retrieves the most recently stored snapshot for a user without loading the
+ * entire history.
+ *
+ * Strategy: list all entry blobs, pick the lexicographically largest key
+ * (which equals the chronologically latest because keys embed an ISO 8601
+ * timestamp), then fetch just that one record.
+ *
+ * Returns `null` when:
+ * - no snapshots are stored yet (first write),
+ * - the blob list operation fails (allow the write to proceed), or
+ * - the fetched entry cannot be parsed.
+ *
+ * @param userId - Numeric GitHub user ID.
+ * @returns The latest `UsageHistorySnapshot`, or `null`.
+ */
+async function getLatestStoredSnapshot(userId: number): Promise<UsageHistorySnapshot | null> {
+  const store = getHistoryStore()
+  const prefix = `${userId}/`
+
+  let blobs: Array<{ key: string }>
+  try {
+    const result = await store.list({ prefix })
+    blobs = result.blobs
+  } catch {
+    // Cannot determine latest snapshot; allow the write to proceed.
+    return null
+  }
+
+  const entryKeys = blobs.map(b => b.key).filter(isEntryKey)
+  if (entryKeys.length === 0) return null
+
+  // Keys follow `<userId>/<YYYY-MM-DD>/<ISO-timestamp>.json`.  Lexicographic
+  // ordering of ISO 8601 timestamps is chronological, so the max key is the
+  // most recent entry.
+  const latestKey = entryKeys.reduce((best, key) => (key > best ? key : best))
+
+  try {
+    const entry = await store.get(latestKey, { type: 'json' }) as UsageHistoryEntry | null
+    if (!entry || typeof entry.snapshot !== 'object' || entry.snapshot === null) return null
+    return entry.snapshot
+  } catch {
+    return null
   }
 }
 

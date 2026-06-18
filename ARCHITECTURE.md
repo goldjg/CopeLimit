@@ -305,10 +305,20 @@ Old entries are deleted lazily when a new snapshot is written for the same user
 prefix. The daily cap is enforced via `HistoryDailyIndex._index.json` (Tier 3).
 Loss of the daily index is non-blocking; the count is rebuilt from listed entries.
 
+**Snapshot deduplication:** before writing, `appendSnapshot` reads the most
+recently stored snapshot for the user (one `list` + one `get`). If all six
+tracked fields — `used`, `quota`, `remaining`, `billingPhase`, `overageCount`,
+`derivedOverageCredits` — are identical to the incoming snapshot, the write is
+silently dropped. The first snapshot (empty history) is always stored. If the
+lookup fails, the write proceeds (fail-open). `capturedAt` is excluded from the
+comparison so that identical state observed at different wall-clock times is
+correctly de-duplicated.
+
 **Storage functions** (`netlify/functions/lib/usage-history-store.ts`):
-- `appendSnapshot(userId, snapshot, config)` — fire-and-forget write; never throws.
+- `appendSnapshot(userId, snapshot, config)` — fire-and-forget write; never throws; skips identical snapshots.
 - `getHistory(userId, options?)` — read history with optional date range and limit.
 - `calculateDelta(before, after)` — pure function; computes `UsageHistoryDelta` from two snapshots.
+- `snapshotsAreEquivalent(a, b)` — pure function; returns `true` when all six tracked fields match.
 
 ### Blob record tiers
 
@@ -867,3 +877,25 @@ numeric/boolean metadata — no credentials or PII.
 
 Implementation of this model is tracked in
 `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
+
+---
+
+## Usage history ledger
+
+### Snapshot deduplication (implemented)
+
+`appendSnapshot` suppresses redundant writes when all six tracked fields
+(`used`, `quota`, `remaining`, `billingPhase`, `overageCount`,
+`derivedOverageCredits`) are unchanged from the most recently stored snapshot.
+
+Rules:
+- The first snapshot for a user is always stored (empty history → write).
+- State transitions (billing phase change, overage growth, usage change) are
+  always stored.
+- If the latest-snapshot lookup fails, the write proceeds (fail-open).
+- `capturedAt` is excluded from the comparison; only state fields matter.
+
+Implementation in `usage-history-store.ts`:
+- `snapshotsAreEquivalent(a, b)` — pure comparison of the six tracked fields.
+- `getLatestStoredSnapshot(userId)` — internal helper; lists blobs, picks the
+  lexicographically largest entry key (= chronologically latest), fetches it.
