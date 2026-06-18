@@ -299,6 +299,9 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
   // (credits consumed beyond quota before overage_count has been settled by billing).
   const rawRemaining = remaining ?? 0;
   // Effective used: when rawRemaining < 0 this exceeds quota (e.g. 7000 - (-473) = 7473).
+  // Math.max(0, ...) guards only the rawRemaining > quota edge case (invalid API data);
+  // it does NOT suppress the negative-remaining signal because safeQuota - rawRemaining
+  // is already positive (and > safeQuota) when rawRemaining < 0.
   const used = Math.max(0, safeQuota - rawRemaining);
   const resetAt =
     readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
