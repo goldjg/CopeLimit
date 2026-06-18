@@ -61,7 +61,30 @@ invariants:
       with an explicit, field-level gate.
     severity: high
 
-  - id: token-never-exposed
+  - id: negative-remaining-is-real-overage
+    name: Negative remaining preserves real overage signal
+    rule: |
+      The raw `remaining` value from `quota_snapshots.premium_interactions.remaining`
+      may be negative when credits consumed exceed the included quota but
+      `overage_count` has not yet been settled by the billing engine (settlement lag).
+      This negative value is a real signal — it must not be silently discarded.
+      The pre-clamp raw value (rawRemaining) must be passed to detectBillingPhase
+      so that the settlement-lag window is correctly detected as budget_active,
+      not misclassified as budget_available.
+    severity: high
+
+  - id: budget-active-negative-remaining
+    name: budget_active detects rawRemaining < 0 in addition to overage_count > 0
+    rule: |
+      The budget_active BillingPhase must be detected when either:
+        (a) overage_count > 0 and overage_permitted === true, OR
+        (b) rawRemaining < 0 and overage_permitted === true.
+      Condition (b) covers the settlement-lag window where credit consumption
+      has exceeded the quota but the billing engine has not yet incremented
+      overage_count. Detecting only condition (a) causes budget_active to be
+      missed during the lag window, incorrectly showing budget_available.
+      Both conditions require overage_permitted === true as the guard.
+    severity: high
     name: GitHub access token never exposed
     rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
     severity: critical
