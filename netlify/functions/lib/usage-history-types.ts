@@ -104,7 +104,12 @@ export type UsageHistoryDelta = {
    * Present when at least one snapshot has `derivedOverageCredits` defined.
    */
   derivedOverageCreditsDelta?: number;
-  /** Milliseconds elapsed between `from.capturedAt` and `to.capturedAt`. May be negative if snapshots are passed in reverse order. */
+  /**
+   * Milliseconds elapsed between `from.capturedAt` and `to.capturedAt`.
+   * Positive when `to` is newer than `from`; negative when snapshots are
+   * passed in reverse chronological order (useful for regression detection
+   * where `from` represents a later observation than `to`).
+   */
   durationMs: number;
 }
 

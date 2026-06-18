@@ -105,7 +105,7 @@ function logHistoryFailure(userId: number, errorCode: string, operation: string,
   }
 
   const diagnostics = buildSafeErrorSummary(error)
-  console.warn('[usage-history] Failed to persist usage snapshot', {
+  console.warn('[usage-history] History store operation failed', {
     userId,
     errorCode,
     operation,
@@ -120,6 +120,11 @@ function classifyBlobError(error: unknown): string {
   if (/\b403\b/.test(msg)) return 'blob_forbidden'
   if (/\b401\b/.test(msg) || /unauthorized/i.test(msg)) return 'blob_unavailable'
   return 'unknown'
+}
+
+/** Returns true when `key` is a snapshot entry (not a daily index). */
+function isEntryKey(key: string): boolean {
+  return !key.endsWith('_index.json')
 }
 
 function getDateFolderFromKey(userId: number, key: string): string | null {
@@ -211,7 +216,7 @@ async function readDailyIndex(key: string, date: string, userId: number): Promis
   const datePrefix = `${userId}/${date}/`
   try {
     const result = await store.list({ prefix: datePrefix })
-    const rebuiltCount = result.blobs.filter(b => !b.key.endsWith('_index.json')).length
+    const rebuiltCount = result.blobs.filter(b => isEntryKey(b.key)).length
     const recovered: HistoryDailyIndex = { count: rebuiltCount, date }
 
     // Best-effort write of recovered index
@@ -317,7 +322,11 @@ export async function appendSnapshot(
 
   if (dailyIndex.count >= config.maxPerDay) return
 
-  await runLazyHistoryCleanup(userId, config.retentionDays)
+  try {
+    await runLazyHistoryCleanup(userId, config.retentionDays)
+  } catch {
+    // Non-blocking: cleanup errors must not abort the snapshot write
+  }
 
   const entry: UsageHistoryEntry = {
     historyVersion: HISTORY_VERSION,
@@ -375,7 +384,7 @@ export async function getHistory(
   const entryKeys = blobs
     .map(b => b.key)
     .filter(key => {
-      if (key.endsWith('_index.json')) return false
+      if (!isEntryKey(key)) return false
       if (!options?.fromDate && !options?.toDate) return true
       const dateFolder = getDateFolderFromKey(userId, key)
       if (!dateFolder) return false

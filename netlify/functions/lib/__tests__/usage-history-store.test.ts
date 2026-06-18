@@ -551,7 +551,7 @@ describe('getHistory', () => {
     const result = await getHistory(USER_ID)
     expect(result).toEqual([])
     expect(warnSpy).toHaveBeenCalledWith(
-      '[usage-history] Failed to persist usage snapshot',
+      '[usage-history] History store operation failed',
       expect.objectContaining({ operation: 'listBlobs', storeName: 'usage-history' })
     )
   })
