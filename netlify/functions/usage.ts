@@ -295,8 +295,11 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
   }
 
   const safeQuota = Math.max(0, quota ?? 0);
-  const safeRemaining = Math.max(0, remaining ?? 0);
-  const used = Math.max(0, safeQuota - safeRemaining);
+  // Preserve the pre-clamp value; a negative rawRemaining indicates settlement lag
+  // (credits consumed beyond quota before overage_count has been settled by billing).
+  const rawRemaining = remaining ?? 0;
+  // Effective used: when rawRemaining < 0 this exceeds quota (e.g. 7000 - (-473) = 7473).
+  const used = Math.max(0, safeQuota - rawRemaining);
   const resetAt =
     readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
     nextMonthReset();
@@ -306,6 +309,7 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
       mode: detectMode(body),
       used,
       quota: safeQuota,
+      rawRemaining,
       resetAt,
       billingEntity: login,
       source: 'github-copilot-internal',
