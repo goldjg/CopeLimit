@@ -357,6 +357,7 @@ button {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  height: 88px;
   min-height: 88px;
   padding: 14px 12px 10px;
   border-radius: 18px;
