@@ -21,6 +21,7 @@ This document describes the design decisions, data flows, and component boundari
 8. [Provider system](#provider-system)
 9. [iOS Scriptable scripts](#ios-scriptable-scripts)
 10. [Multi-context model (Horizon 2)](#multi-context-model-horizon-2)
+11. [Billing state model](#billing-state-model)
 
 ---
 
@@ -478,3 +479,178 @@ user and which one is the default.
   from real observed payloads.
 - No widget aggregate view (one selected context only in Horizon 2).
 - No new paid infrastructure or new database.
+
+---
+
+## Billing state model
+
+This section documents the `BillingPhase` design derived from newly
+observed fields in the `copilot_internal/user` API response. **No code
+implementing this model exists yet.** This section establishes the
+canonical terminology and detection logic for the implementation PR
+tracked in `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
+
+### Motivation
+
+GitHub's transition from premium requests to AI Credits (effective
+1 June 2026) introduced a two-tier quota model:
+
+1. **Included credits** — a fixed monthly allocation (e.g. 7,000 AI
+   Credits for Copilot Pro) that resets each billing cycle.
+2. **Budget-backed credits** — additional usage drawn against a
+   spend budget when included credits are exhausted, if the user has
+   configured one.
+
+The current `Usage` type has no way to express which tier is active, whether
+a budget is configured but not yet consumed, or whether usage is unlimited.
+The `BillingPhase` model fills this gap.
+
+### Newly observed API fields
+
+All fields live at
+`quota_snapshots.premium_interactions.*` in the
+`copilot_internal/user` response body (alongside the existing
+`entitlement`, `remaining`, and `reset_date` fields):
+
+| Field | Type | Description |
+|---|---|---|
+| `token_based_billing` | `boolean` | Already tracked; signals AI Credits mode. |
+| `overage_count` | `number` | Credits consumed beyond the included quota (budget-backed credits used so far this period). |
+| `overage_entitlement` | `number` | Budget allocation in credit-equivalent units (e.g. $50 budget expressed as credit headroom). |
+| `overage_permitted` | `boolean` | `true` when the user has enabled additional/budget-backed usage; `false` or absent when not. |
+| `unlimited` | `boolean` | `true` when usage is unlimited (no quota cap). |
+| `has_quota` | `boolean` | `false` when the account has no quota at all (hard stop). |
+
+**Trust boundary note:** all of these fields originate from the
+`copilot_internal/user` external response and must be treated as
+low-trust. None may drive a repository write target without validation.
+The API shape may change without notice.
+
+### BillingPhase state model
+
+```typescript
+/**
+ * The billing phase captures where in the credit/budget lifecycle the
+ * current usage falls.
+ *
+ * Detection priority (first match wins):
+ *  1. unlimited        — unlimited === true
+ *  2. credits_available — remaining > 0
+ *  3. budget_active    — overage_count > 0 && overage_permitted === true
+ *  4. budget_available — remaining === 0 && overage_permitted === true && overage_count === 0
+ *  5. credits_exhausted — remaining === 0 && overage_permitted !== true && has_quota !== false
+ *  6. hard_stop        — has_quota === false && unlimited !== true
+ */
+type BillingPhase =
+  | 'credits_available'   // Included credits remaining; budget not yet needed
+  | 'credits_exhausted'   // Included credits = 0; no budget configured or enabled
+  | 'budget_available'    // Included credits = 0; budget enabled; no overage consumed yet
+  | 'budget_active'       // Budget spending in progress (overage_count > 0)
+  | 'unlimited'           // Unlimited usage (unlimited === true)
+  | 'hard_stop';          // No quota, no budget, no unlimited (has_quota === false)
+```
+
+### Phase transition diagram
+
+```
+                        ┌──────────────┐
+                        │   unlimited  │  (unlimited === true)
+                        └──────────────┘
+
+          ┌──────────────────────────────────────────────────────┐
+          │                 has_quota === true                   │
+          │                                                      │
+          ▼                                                      │
+  ┌──────────────────┐  credits     ┌───────────────────────┐   │
+  │ credits_available│──exhausted──►│                       │   │
+  │  remaining > 0   │             │  overage_permitted?    │   │
+  └──────────────────┘             └───────────┬───────────┘   │
+                                              │                 │
+                               ┌──────────────┴──────────────┐ │
+                            true (budget)              false   │ │
+                               │                        │      │ │
+                               ▼                        ▼      │ │
+                  ┌────────────────────┐  ┌─────────────────┐  │ │
+                  │  budget_available  │  │credits_exhausted│  │ │
+                  │  overage_count = 0 │  │ (soft stop)     │  │ │
+                  └────────┬───────────┘  └─────────────────┘  │ │
+                           │ overage_count > 0                  │ │
+                           ▼                                    │ │
+                  ┌────────────────────┐                        │ │
+                  │   budget_active    │                        │ │
+                  │  drawing on budget │                        │ │
+                  └────────────────────┘                        │ │
+                                                                │ │
+          ┌──────────────────────────────────────────────────────┘ │
+          │  has_quota === false                                    │
+          ▼                                                         │
+  ┌──────────────────┐                                             │
+  │    hard_stop     │◄────────────────────────────────────────────┘
+  └──────────────────┘
+```
+
+### Phase summary table
+
+| Phase | Detection condition | UI wording (suggested) | Warning level |
+|---|---|---|---|
+| `credits_available` | `remaining > 0` | "X AI credits remaining (Y of Z)" | derived from `percentUsed` |
+| `credits_exhausted` | `remaining == 0`, `overage_permitted !== true`, `has_quota !== false` | "Included credits used — no budget configured" | `over` |
+| `budget_available` | `remaining == 0`, `overage_permitted === true`, `overage_count == 0` | "Included credits used — budget ready" | `over` (badge), informational |
+| `budget_active` | `overage_count > 0`, `overage_permitted === true` | "Using budget: X credits used" | derived from `overage_count / overage_entitlement` |
+| `unlimited` | `unlimited === true` | "Unlimited usage" | `normal` |
+| `hard_stop` | `has_quota === false`, `unlimited !== true` | "No quota available" | `over` |
+
+### Normalization implications
+
+1. **`Usage` type extension (Horizon 1 follow-up):**
+   - Add `billingPhase: BillingPhase` to the `Usage` type in `copilot.ts`.
+   - Add optional `overageCount?: number` and `overageEntitlement?: number`
+     for display in `budget_active` phase.
+   - `normaliseUsage` should accept these optional inputs and pass them
+     through; the detection function `detectBillingPhase` should live in
+     `copilot.ts`.
+
+2. **`warningLevel` semantics:** The existing percentage-based `WarningLevel`
+   remains unchanged. For `budget_active` phase, `percentUsed` reflects the
+   included-credits fill (will be ≥ 100 %) while `billingPhase` provides the
+   richer context. No extension to `WarningLevel` is planned at this stage.
+
+3. **`UsageSnapshot` (Horizon 2):** The `UsageSnapshot` type stored inside
+   `UsageContext` should add `billingPhase?: BillingPhase` when the
+   Horizon 2 multi-context implementation lands.
+
+4. **Provider compatibility:** `BillingPhase` is a normalised abstraction.
+   The `github-copilot-internal` provider will populate it from the fields
+   listed above. Other providers (`mock`, `copilot-local`) should default
+   to `credits_available` unless they expose equivalent field semantics.
+
+5. **No-surprise-spend guard:** `budget_available` and `budget_active`
+   phases must only be presented when `overage_permitted === true` is
+   observed in the API response. CopeLimit must never surface assumed
+   additional usage without data evidence.
+
+### Current observed state (captured 2026-06-18)
+
+```
+quota_snapshots.premium_interactions:
+  entitlement:        7000
+  remaining:          31
+  used:               6969
+  overage_count:      0
+  overage_entitlement: (budget-equivalent; $50/month)
+  overage_permitted:  true
+  unlimited:          false
+  has_quota:          true
+  token_based_billing: true
+
+Derived BillingPhase: credits_available
+  (remaining = 31 > 0; overage not yet consumed)
+
+Next expected phase: budget_available
+  (after remaining 31 credits are consumed)
+```
+
+### Roadmap
+
+Implementation of this model is tracked in
+`.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.

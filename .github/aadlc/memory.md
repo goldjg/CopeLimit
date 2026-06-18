@@ -138,14 +138,66 @@ CopeLimit-specific boundaries:
   `netlify/functions/widget-usage.ts` now call `detectMode(body)` to
   select `mode: 'ai_credits'` when `token_based_billing` markers are
   detected, falling back to `mode: 'premium_requests'` otherwise.
+- **Additional/budget-backed usage fields (observed 2026-06-18):** The
+  `quota_snapshots.premium_interactions` object now exposes the following
+  additional fields alongside the existing `entitlement`, `remaining`, and
+  `reset_date`:
+  - `overage_count` (`number`) — credits consumed beyond included quota.
+    Zero when budget spending has not started.
+  - `overage_entitlement` (`number`) — budget allocation expressed in
+    credit-equivalent headroom (e.g. a $50 budget maps to a
+    credit-equivalent value).
+  - `overage_permitted` (`boolean`) — `true` when additional/budget-backed
+    usage is enabled; `false` or absent when not.
+  - `unlimited` (`boolean`) — `true` when usage is not quota-capped.
+  - `has_quota` (`boolean`) — `false` when the account has no quota at all
+    (hard stop condition).
+- **Observed state (2026-06-18):** `entitlement: 7000`, `remaining: 31`,
+  `overage_count: 0`, `overage_permitted: true`, `unlimited: false`,
+  `has_quota: true`. Budget: $50/month configured but not yet consumed.
+  Current `BillingPhase`: `credits_available` (transitioning to
+  `budget_available` once remaining 31 credits are exhausted).
 - **Pay-as-you-go:** Additional / pay-as-you-go usage may be disabled
   and should not be assumed enabled. CopeLimit should not surface
-  assumed additional usage without data support.
+  assumed additional usage without data support. The `overage_permitted`
+  field is now the authoritative gate for this check.
 - **Onboarding session verification** uses `GET /api/onboarding/status`
   for a specific onboarding session ID, not generic widget-token active
   status.
 
-## Horizon 2 domain model
+## BillingPhase state model
+
+The `BillingPhase` type captures which tier of the credit/budget lifecycle is
+active. It is derived from newly observed `copilot_internal/user` API fields
+and will be added to the `Usage` type in a follow-up implementation PR
+(see `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`).
+
+```typescript
+type BillingPhase =
+  | 'credits_available'   // Included credits remaining
+  | 'credits_exhausted'   // Included credits = 0; no budget configured
+  | 'budget_available'    // Included credits = 0; budget enabled; overage_count = 0
+  | 'budget_active'       // Budget spending in progress (overage_count > 0)
+  | 'unlimited'           // unlimited === true
+  | 'hard_stop';          // has_quota === false && unlimited !== true
+```
+
+Detection priority (first match wins):
+1. `unlimited` — `unlimited === true`
+2. `credits_available` — `remaining > 0`
+3. `budget_active` — `overage_count > 0 && overage_permitted === true`
+4. `budget_available` — `remaining === 0 && overage_permitted === true && overage_count === 0`
+5. `credits_exhausted` — `remaining === 0 && overage_permitted !== true && has_quota !== false`
+6. `hard_stop` — `has_quota === false && unlimited !== true`
+
+**Guard invariant:** `budget_available` and `budget_active` phases must
+only be presented when `overage_permitted === true` is observed in the API
+response. Never surface assumed additional usage without data evidence.
+
+Full design (phase table, transition diagram, normalization implications):
+`ARCHITECTURE.md` § "Billing state model".
+
+
 
 ### Goal
 
@@ -512,12 +564,22 @@ modes.
   `quota_snapshots.premium_interactions.token_based_billing: true`?
   Requires a live API capture or GitHub Copilot API changelog to confirm
   the exact field name and nesting.
+  **RESOLVED (2026-06-18):** Both paths have been observed. The existing
+  `detectMode` implementation (checking both locations) is confirmed
+  correct.
 - Are the numeric values in `premium_interactions.entitlement` and
   `remaining` now expressed in AI Credit units (e.g. integers up to
   ~7,000) rather than premium request units (e.g. integers up to ~500)?
+  **RESOLVED (2026-06-18):** Confirmed. Live observed values:
+  `entitlement: 7000`, `remaining: 31`. AI Credit scale.
 - Is additional/pay-as-you-go usage data exposed anywhere in the
   `copilot_internal/user` response under the new billing model? If so,
   what is the field path and how should CopeLimit present it?
+  **RESOLVED (2026-06-18):** `quota_snapshots.premium_interactions`
+  exposes `overage_count`, `overage_entitlement`, `overage_permitted`,
+  `unlimited`, and `has_quota`. The `BillingPhase` state model (see
+  `ARCHITECTURE.md` § "Billing state model") addresses presentation.
+  Implementation tracked in `horizon-1-pr2-billing-phase.plan.yml`.
 - Should the `mock` provider's default values be updated from
   `MOCK_USED=321 / MOCK_QUOTA=500` (premium request scale) to values
   representative of AI Credits (e.g. `MOCK_QUOTA=7000`)?
@@ -543,4 +605,4 @@ modes.
 
 ## Last updated
 
-2026-06-01 by horizon-3-finops-docs PR agent
+2026-06-18 by billing-phase-model-docs PR agent

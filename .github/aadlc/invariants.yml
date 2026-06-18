@@ -50,6 +50,17 @@ invariants:
     rule: The normalisation layer must retain compatibility with legacy premium_requests fields (entitlement, remaining, reset date) while supporting ai_credits mode detection via token_based_billing markers. Neither mode must be silently dropped or assumed exclusively.
     severity: high
 
+  - id: overage-permitted-gate
+    name: Overage/budget display requires overage_permitted evidence
+    rule: |
+      CopeLimit must not present budget_available or budget_active billing phases —
+      or any UI text implying additional/budget-backed usage is possible — unless
+      overage_permitted === true is observed in the copilot_internal/user API
+      response for the current poll. Absence of the field must be treated as
+      overage_permitted = false. This extends the no-surprise-spend invariant
+      with an explicit, field-level gate.
+    severity: high
+
   - id: token-never-exposed
     name: GitHub access token never exposed
     rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
