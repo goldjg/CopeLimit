@@ -13,6 +13,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WidgetTokenSection } from './WidgetTokenSection';
 import { isLikelyIosNavigator } from './widget-onboarding';
+import { labelForBillingPhase } from './billing-display';
+import type { BillingPhase } from './billing-display';
 import './styles.css';
 
 type Usage = {
@@ -27,6 +29,19 @@ type Usage = {
   warningLevel: 'normal' | 'warm' | 'hot' | 'over';
   updatedAt: string;
   notes: string[];
+  billingPhase: BillingPhase;
+  overageCount?: number;
+  overageEntitlement?: number;
+  derivedOverageCredits?: number;
+};
+
+type HistorySummary = {
+  deltaUsed: number;
+  creditsPerHour: number | null;
+  averageBurnRate: number | null;
+  oldestAt: string | null;
+  newestAt: string | null;
+  snapshotCount: number;
 };
 
 type User = {
@@ -73,6 +88,7 @@ function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -97,6 +113,18 @@ function App() {
     }
   }
 
+  async function fetchHistorySummary() {
+    try {
+      const response = await fetch('/api/history?summary=true&limit=50', { cache: 'no-store' });
+      if (response.ok) {
+        const data = await response.json() as { summary?: HistorySummary };
+        setHistorySummary(data.summary ?? null);
+      }
+    } catch {
+      // History is optional — silently ignore failures
+    }
+  }
+
   async function fetchUser() {
     try {
       const response = await fetch('/api/me', { cache: 'no-store' });
@@ -111,6 +139,7 @@ function App() {
   useEffect(() => {
     void refresh();
     void fetchUser();
+    void fetchHistorySummary();
   }, []);
 
   useEffect(() => {
@@ -277,11 +306,47 @@ function App() {
               <span className="label">Billing entity</span>
               <strong>{usage.billingEntity}</strong>
               <p>Updated {new Date(usage.updatedAt).toLocaleString()}.</p>
-              <span className={sourceBadge(usage.source).className}>
-                {sourceBadge(usage.source).label}
-              </span>
+              <div className="billingMeta">
+                <span className={`badge billingPhaseBadge phase-${usage.billingPhase}`}>
+                  {labelForBillingPhase(usage.billingPhase)}
+                </span>
+                <span className={sourceBadge(usage.source).className}>
+                  {sourceBadge(usage.source).label}
+                </span>
+              </div>
             </div>
           </section>
+
+          {usage.billingPhase === 'budget_active' && (
+            <section className="card budgetInfo">
+              <span className="label">Budget usage</span>
+              <div className="budgetGrid">
+                <div>
+                  <span>Included quota used</span>
+                  <strong>{usage.used}</strong>
+                </div>
+                {usage.overageCount !== undefined && (
+                  <div>
+                    <span>Overage credits used</span>
+                    <strong>{usage.overageCount}</strong>
+                  </div>
+                )}
+                {usage.overageEntitlement !== undefined && (
+                  <div>
+                    <span>Overage budget</span>
+                    <strong>{usage.overageEntitlement}</strong>
+                  </div>
+                )}
+                {usage.derivedOverageCredits !== undefined &&
+                  usage.derivedOverageCredits !== usage.overageCount && (
+                  <div>
+                    <span>Derived overage (est.)</span>
+                    <strong>{usage.derivedOverageCredits}</strong>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {usage.notes.length > 0 && (
             <section className="card notes">
@@ -289,6 +354,37 @@ function App() {
               {usage.notes.map((note) => (
                 <p key={note}>{note}</p>
               ))}
+            </section>
+          )}
+
+          {historySummary && historySummary.snapshotCount >= 2 && (
+            <section className="card historySummary">
+              <span className="label">Usage history</span>
+              <div className="historyGrid">
+                <div>
+                  <span>Consumed (window)</span>
+                  <strong>{historySummary.deltaUsed}</strong>
+                </div>
+                {historySummary.creditsPerHour !== null && (
+                  <div>
+                    <span>Credits / hour</span>
+                    <strong>{historySummary.creditsPerHour.toFixed(1)}</strong>
+                  </div>
+                )}
+                {historySummary.averageBurnRate !== null && (
+                  <div>
+                    <span>Avg burn rate</span>
+                    <strong>{historySummary.averageBurnRate.toFixed(1)}/hr</strong>
+                  </div>
+                )}
+              </div>
+              {historySummary.oldestAt && historySummary.newestAt && (
+                <p className="historyWindow">
+                  {new Date(historySummary.oldestAt).toLocaleString()} –{' '}
+                  {new Date(historySummary.newestAt).toLocaleString()}
+                  {' '}({historySummary.snapshotCount} snapshots)
+                </p>
+              )}
             </section>
           )}
         </>

@@ -23,6 +23,7 @@ async function getUsage() {
 
 function colourFor(usage) {
   if (usage.source === "unsupported") return new Color("#f59e0b");
+  if (usage.billingPhase === "budget_active") return new Color("#ef4444");
   if (usage.warningLevel === "over" || usage.warningLevel === "hot") return new Color("#ef4444");
   if (usage.warningLevel === "warm") return new Color("#f59e0b");
   if (usage.source === "github-copilot-internal") return new Color("#22c55e");
@@ -73,6 +74,7 @@ try {
     resetAt: null,
     source: "error",
     warningLevel: "hot",
+    billingPhase: null,
     error: error instanceof Error ? error.message : "Unknown error"
   };
 }
@@ -88,13 +90,21 @@ title.textColor = Color.white();
 
 widget.addSpacer(6);
 
-const remaining = widget.addText(String(usage.remaining));
-remaining.font = Font.heavySystemFont(42);
-remaining.textColor = colourFor(usage);
-remaining.minimumScaleFactor = 0.55;
-remaining.lineLimit = 1;
+// When budget is active and remaining is 0, show overage credits instead
+const isBudgetActive = !usage.error && usage.billingPhase === "budget_active";
+const overageValue = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
+const bigValue = isBudgetActive ? `+${overageValue}` : String(usage.remaining);
 
-const caption = widget.addText(`remaining of ${usage.quota}`);
+const remainingText = widget.addText(bigValue);
+remainingText.font = Font.heavySystemFont(42);
+remainingText.textColor = colourFor(usage);
+remainingText.minimumScaleFactor = 0.55;
+remainingText.lineLimit = 1;
+
+const captionText = isBudgetActive
+  ? `overage of ${usage.quota}`
+  : `remaining of ${usage.quota}`;
+const caption = widget.addText(captionText);
 caption.font = Font.mediumSystemFont(12);
 caption.textColor = Color.gray();
 caption.minimumScaleFactor = 0.7;
@@ -105,7 +115,13 @@ widget.addSpacer(10);
 if (usage.error) {
   addLine(widget, "Error", usage.error, false);
 } else {
-  addLine(widget, "Used", `${usage.used} (${usage.percentUsed}%)`);
+  const pct = usage.percentUsed > 100
+    ? `${usage.used} (${usage.percentUsed}%!)`
+    : `${usage.used} (${usage.percentUsed}%)`;
+  addLine(widget, "Used", pct);
+  if (isBudgetActive && usage.overageEntitlement !== undefined) {
+    addLine(widget, "Budget", usage.overageEntitlement);
+  }
   addLine(widget, "Reset", formatDate(usage.resetAt));
   addLine(widget, "Source", sourceLabel(usage.source), true);
 }

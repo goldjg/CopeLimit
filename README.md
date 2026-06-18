@@ -162,7 +162,7 @@ Returns normalised Copilot quota data from the configured provider.
 **Response**
 ```json
 {
-  "mode": "premium_requests",
+  "mode": "ai_credits",
   "used": 321,
   "quota": 500,
   "remaining": 179,
@@ -172,11 +172,31 @@ Returns normalised Copilot quota data from the configured provider.
   "source": "github-copilot-internal",
   "warningLevel": "normal",
   "updatedAt": "2026-05-07T21:00:00.000Z",
-  "notes": []
+  "notes": [],
+  "billingPhase": "credits_available"
 }
 ```
 
 `warningLevel` is one of: `normal` (< 75 %), `warm` (≥ 75 %), `hot` (≥ 90 %), `over` (≥ 100 %).
+
+`billingPhase` is one of:
+
+| Value | Description |
+|---|---|
+| `credits_available` | Included credits remain; budget not yet needed. |
+| `credits_exhausted` | Credits at zero; no budget configured. |
+| `budget_available` | Credits exhausted; budget enabled but not yet consumed. |
+| `budget_active` | Budget spending in progress (`overageCount > 0` or `rawRemaining < 0`). |
+| `unlimited` | Unlimited usage. |
+| `hard_stop` | No quota, no budget, no unlimited. |
+
+When `billingPhase` is `budget_active`, the response may include:
+
+| Field | Description |
+|---|---|
+| `overageCount` | Budget-backed credits consumed beyond the included quota. |
+| `overageEntitlement` | Configured budget allocation in credit-equivalent units. |
+| `derivedOverageCredits` | Estimated overage from negative `rawRemaining` (settlement-lag window). |
 
 ---
 

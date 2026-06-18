@@ -85,10 +85,23 @@ The frontend is a single-page React application built with Vite. It is served as
 
 | File | Purpose |
 |---|---|
-| `src/main.tsx` | Root `App` component, usage fetch, PWA install prompt, service worker registration |
+| `src/main.tsx` | Root `App` component, usage fetch, billing/overage display, history summary, PWA install prompt, service worker registration |
+| `src/billing-display.ts` | Pure `labelForBillingPhase()` helper (unit-tested independently of browser globals) |
 | `src/WidgetTokenSection.tsx` | Widget token lifecycle UI, iOS onboarding state machine |
 | `src/widget-onboarding.ts` | Platform-agnostic onboarding types and pure helper functions (unit-tested) |
 | `src/styles.css` | Application styles |
+
+### PWA billing display
+
+When `billingPhase === 'budget_active'` a **Budget usage** card is shown below the grid, displaying:
+- Included quota used
+- Overage credits used (`overageCount`) when present
+- Overage budget (`overageEntitlement`) when configured
+- Derived overage estimate (`derivedOverageCredits`) when it differs from `overageCount` (settlement-lag window)
+
+The `billingPhase` label is shown inline in the billing entity card as a colour-coded badge.
+
+A **Usage history** summary card is fetched from `GET /api/history?summary=true&limit=50` on page load. It is shown when at least two snapshots are available and displays `deltaUsed`, `creditsPerHour`, `averageBurnRate`, and the oldest/newest window. History is session-gated; the fetch fails silently for unauthenticated sessions.
 
 ### PWA features
 
@@ -409,7 +422,11 @@ Both scripts are served from `public/scriptable/` with `Cache-Control: no-cache,
 Home-screen widget that:
 1. Reads the widget token from `Keychain.get("copelimit_widget_token")`.
 2. Calls `GET /api/widget-usage` with `Authorization: Bearer <token>`.
-3. Renders a `ListWidget` with remaining quota, usage bar, reset date, and source label.
+3. Renders a `ListWidget` with:
+   - When `billingPhase === 'budget_active'`: large overage credits value (`+N`) and "overage of Q" caption in red; a **Budget** line showing `overageEntitlement` when available.
+   - Otherwise: remaining credits value and "remaining of Q" caption.
+   - Used percentage shown as `>100%!` when over quota.
+   - Reset date and source label.
 
 ### `CopeLimitInstall.js`
 
