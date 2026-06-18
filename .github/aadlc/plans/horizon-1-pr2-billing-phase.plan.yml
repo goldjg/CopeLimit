@@ -6,19 +6,20 @@ status: active
 run:
   type: implementation
   horizon: 1
-  title: Horizon 1 PR 2 — BillingPhase state model (including rawRemaining fix)
+  title: Horizon 1 PR 2 — BillingPhase amendment (rawRemaining fix)
   intent: >-
-    Add a BillingPhase type and detectBillingPhase() function to copilot.ts.
-    Extend the Usage type with billingPhase, overageCount, overageEntitlement,
-    and derivedOverageCredits optional fields. Update normaliseUsage to accept
-    and pass these fields through. Update github-copilot-internal provider to
-    populate them from the observed overage_* API fields.
+    BillingPhase, detectBillingPhase(), readOverageFields(), and the Usage
+    billingPhase/overageCount/overageEntitlement fields are already implemented
+    in copilot.ts (shipped in PR #34). This plan governs the required amendment
+    to that implementation.
 
-    CRITICAL FIX: detectBillingPhase must receive rawRemaining (the pre-clamp
-    API value) as a parameter. Detection priority 3 (budget_active) must fire
-    when (overageCount > 0 || rawRemaining < 0) && overagePermitted === true,
-    not only when overageCount > 0. This corrects the settlement-lag detection
-    gap observed in capture 2 (remaining: -473, overage_count: 0, billing: $0).
+    AMENDMENT: detectBillingPhase must receive rawRemaining (the pre-clamp
+    API value) as a distinct parameter. Detection priority 3 (budget_active)
+    must fire when (overageCount > 0 || rawRemaining < 0) && overagePermitted
+    === true, not only when overageCount > 0. This corrects the settlement-lag
+    detection gap observed in capture 2 (remaining: -473, overage_count: 0,
+    billing: $0). Also add derivedOverageCredits optional field to Usage type
+    and wire it from the provider.
 
     Add tests for all contract assertions including the rawRemaining < 0 case.
     Do not change the wire shape of existing fields or break any existing caller.

@@ -485,10 +485,13 @@ user and which one is the default.
 ## Billing state model
 
 This section documents the `BillingPhase` design derived from newly
-observed fields in the `copilot_internal/user` API response. **No code
-implementing this model exists yet.** This section establishes the
-canonical terminology and detection logic for the implementation PR
-tracked in `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
+observed fields in the `copilot_internal/user` API response.
+`BillingPhase`, `detectBillingPhase()`, and `readOverageFields()` are
+**implemented in `copilot.ts` (PR #34)**. This section records the
+canonical terminology and detection logic, including a required
+amendment — passing `rawRemaining` (pre-clamp) to `detectBillingPhase`
+and updating detection priority 3 — tracked in
+`.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
 
 ### Motivation
 
@@ -609,7 +612,7 @@ type BillingPhase =
 See the updated "Normalization implications (updated)" subsection below the
 "Negative remaining: detection gap and proposed fix" subsection, which reflects
 the amended design including `rawRemaining`, `effectiveUsed`, and
-`derivedOverageCredits`. The implementation is tracked in
+`derivedOverageCredits`. The amendment is tracked in
 `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
 
 ### Current observed state (updated 2026-06-18, capture 2)
