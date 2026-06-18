@@ -234,11 +234,9 @@ export function detectBillingPhase(input: {
   hasQuota?: boolean;
 }): BillingPhase {
   if (input.unlimited === true) return 'unlimited';
-  // By the time execution reaches the lines below, remaining === 0 is guaranteed
-  // because the credits_available guard above already returned for remaining > 0.
   if (input.remaining > 0) return 'credits_available';
+  // remaining === 0 is guaranteed from here on (both early-return guards above have passed).
   if ((input.overageCount ?? 0) > 0 && input.overagePermitted === true) return 'budget_active';
-  // remaining === 0 is implicit here (established by the guard above)
   if (input.overagePermitted === true) return 'budget_available';
   if (input.hasQuota === false) return 'hard_stop';
   return 'credits_exhausted';
