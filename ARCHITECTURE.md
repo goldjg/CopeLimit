@@ -109,6 +109,7 @@ All functions live in `netlify/functions/` and are TypeScript compiled by Netlif
 | `auth-logout` | GET | None | Clear session cookie |
 | `me` | GET | Optional | Return public user info from session |
 | `usage` | GET | Provider-dependent | Return normalised Copilot quota |
+| `history` | GET | Session | Return usage history snapshots with optional derived metrics |
 | `widget-token` | GET/POST/DELETE | Session | Manage widget bearer tokens |
 | `widget-usage` | GET | Widget token | Fetch quota for iOS widget |
 | `onboarding-session` | POST | Session | Issue bootstrap token for iOS setup |
@@ -134,6 +135,7 @@ Shared code lives in `netlify/functions/lib/`:
 | `capture-store.ts` | Blobs persistence for sanitised provider captures |
 | `usage-history-types.ts` | Types for the usage history ledger (`UsageHistorySnapshot`, `UsageHistoryEntry`, `UsageHistoryDelta`, `UsageHistoryConfig`) |
 | `usage-history-store.ts` | Blobs persistence for usage snapshots; `appendSnapshot`, `getHistory`, `calculateDelta` |
+| `history-metrics.ts` | Pure derived-metrics functions for `GET /api/history`; `computeHistorySummary` |
 | `finops-types.ts` | FinOps and AADLC attribution domain types (Horizon 3) |
 
 ---
@@ -209,6 +211,40 @@ Scriptable (iOS)     widget-usage function    widget-store     GitHub API
        │                     │──normaliseUsage()  │               │
        │◄──200 Usage JSON────│                    │               │
 ```
+
+
+### Usage history fetch flow
+
+```
+Browser                 history function           usage-history (Blobs)
+   │                          │                           │
+   │──GET /api/history──────► │                           │
+   │  (optional: ?limit=N     │──verify session cookie    │
+   │   ?from=YYYY-MM-DD       │──getHistory(userId, opts)─►
+   │   ?to=YYYY-MM-DD         │                           │──list blobs (userId/ prefix)
+   │   ?summary=true)         │                           │──fetch entry blobs in parallel
+   │                          │◄──UsageHistorySnapshot[]──│
+   │                          │──(if ?summary=true)       │
+   │                          │──computeHistorySummary()  │
+   │◄──200 { snapshots, count, [summary] }                │
+```
+
+The history endpoint:
+- Requires a valid session cookie; returns `401` for unauthenticated requests.
+- Uses `session.id` (numeric GitHub user ID) to scope the blob prefix.
+- Snapshots are provider-independent: no raw provider payloads, no `billingEntity`,
+  no tokens, and no credential data.
+- `computeHistorySummary` is a pure function in `history-metrics.ts`; it
+  computes burn-rate metrics from the already-filtered snapshot list.
+
+**Derived metrics** (`?summary=true`):
+
+| Metric | Formula |
+|---|---|
+| `deltaUsed` | Sum of positive per-interval `used` deltas (quota resets excluded). |
+| `creditsPerHour` | `deltaUsed / windowHours` |
+| `creditsPerDay` | `creditsPerHour × 24` |
+| `averageBurnRate` | Mean of per-interval burn rates (credits/hour) across qualifying intervals. |
 
 ---
 
