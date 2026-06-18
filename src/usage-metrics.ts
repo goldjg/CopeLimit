@@ -33,7 +33,7 @@ export function getBudgetRemaining(usage: UsageMetricsUsage): number | null {
 }
 
 export function computeEtaHours(usage: UsageMetricsUsage, burnRate: number | null | undefined): number | null {
-  if (!burnRate || burnRate <= 0) return null;
+  if (burnRate === null || burnRate === undefined || burnRate <= 0) return null;
   if (usage.billingPhase === 'budget_active') {
     const budgetRemaining = getBudgetRemaining(usage);
     if (budgetRemaining === null) return null;

@@ -333,7 +333,7 @@ function App() {
                 <strong>{usage.quota}</strong>
               </div>
               <div>
-                <span>Pct used</span>
+                <span>Used %</span>
                 <strong>{usage.percentUsed}%</strong>
               </div>
             </div>
@@ -447,7 +447,7 @@ function App() {
                   <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
                     {trendHeights.map((height, index) => (
                       <span
-                      key={`${trendSnapshots[index]?.capturedAt ?? 'snapshot'}-${index}`}
+                      key={index}
                         className="historyTrendBar"
                         style={{ height: `${height}%` }}
                         title={`${formatNumber(trendSnapshots[index]?.used ?? 0)} used`}
