@@ -22,7 +22,23 @@
  * 4. Returns a normalised {@link Usage} JSON response.
  *
  * ## Response shape
- * Same as `/api/usage` — a {@link Usage} JSON object.
+ * Same as `/api/usage` — a {@link Usage} JSON object — with an optional
+ * `widgetExtras` field when `?extras=1` is passed and history data exists:
+ *
+ * ```json
+ * {
+ *   "used": 5550,
+ *   "quota": 7000,
+ *   ...
+ *   "widgetExtras": {
+ *     "burnRate": 45.2,
+ *     "sparkline": [1000, 2500, 3200, 5550]
+ *   }
+ * }
+ * ```
+ *
+ * The large Scriptable widget passes `?extras=1` to receive `widgetExtras`.
+ * Small and medium widgets omit the parameter to keep the response lean.
  *
  * ## Required environment variables
  * - `SESSION_SECRET` or `WIDGET_TOKEN_HASH_SECRET` – For HMAC token hashing
@@ -42,6 +58,49 @@ import {
   readOverageFields
 } from './lib/copilot';
 import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
+import { getHistory } from './lib/usage-history-store';
+import { computeHistorySummary } from './lib/history-metrics';
+import type { UsageHistorySnapshot } from './lib/usage-history-types';
+
+/**
+ * Extra telemetry derived from usage history, included in the widget-usage
+ * response only when the `?extras=1` query parameter is present and history
+ * data is available. Consumed by the large Scriptable widget layout.
+ */
+export type WidgetExtras = {
+  /** Overall burn rate in credits per hour. `null` when fewer than 2 snapshots exist. */
+  burnRate: number | null;
+  /**
+   * Ordered array of `used` values for sparkline rendering, oldest-first.
+   * Contains at most 14 data points (the most recent snapshots, reversed).
+   */
+  sparkline: number[];
+};
+
+/**
+ * Computes {@link WidgetExtras} from a list of usage history snapshots.
+ *
+ * Pure function — no I/O. Returns `undefined` when fewer than 2 snapshots
+ * are present (burn rate requires at least one interval).
+ *
+ * @param snapshots - Array of snapshots in **newest-first** order (as returned
+ *   by {@link getHistory}).
+ * @returns Populated {@link WidgetExtras}, or `undefined` when insufficient data.
+ */
+export function computeWidgetExtras(
+  snapshots: UsageHistorySnapshot[]
+): WidgetExtras | undefined {
+  if (snapshots.length < 2) return undefined;
+  const summary = computeHistorySummary(snapshots);
+  // Sparkline: take up to 14 newest snapshots, then reverse to oldest-first
+  // so the chart reads left-to-right chronologically.
+  const sparklineSnapshots = snapshots.slice(0, 14).reverse();
+  const sparkline = sparklineSnapshots.map(s => s.used);
+  return {
+    burnRate: summary.creditsPerHour,
+    sparkline
+  };
+}
 
 function extractToken(event: HandlerEvent): string | undefined {
   const auth = event.headers['authorization'];
@@ -160,13 +219,35 @@ export const handler: Handler = async (event) => {
 
     const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
+    // When the caller requests extras (e.g. the large widget), attempt to
+    // enrich the response with burn-rate and sparkline data from history.
+    // History failures are non-fatal: the widget falls back gracefully.
+    const includeExtras =
+      event.queryStringParameters?.['extras'] === '1' ||
+      event.queryStringParameters?.['extras'] === 'true';
+
+    let widgetExtras: WidgetExtras | undefined;
+    if (includeExtras) {
+      try {
+        // Fetch slightly more than the 14-point sparkline cap to give
+        // computeWidgetExtras headroom for burn-rate calculation intervals.
+        const HISTORY_FETCH_LIMIT = 20;
+        const snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
+        widgetExtras = computeWidgetExtras(snapshots);
+      } catch {
+        // Non-fatal: extras are omitted when history is unavailable.
+      }
+    }
+
+    const responseBody = widgetExtras ? { ...usage, widgetExtras } : usage;
+
     return {
       statusCode: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'private, max-age=60'
       },
-      body: JSON.stringify(usage)
+      body: JSON.stringify(responseBody)
     };
   } catch (error) {
     if (isWidgetStoreNotConfiguredError(error)) {
