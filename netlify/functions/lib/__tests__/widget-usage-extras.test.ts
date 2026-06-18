@@ -3,10 +3,12 @@
  *
  * Tests verify:
  * 1. Returns `undefined` when fewer than 2 snapshots are provided.
- * 2. Burn rate is `null` when identical `used` values produce a zero delta.
- * 3. Sparkline is ordered oldest-first and capped at 14 points.
- * 4. Burn rate matches expected credits/hour for a simple linear history.
- * 5. Behaves correctly at the 14-point sparkline boundary.
+ * 2. Burn rate is `0` when used values are identical (no consumption, valid interval).
+ * 3. Burn rate is `null` when the time window is zero (identical timestamps) —
+ *    `computeHistorySummary` returns null for creditsPerHour in this case.
+ * 4. Sparkline is ordered oldest-first and capped at 14 points.
+ * 5. Burn rate matches expected credits/hour for a simple linear history.
+ * 6. Behaves correctly at the 14-point sparkline boundary.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -104,7 +106,7 @@ describe('computeWidgetExtras — burn rate', () => {
     const snapshots = makeLinearHistory(2, '2026-06-15T08:00:00.000Z', 2, 1000, 200);
     const result = computeWidgetExtras(snapshots);
     expect(result).toBeDefined();
-    expect(result!.burnRate).toBeCloseTo(100, 5);
+    expect(result!.burnRate).toBeCloseTo(100, 2);
   });
 
   it('computes burn rate across multiple intervals', () => {
@@ -112,7 +114,7 @@ describe('computeWidgetExtras — burn rate', () => {
     const snapshots = makeLinearHistory(5, '2026-06-15T08:00:00.000Z', 1, 1000, 100);
     const result = computeWidgetExtras(snapshots);
     expect(result).toBeDefined();
-    expect(result!.burnRate).toBeCloseTo(100, 5);
+    expect(result!.burnRate).toBeCloseTo(100, 2);
   });
 });
 

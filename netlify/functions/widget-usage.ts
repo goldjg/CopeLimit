@@ -229,7 +229,10 @@ export const handler: Handler = async (event) => {
     let widgetExtras: WidgetExtras | undefined;
     if (includeExtras) {
       try {
-        const snapshots = await getHistory(record.userId, { limit: 20 });
+        // Fetch slightly more than the 14-point sparkline cap to give
+        // computeWidgetExtras headroom for burn-rate calculation intervals.
+        const HISTORY_FETCH_LIMIT = 20;
+        const snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
         widgetExtras = computeWidgetExtras(snapshots);
       } catch {
         // Non-fatal: extras are omitted when history is unavailable.

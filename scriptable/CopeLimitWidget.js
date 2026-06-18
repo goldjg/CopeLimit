@@ -443,8 +443,9 @@ function createLargeWidget(usage) {
 // --- Main -----------------------------------------------------------------
 
 const family = config.widgetFamily;  // "small" | "medium" | "large" | null (in-app preview)
+const DEFAULT_FAMILY = "medium";     // null means running directly in Scriptable for preview
 const isLarge = family === "large";
-const isMedium = family === "medium" || family === null;  // null = in-app preview => medium
+const isMedium = family === DEFAULT_FAMILY || family === null;
 
 let usage;
 try {
