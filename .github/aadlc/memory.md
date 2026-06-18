@@ -187,8 +187,8 @@ Detection priority (first match wins):
 2. `credits_available` — `remaining > 0`
 3. `budget_active` — `overage_count > 0 && overage_permitted === true`
 4. `budget_available` — `remaining === 0 && overage_permitted === true && overage_count === 0`
-5. `credits_exhausted` — `remaining === 0 && overage_permitted !== true && has_quota !== false`
-6. `hard_stop` — `has_quota === false && unlimited !== true`
+5. `hard_stop` — `has_quota === false && unlimited !== true`
+6. `credits_exhausted` — `remaining === 0 && overage_permitted !== true`
 
 **Guard invariant:** `budget_available` and `budget_active` phases must
 only be presented when `overage_permitted === true` is observed in the API

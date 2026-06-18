@@ -538,8 +538,8 @@ The API shape may change without notice.
  *  2. credits_available — remaining > 0
  *  3. budget_active    — overage_count > 0 && overage_permitted === true
  *  4. budget_available — remaining === 0 && overage_permitted === true && overage_count === 0
- *  5. credits_exhausted — remaining === 0 && overage_permitted !== true && has_quota !== false
- *  6. hard_stop        — has_quota === false && unlimited !== true
+ *  5. hard_stop        — has_quota === false && unlimited !== true
+ *  6. credits_exhausted — remaining === 0 && overage_permitted !== true
  */
 type BillingPhase =
   | 'credits_available'   // Included credits remaining; budget not yet needed
@@ -594,7 +594,7 @@ type BillingPhase =
 | Phase | Detection condition | UI wording (suggested) | Warning level |
 |---|---|---|---|
 | `credits_available` | `remaining > 0` | "X AI credits remaining (Y of Z)" | derived from `percentUsed` |
-| `credits_exhausted` | `remaining == 0`, `overage_permitted !== true`, `has_quota !== false` | "Included credits used — no budget configured" | `over` |
+| `credits_exhausted` | `remaining == 0`, `overage_permitted !== true` (reached only after `hard_stop` guard) | "Included credits used — no budget configured" | `over` |
 | `budget_available` | `remaining == 0`, `overage_permitted === true`, `overage_count == 0` | "Included credits used — budget ready" | `over` (badge), informational |
 | `budget_active` | `overage_count > 0`, `overage_permitted === true` | "Using budget: X credits used" | derived from `overage_count / overage_entitlement` |
 | `unlimited` | `unlimited === true` | "Unlimited usage" | `normal` |
