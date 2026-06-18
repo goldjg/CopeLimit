@@ -38,7 +38,8 @@ import {
   readNumberAtPath,
   readString,
   getUnsupportedUsage,
-  detectMode
+  detectMode,
+  readOverageFields
 } from './lib/copilot';
 import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
 
@@ -110,23 +111,6 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
     readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
     nextMonthReset();
 
-  // Extract overage and quota-state fields from quota_snapshots.premium_interactions
-  const snapshots = body['quota_snapshots'];
-  const pi = isObject(snapshots) && isObject(snapshots['premium_interactions'])
-    ? snapshots['premium_interactions']
-    : undefined;
-  const overageCount = pi ? readNumber(pi, 'overage_count') : undefined;
-  const overageEntitlement = pi ? readNumber(pi, 'overage_entitlement') : undefined;
-  const overagePermitted = pi && typeof pi['overage_permitted'] === 'boolean'
-    ? pi['overage_permitted']
-    : undefined;
-  const unlimited = pi && typeof pi['unlimited'] === 'boolean'
-    ? pi['unlimited']
-    : typeof body['unlimited'] === 'boolean' ? body['unlimited'] : undefined;
-  const hasQuota = pi && typeof pi['has_quota'] === 'boolean'
-    ? pi['has_quota']
-    : typeof body['has_quota'] === 'boolean' ? body['has_quota'] : undefined;
-
   return normaliseUsage({
     mode: detectMode(body),
     used,
@@ -135,11 +119,7 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
     billingEntity: login,
     source: 'github-copilot-internal',
     notes: ['Live data via GitHub Copilot internal API (widget token).'],
-    overageCount,
-    overageEntitlement,
-    overagePermitted,
-    unlimited,
-    hasQuota
+    ...readOverageFields(body)
   });
 }
 

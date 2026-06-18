@@ -234,8 +234,11 @@ export function detectBillingPhase(input: {
   hasQuota?: boolean;
 }): BillingPhase {
   if (input.unlimited === true) return 'unlimited';
+  // By the time execution reaches the lines below, remaining === 0 is guaranteed
+  // because the credits_available guard above already returned for remaining > 0.
   if (input.remaining > 0) return 'credits_available';
   if ((input.overageCount ?? 0) > 0 && input.overagePermitted === true) return 'budget_active';
+  // remaining === 0 is implicit here (established by the guard above)
   if (input.overagePermitted === true) return 'budget_available';
   if (input.hasQuota === false) return 'hard_stop';
   return 'credits_exhausted';
@@ -277,6 +280,9 @@ export function normaliseUsage(input: {
     hasQuota: input.hasQuota
   });
 
+  // Fields are listed explicitly (rather than spreading ...input) so that
+  // overagePermitted, unlimited, and hasQuota — which are computation inputs,
+  // not Usage output fields — are not accidentally included in the response.
   return {
     mode: input.mode,
     used: input.used,
@@ -292,6 +298,44 @@ export function normaliseUsage(input: {
     billingPhase,
     ...(input.overageCount !== undefined ? { overageCount: input.overageCount } : {}),
     ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {})
+  };
+}
+
+/**
+ * Extracts overage and quota-state flags from a raw `copilot_internal/user`
+ * API payload. All fields are read from `quota_snapshots.premium_interactions.*`
+ * with a top-level fallback for `unlimited` and `has_quota`.
+ *
+ * Used by both the `usage` and `widget-usage` functions to avoid duplicating
+ * the extraction logic across providers.
+ *
+ * @param body - The raw JSON response object from `copilot_internal/user`.
+ * @returns An object containing the optional overage fields for {@link normaliseUsage}.
+ */
+export function readOverageFields(body: JsonObject): {
+  overageCount?: number;
+  overageEntitlement?: number;
+  overagePermitted?: boolean;
+  unlimited?: boolean;
+  hasQuota?: boolean;
+} {
+  const snapshots = body['quota_snapshots'];
+  const pi = isObject(snapshots) && isObject(snapshots['premium_interactions'])
+    ? snapshots['premium_interactions']
+    : undefined;
+
+  return {
+    overageCount: pi ? readNumber(pi, 'overage_count') : undefined,
+    overageEntitlement: pi ? readNumber(pi, 'overage_entitlement') : undefined,
+    overagePermitted: pi && typeof pi['overage_permitted'] === 'boolean' ? pi['overage_permitted'] : undefined,
+    unlimited:
+      pi && typeof pi['unlimited'] === 'boolean'
+        ? pi['unlimited']
+        : typeof body['unlimited'] === 'boolean' ? body['unlimited'] : undefined,
+    hasQuota:
+      pi && typeof pi['has_quota'] === 'boolean'
+        ? pi['has_quota']
+        : typeof body['has_quota'] === 'boolean' ? body['has_quota'] : undefined
   };
 }
 
