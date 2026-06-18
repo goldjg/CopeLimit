@@ -677,9 +677,11 @@ describe('appendSnapshot — deduplication', () => {
    */
   function setupEntryExists(exists: boolean, snapshot: UsageHistorySnapshot): void {
     const entryKey = buildHistoryKey(USER_ID, snapshot)
+    // Extract the YYYY-MM-DD date from the snapshot to return a valid daily index
+    const dateUtc = snapshot.capturedAt.slice(0, 10)
 
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.endsWith('_index.json')) return { count: 0, date: buildHistoryKey(USER_ID, snapshot).slice(9, 19) }
+      if (key.endsWith('_index.json')) return { count: 0, date: dateUtc }
       if (key === entryKey && exists) {
         return { historyVersion: '1', userId: USER_ID, snapshot } satisfies UsageHistoryEntry
       }

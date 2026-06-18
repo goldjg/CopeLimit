@@ -157,9 +157,9 @@ function getDateFolderFromKey(userId: number, key: string): string | null {
  * @returns A URL-safe fingerprint string.
  */
 export function snapshotStateFingerprint(snapshot: UsageHistorySnapshot): string {
-  const oc = snapshot.overageCount === undefined ? 'u' : String(snapshot.overageCount)
-  const doc = snapshot.derivedOverageCredits === undefined ? 'u' : String(snapshot.derivedOverageCredits)
-  return `${snapshot.used}_${snapshot.quota}_${snapshot.remaining}_${snapshot.billingPhase}_${oc}_${doc}`
+  const overageCountStr = snapshot.overageCount === undefined ? 'u' : String(snapshot.overageCount)
+  const derivedOverageCreditsStr = snapshot.derivedOverageCredits === undefined ? 'u' : String(snapshot.derivedOverageCredits)
+  return `${snapshot.used}_${snapshot.quota}_${snapshot.remaining}_${snapshot.billingPhase}_${overageCountStr}_${derivedOverageCreditsStr}`
 }
 
 /**
@@ -355,7 +355,7 @@ export async function appendSnapshot(
 
   try {
     const existing = await store.get(entryKey, { type: 'json' }) as UsageHistoryEntry | null
-    if (existing !== null && typeof existing.snapshot === 'object' && existing.snapshot !== null) {
+    if (existing !== null && existing.snapshot !== null && typeof existing.snapshot === 'object') {
       return
     }
   } catch {
