@@ -15,6 +15,17 @@ import { WidgetTokenSection } from './WidgetTokenSection';
 import { isLikelyIosNavigator } from './widget-onboarding';
 import { labelForBillingPhase } from './billing-display';
 import type { BillingPhase } from './billing-display';
+import {
+  buildTrendBarHeights,
+  computeEtaHours,
+  formatBurnRate,
+  formatEta,
+  formatNumber,
+  getBudgetRemaining,
+  getHeroCaption,
+  getHeroValue,
+  getOverageUsed,
+} from './usage-metrics';
 import './styles.css';
 
 type Usage = {
@@ -38,10 +49,16 @@ type Usage = {
 type HistorySummary = {
   deltaUsed: number;
   creditsPerHour: number | null;
+  creditsPerDay: number | null;
   averageBurnRate: number | null;
   oldestAt: string | null;
   newestAt: string | null;
   snapshotCount: number;
+};
+
+type HistorySnapshot = {
+  capturedAt: string;
+  used: number;
 };
 
 type User = {
@@ -89,6 +106,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
+  const [historySnapshots, setHistorySnapshots] = useState<HistorySnapshot[]>([]);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -100,28 +118,38 @@ function App() {
     return authErrorMessage(params.get('error'));
   }, []);
 
-  async function refresh() {
-    setError(null);
-    try {
-      const response = await fetch('/api/usage', { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Usage API returned HTTP ${response.status}`);
-      }
-      setUsage(await response.json());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    }
-  }
-
   async function fetchHistorySummary() {
     try {
       const response = await fetch('/api/history?summary=true&limit=50', { cache: 'no-store' });
       if (response.ok) {
-        const data = await response.json() as { summary?: HistorySummary };
+        const data = await response.json() as { summary?: HistorySummary; snapshots?: HistorySnapshot[] };
         setHistorySummary(data.summary ?? null);
+        setHistorySnapshots(data.snapshots ?? []);
       }
     } catch {
       // History is optional — silently ignore failures
+    }
+  }
+
+  async function refresh() {
+    setError(null);
+    const [usageResult] = await Promise.allSettled([
+      fetch('/api/usage', { cache: 'no-store' }),
+      fetchHistorySummary(),
+    ]);
+
+    if (usageResult.status === 'rejected') {
+      setError(usageResult.reason instanceof Error ? usageResult.reason.message : 'Unknown error');
+      return;
+    }
+
+    try {
+      if (!usageResult.value.ok) {
+        throw new Error(`Usage API returned HTTP ${usageResult.value.status}`);
+      }
+      setUsage(await usageResult.value.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     }
   }
 
@@ -139,7 +167,6 @@ function App() {
   useEffect(() => {
     void refresh();
     void fetchUser();
-    void fetchHistorySummary();
   }, []);
 
   useEffect(() => {
@@ -202,6 +229,23 @@ function App() {
   }, [usage]);
 
   const isUnsupported = usage?.source === 'unsupported' || usage?.source === 'github-placeholder';
+  const burnRate = historySummary?.creditsPerHour ?? null;
+  const burnRateLabel = formatBurnRate(burnRate);
+  const dailyBurnLabel =
+    historySummary?.creditsPerDay === null || historySummary?.creditsPerDay === undefined
+      ? null
+      : `${historySummary.creditsPerDay.toFixed(1)}/day`;
+  const etaLabel = usage ? formatEta(computeEtaHours(usage, burnRate)) : null;
+  const budgetRemaining = usage ? getBudgetRemaining(usage) : null;
+  const overageUsed = usage ? getOverageUsed(usage) : 0;
+  const trendSnapshots = useMemo(
+    () => historySnapshots.slice(0, 14).reverse(),
+    [historySnapshots],
+  );
+  const trendHeights = useMemo(
+    () => buildTrendBarHeights(trendSnapshots.map((snapshot) => snapshot.used)),
+    [trendSnapshots],
+  );
 
   return (
     <main className="shell">
@@ -272,8 +316,8 @@ function App() {
               <strong>{statusText}</strong>
             </div>
 
-            <div className="bigNumber">{usage.remaining}</div>
-            <div className="subtle">remaining of {usage.quota}</div>
+            <div className="bigNumber">{getHeroValue(usage)}</div>
+            <div className="subtle">{getHeroCaption(usage)}</div>
 
             <div className="bar" aria-label={`${usage.percentUsed}% used`}>
               <div style={{ width: `${Math.min(100, usage.percentUsed)}%` }} />
@@ -289,7 +333,7 @@ function App() {
                 <strong>{usage.quota}</strong>
               </div>
               <div>
-                <span>Used</span>
+                <span>Usage share</span>
                 <strong>{usage.percentUsed}%</strong>
               </div>
             </div>
@@ -317,7 +361,7 @@ function App() {
             </div>
           </section>
 
-          {usage.billingPhase === 'budget_active' && (
+          {(usage.billingPhase === 'budget_active' || usage.overageEntitlement !== undefined) && (
             <section className="card budgetInfo">
               <span className="label">Budget usage</span>
               <div className="budgetGrid">
@@ -325,16 +369,22 @@ function App() {
                   <span>Included quota used</span>
                   <strong>{Math.min(usage.used, usage.quota)}</strong>
                 </div>
-                {usage.overageCount !== undefined && (
+                {(usage.overageCount !== undefined || usage.derivedOverageCredits !== undefined) && (
                   <div>
                     <span>Overage credits used</span>
-                    <strong>{usage.overageCount}</strong>
+                    <strong>{overageUsed}</strong>
                   </div>
                 )}
                 {usage.overageEntitlement !== undefined && (
                   <div>
                     <span>Overage budget</span>
                     <strong>{usage.overageEntitlement}</strong>
+                  </div>
+                )}
+                {budgetRemaining !== null && (
+                  <div>
+                    <span>Budget remaining</span>
+                    <strong>{budgetRemaining}</strong>
                   </div>
                 )}
                 {usage.derivedOverageCredits !== undefined &&
@@ -366,10 +416,22 @@ function App() {
                   <span>Consumed (window)</span>
                   <strong>{historySummary.deltaUsed}</strong>
                 </div>
-                {historySummary.creditsPerHour !== null && (
+                {burnRateLabel && (
                   <div>
-                    <span>Credits / hour</span>
-                    <strong>{historySummary.creditsPerHour.toFixed(1)}</strong>
+                    <span>Burn rate</span>
+                    <strong>{burnRateLabel}</strong>
+                  </div>
+                )}
+                {dailyBurnLabel && (
+                  <div>
+                    <span>Burn / day</span>
+                    <strong>{dailyBurnLabel}</strong>
+                  </div>
+                )}
+                {etaLabel && (
+                  <div>
+                    <span>ETA</span>
+                    <strong>{etaLabel}</strong>
                   </div>
                 )}
                 {historySummary.averageBurnRate !== null && (
@@ -379,6 +441,22 @@ function App() {
                   </div>
                 )}
               </div>
+              {trendHeights.length >= 2 && (
+                <>
+                  <p className="historyTrendLabel">Usage trend · {trendHeights.length} snapshots</p>
+                  <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
+                    {trendSnapshots.map((snapshot, index) => (
+                      <span
+                      key={snapshot.capturedAt}
+                        className="historyTrendBar"
+                      style={{ height: `${trendHeights[index] ?? 0}%` }}
+                      title={`${formatNumber(snapshot.used)} used`}
+                      aria-label={`${formatNumber(snapshot.used)} used at ${new Date(snapshot.capturedAt).toLocaleString()}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
               {historySummary.oldestAt && historySummary.newestAt && (
                 <p className="historyWindow">
                   {new Date(historySummary.oldestAt).toLocaleString()} –{' '}
