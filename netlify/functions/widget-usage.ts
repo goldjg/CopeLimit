@@ -38,7 +38,8 @@ import {
   readNumberAtPath,
   readString,
   getUnsupportedUsage,
-  detectMode
+  detectMode,
+  readOverageFields
 } from './lib/copilot';
 import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
 
@@ -117,7 +118,8 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
     resetAt,
     billingEntity: login,
     source: 'github-copilot-internal',
-    notes: ['Live data via GitHub Copilot internal API (widget token).']
+    notes: ['Live data via GitHub Copilot internal API (widget token).'],
+    ...readOverageFields(body)
   });
 }
 

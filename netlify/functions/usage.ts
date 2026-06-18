@@ -61,7 +61,8 @@ import {
   readNumberAtPath,
   readString,
   getUnsupportedUsage,
-  detectMode
+  detectMode,
+  readOverageFields
 } from './lib/copilot';
 import { maybeCapture } from './lib/capture-store';
 import { readCaptureConfig } from './lib/capture-config';
@@ -308,7 +309,8 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
       resetAt,
       billingEntity: login,
       source: 'github-copilot-internal',
-      notes: ['Live data via GitHub Copilot internal API.']
+      notes: ['Live data via GitHub Copilot internal API.'],
+      ...readOverageFields(body)
     }),
     rawPayload: body,
     userId: id
