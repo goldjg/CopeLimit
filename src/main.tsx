@@ -447,10 +447,10 @@ function App() {
                   <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
                     {trendHeights.map((height, index) => (
                       <span
-                      key={index}
+                      key={trendSnapshots[index].capturedAt}
                         className="historyTrendBar"
                         style={{ height: `${height}%` }}
-                        title={`${formatNumber(trendSnapshots[index]?.used ?? 0)} used`}
+                      title={`${formatNumber(trendSnapshots[index].used)} used`}
                       />
                     ))}
                   </div>
