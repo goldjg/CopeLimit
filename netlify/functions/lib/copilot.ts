@@ -29,6 +29,26 @@ export type Mode = 'premium_requests' | 'ai_credits';
 export type WarningLevel = 'normal' | 'warm' | 'hot' | 'over';
 
 /**
+ * The billing phase captures where in the credit/budget lifecycle the
+ * current usage falls.
+ *
+ * Detection priority (first match wins):
+ *  1. `unlimited`         — `unlimited === true`
+ *  2. `credits_available` — `remaining > 0`
+ *  3. `budget_active`     — `overage_count > 0 && overage_permitted === true`
+ *  4. `budget_available`  — `remaining === 0 && overage_permitted === true && overage_count === 0`
+ *  5. `hard_stop`         — `has_quota === false` (unlimited already ruled out at priority 1)
+ *  6. `credits_exhausted` — `remaining === 0 && overage_permitted !== true` (default)
+ */
+export type BillingPhase =
+  | 'credits_available'  // Included credits remaining; budget not yet needed
+  | 'credits_exhausted'  // Included credits = 0; no budget configured or enabled
+  | 'budget_available'   // Included credits = 0; budget enabled; no overage consumed yet
+  | 'budget_active'      // Budget spending in progress (overage_count > 0)
+  | 'unlimited'          // Unlimited usage (unlimited === true)
+  | 'hard_stop';         // No quota, no budget, no unlimited (has_quota === false)
+
+/**
  * The canonical usage response shape returned by every provider and
  * exposed to the PWA and the iOS Scriptable widget.
  */
@@ -55,6 +75,12 @@ export type Usage = {
   updatedAt: string;
   /** Human-readable notes from the provider (e.g. warnings, caveats). */
   notes: string[];
+  /** Where in the credit/budget lifecycle this usage record falls. */
+  billingPhase: BillingPhase;
+  /** Budget-backed credits consumed beyond the included quota (present in `budget_active` phase). */
+  overageCount?: number;
+  /** Budget allocation expressed in credit-equivalent units (present when a budget is configured). */
+  overageEntitlement?: number;
 };
 
 /** A plain JSON object whose values are unknown at compile time. */
@@ -184,11 +210,47 @@ export function detectMode(body: JsonObject): Mode {
 }
 
 /**
+ * Derives the {@link BillingPhase} from normalised usage and overage fields.
+ *
+ * Detection follows a fixed priority (first match wins):
+ * 1. `unlimited`         — `unlimited === true`
+ * 2. `credits_available` — `remaining > 0`
+ * 3. `budget_active`     — `overageCount > 0 && overagePermitted === true`
+ * 4. `budget_available`  — `remaining === 0 && overagePermitted === true && overageCount === 0`
+ * 5. `hard_stop`         — `hasQuota === false` (unlimited already ruled out at step 1)
+ * 6. `credits_exhausted` — default (`remaining === 0 && overagePermitted !== true`)
+ *
+ * When overage fields are absent (e.g. for the `mock` or `copilot-local` providers),
+ * the result is `credits_available` when credits remain, or `credits_exhausted` otherwise.
+ *
+ * @param input - Normalised usage values plus optional overage flags from the API.
+ * @returns The detected {@link BillingPhase}.
+ */
+export function detectBillingPhase(input: {
+  remaining: number;
+  overageCount?: number;
+  overagePermitted?: boolean;
+  unlimited?: boolean;
+  hasQuota?: boolean;
+}): BillingPhase {
+  if (input.unlimited === true) return 'unlimited';
+  if (input.remaining > 0) return 'credits_available';
+  if ((input.overageCount ?? 0) > 0 && input.overagePermitted === true) return 'budget_active';
+  if (input.overagePermitted === true) return 'budget_available';
+  if (input.hasQuota === false) return 'hard_stop';
+  return 'credits_exhausted';
+}
+
+/**
  * Constructs a complete {@link Usage} object from raw provider fields by
  * computing the derived properties (`remaining`, `percentUsed`, `warningLevel`,
- * `updatedAt`).
+ * `billingPhase`, `updatedAt`).
  *
  * @param input - Core usage fields from the provider (without derived values).
+ *   The optional `overageCount`, `overageEntitlement`, `overagePermitted`,
+ *   `unlimited`, and `hasQuota` fields are used to detect the {@link BillingPhase};
+ *   `overageCount` and `overageEntitlement` are also carried through to the
+ *   returned `Usage` when present.
  * @returns A fully populated `Usage` record with a current `updatedAt` timestamp.
  */
 export function normaliseUsage(input: {
@@ -199,17 +261,37 @@ export function normaliseUsage(input: {
   billingEntity: string;
   source: string;
   notes?: string[];
+  overageCount?: number;
+  overageEntitlement?: number;
+  overagePermitted?: boolean;
+  unlimited?: boolean;
+  hasQuota?: boolean;
 }): Usage {
   const remaining = Math.max(0, input.quota - input.used);
   const percentUsed = input.quota > 0 ? Math.round((input.used / input.quota) * 100) : 0;
+  const billingPhase = detectBillingPhase({
+    remaining,
+    overageCount: input.overageCount,
+    overagePermitted: input.overagePermitted,
+    unlimited: input.unlimited,
+    hasQuota: input.hasQuota
+  });
 
   return {
-    ...input,
+    mode: input.mode,
+    used: input.used,
+    quota: input.quota,
     remaining,
     percentUsed,
+    resetAt: input.resetAt,
+    billingEntity: input.billingEntity,
+    source: input.source,
     warningLevel: warningLevel(percentUsed),
     updatedAt: new Date().toISOString(),
-    notes: input.notes ?? []
+    notes: input.notes ?? [],
+    billingPhase,
+    ...(input.overageCount !== undefined ? { overageCount: input.overageCount } : {}),
+    ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {})
   };
 }
 

@@ -300,6 +300,23 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
     readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
     nextMonthReset();
 
+  // Extract overage and quota-state fields from quota_snapshots.premium_interactions
+  const snapshots = body['quota_snapshots'];
+  const pi = isObject(snapshots) && isObject(snapshots['premium_interactions'])
+    ? snapshots['premium_interactions']
+    : undefined;
+  const overageCount = pi ? readNumber(pi, 'overage_count') : undefined;
+  const overageEntitlement = pi ? readNumber(pi, 'overage_entitlement') : undefined;
+  const overagePermitted = pi && typeof pi['overage_permitted'] === 'boolean'
+    ? pi['overage_permitted']
+    : undefined;
+  const unlimited = pi && typeof pi['unlimited'] === 'boolean'
+    ? pi['unlimited']
+    : typeof body['unlimited'] === 'boolean' ? body['unlimited'] : undefined;
+  const hasQuota = pi && typeof pi['has_quota'] === 'boolean'
+    ? pi['has_quota']
+    : typeof body['has_quota'] === 'boolean' ? body['has_quota'] : undefined;
+
   return {
     usage: normaliseUsage({
       mode: detectMode(body),
@@ -308,7 +325,12 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
       resetAt,
       billingEntity: login,
       source: 'github-copilot-internal',
-      notes: ['Live data via GitHub Copilot internal API.']
+      notes: ['Live data via GitHub Copilot internal API.'],
+      overageCount,
+      overageEntitlement,
+      overagePermitted,
+      unlimited,
+      hasQuota
     }),
     rawPayload: body,
     userId: id
