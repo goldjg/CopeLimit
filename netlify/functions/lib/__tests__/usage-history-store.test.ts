@@ -8,6 +8,7 @@ import {
   calculateDelta,
   getHistory,
   isDateExpired,
+  snapshotStateFingerprint,
   snapshotsAreEquivalent,
 } from '../usage-history-store'
 import type { UsageHistoryConfig, UsageHistoryEntry, UsageHistorySnapshot } from '../usage-history-types'
@@ -57,9 +58,13 @@ const USER_ID = 43296126
 // ---------------------------------------------------------------------------
 
 describe('usage-history key helpers', () => {
-  it('buildHistoryKey produces correct format', () => {
-    const key = buildHistoryKey(123, '2026-06-15T10:00:00.000Z')
-    expect(key).toBe('123/2026-06-15/2026-06-15T10:00:00.000Z.json')
+  it('buildHistoryKey produces state-fingerprint-based key in correct format', () => {
+    const key = buildHistoryKey(123, BASE_SNAPSHOT)
+    // format: <userId>/<YYYY-MM-DD>/<fingerprint>.json
+    expect(key).toMatch(/^123\/2026-06-15\/.+\.json$/)
+    // must not embed the capture timestamp (that would make concurrent writes diverge)
+    expect(key).not.toContain('T10:00:00')
+    expect(key).not.toContain(BASE_SNAPSHOT.capturedAt)
   })
 
   it('buildHistoryIndexKey produces correct format', () => {
@@ -68,16 +73,41 @@ describe('usage-history key helpers', () => {
   })
 
   it('buildHistoryKey uses the date from the ISO timestamp', () => {
-    const key = buildHistoryKey(99, '2026-01-31T23:59:59.999Z')
+    const snapshot: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-01-31T23:59:59.999Z' }
+    const key = buildHistoryKey(99, snapshot)
     expect(key).toContain('2026-01-31')
-    expect(key.endsWith('2026-01-31T23:59:59.999Z.json')).toBe(true)
+    expect(key).not.toContain('T23:59:59')
   })
 
   it('buildHistoryKey partitions by userId', () => {
-    const key1 = buildHistoryKey(1, '2026-06-15T10:00:00.000Z')
-    const key2 = buildHistoryKey(2, '2026-06-15T10:00:00.000Z')
+    const key1 = buildHistoryKey(1, BASE_SNAPSHOT)
+    const key2 = buildHistoryKey(2, BASE_SNAPSHOT)
     expect(key1.startsWith('1/')).toBe(true)
     expect(key2.startsWith('2/')).toBe(true)
+  })
+
+  it('buildHistoryKey returns the same key for snapshots with identical state but different capturedAt', () => {
+    const s1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T09:00:00.000Z' }
+    const s2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:00:00.000Z' }
+    expect(buildHistoryKey(123, s1)).toBe(buildHistoryKey(123, s2))
+  })
+
+  it('buildHistoryKey returns different keys for snapshots with different state', () => {
+    const s1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, used: 1000 }
+    const s2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, used: 2000 }
+    expect(buildHistoryKey(123, s1)).not.toBe(buildHistoryKey(123, s2))
+  })
+
+  it('snapshotStateFingerprint distinguishes undefined overageCount from 0', () => {
+    const withUndefined = snapshotStateFingerprint(BASE_SNAPSHOT)
+    const withZero = snapshotStateFingerprint({ ...BASE_SNAPSHOT, overageCount: 0 })
+    expect(withUndefined).not.toBe(withZero)
+  })
+
+  it('snapshotStateFingerprint is stable across different capturedAt values', () => {
+    const fp1 = snapshotStateFingerprint({ ...BASE_SNAPSHOT, capturedAt: '2026-06-15T08:00:00.000Z' })
+    const fp2 = snapshotStateFingerprint({ ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:00:00.000Z' })
+    expect(fp1).toBe(fp2)
   })
 })
 
@@ -311,7 +341,7 @@ describe('appendSnapshot — happy path', () => {
     )
     expect(entryCall).toBeDefined()
     const [key, data] = entryCall!
-    expect(key).toBe(buildHistoryKey(USER_ID, BASE_SNAPSHOT.capturedAt))
+    expect(key).toBe(buildHistoryKey(USER_ID, BASE_SNAPSHOT))
     expect((data as UsageHistoryEntry).historyVersion).toBe('1')
     expect((data as UsageHistoryEntry).userId).toBe(USER_ID)
     expect((data as UsageHistoryEntry).snapshot).toEqual(BASE_SNAPSHOT)
@@ -398,7 +428,7 @@ describe('getHistory', () => {
     mockStore.list.mockResolvedValue({
       blobs: [
         { key: `${USER_ID}/2026-06-15/_index.json` },
-        { key: buildHistoryKey(USER_ID, '2026-06-15T10:00:00.000Z') },
+        { key: buildHistoryKey(USER_ID, BASE_SNAPSHOT) },
       ],
     })
 
@@ -423,24 +453,21 @@ describe('getHistory', () => {
     const ts2 = '2026-06-15T10:00:00.000Z'
     const ts3 = '2026-06-15T09:00:00.000Z'
 
-    const makeEntry = (capturedAt: string): UsageHistoryEntry => ({
-      historyVersion: '1',
-      userId: USER_ID,
-      snapshot: { ...BASE_SNAPSHOT, capturedAt, used: 1000 },
-    })
+    // Use distinct `used` values so each snapshot gets a different content-hash key
+    const snap1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts1, used: 1001 }
+    const snap2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts2, used: 1002 }
+    const snap3: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts3, used: 1003 }
 
-    mockStore.list.mockResolvedValue({
-      blobs: [
-        { key: buildHistoryKey(USER_ID, ts1) },
-        { key: buildHistoryKey(USER_ID, ts2) },
-        { key: buildHistoryKey(USER_ID, ts3) },
-      ],
-    })
+    const key1 = buildHistoryKey(USER_ID, snap1)
+    const key2 = buildHistoryKey(USER_ID, snap2)
+    const key3 = buildHistoryKey(USER_ID, snap3)
+
+    mockStore.list.mockResolvedValue({ blobs: [{ key: key1 }, { key: key2 }, { key: key3 }] })
 
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.includes(ts1)) return makeEntry(ts1)
-      if (key.includes(ts2)) return makeEntry(ts2)
-      if (key.includes(ts3)) return makeEntry(ts3)
+      if (key === key1) return { historyVersion: '1', userId: USER_ID, snapshot: snap1 }
+      if (key === key2) return { historyVersion: '1', userId: USER_ID, snapshot: snap2 }
+      if (key === key3) return { historyVersion: '1', userId: USER_ID, snapshot: snap3 }
       return null
     })
 
@@ -452,21 +479,16 @@ describe('getHistory', () => {
     const ts1 = '2026-06-14T10:00:00.000Z' // date: 2026-06-14 — before fromDate
     const ts2 = '2026-06-15T10:00:00.000Z' // date: 2026-06-15 — matches
 
-    const makeEntry = (capturedAt: string): UsageHistoryEntry => ({
-      historyVersion: '1',
-      userId: USER_ID,
-      snapshot: { ...BASE_SNAPSHOT, capturedAt },
-    })
+    const snap1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts1, used: 2001 }
+    const snap2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts2, used: 2002 }
 
-    mockStore.list.mockResolvedValue({
-      blobs: [
-        { key: buildHistoryKey(USER_ID, ts1) },
-        { key: buildHistoryKey(USER_ID, ts2) },
-      ],
-    })
+    const key1 = buildHistoryKey(USER_ID, snap1)
+    const key2 = buildHistoryKey(USER_ID, snap2)
+
+    mockStore.list.mockResolvedValue({ blobs: [{ key: key1 }, { key: key2 }] })
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.includes(ts1)) return makeEntry(ts1)
-      if (key.includes(ts2)) return makeEntry(ts2)
+      if (key === key1) return { historyVersion: '1', userId: USER_ID, snapshot: snap1 }
+      if (key === key2) return { historyVersion: '1', userId: USER_ID, snapshot: snap2 }
       return null
     })
 
@@ -479,21 +501,16 @@ describe('getHistory', () => {
     const ts1 = '2026-06-15T10:00:00.000Z' // date: 2026-06-15 — matches
     const ts2 = '2026-06-16T10:00:00.000Z' // date: 2026-06-16 — after toDate
 
-    const makeEntry = (capturedAt: string): UsageHistoryEntry => ({
-      historyVersion: '1',
-      userId: USER_ID,
-      snapshot: { ...BASE_SNAPSHOT, capturedAt },
-    })
+    const snap1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts1, used: 3001 }
+    const snap2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts2, used: 3002 }
 
-    mockStore.list.mockResolvedValue({
-      blobs: [
-        { key: buildHistoryKey(USER_ID, ts1) },
-        { key: buildHistoryKey(USER_ID, ts2) },
-      ],
-    })
+    const key1 = buildHistoryKey(USER_ID, snap1)
+    const key2 = buildHistoryKey(USER_ID, snap2)
+
+    mockStore.list.mockResolvedValue({ blobs: [{ key: key1 }, { key: key2 }] })
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.includes(ts1)) return makeEntry(ts1)
-      if (key.includes(ts2)) return makeEntry(ts2)
+      if (key === key1) return { historyVersion: '1', userId: USER_ID, snapshot: snap1 }
+      if (key === key2) return { historyVersion: '1', userId: USER_ID, snapshot: snap2 }
       return null
     })
 
@@ -503,41 +520,48 @@ describe('getHistory', () => {
   })
 
   it('respects the limit option', async () => {
-    const timestamps = [
-      '2026-06-15T08:00:00.000Z',
-      '2026-06-15T09:00:00.000Z',
-      '2026-06-15T10:00:00.000Z',
-    ]
+    const ts1 = '2026-06-15T08:00:00.000Z'
+    const ts2 = '2026-06-15T09:00:00.000Z'
+    const ts3 = '2026-06-15T10:00:00.000Z'
 
-    mockStore.list.mockResolvedValue({
-      blobs: timestamps.map(ts => ({ key: buildHistoryKey(USER_ID, ts) })),
-    })
+    const snap1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts1, used: 4001 }
+    const snap2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts2, used: 4002 }
+    const snap3: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts3, used: 4003 }
+
+    const key1 = buildHistoryKey(USER_ID, snap1)
+    const key2 = buildHistoryKey(USER_ID, snap2)
+    const key3 = buildHistoryKey(USER_ID, snap3)
+
+    mockStore.list.mockResolvedValue({ blobs: [{ key: key1 }, { key: key2 }, { key: key3 }] })
     mockStore.get.mockImplementation(async (key: string) => {
-      const ts = timestamps.find(t => key.includes(t))
-      if (!ts) return null
-      return { historyVersion: '1', userId: USER_ID, snapshot: { ...BASE_SNAPSHOT, capturedAt: ts } }
+      if (key === key1) return { historyVersion: '1', userId: USER_ID, snapshot: snap1 }
+      if (key === key2) return { historyVersion: '1', userId: USER_ID, snapshot: snap2 }
+      if (key === key3) return { historyVersion: '1', userId: USER_ID, snapshot: snap3 }
+      return null
     })
 
     const result = await getHistory(USER_ID, { limit: 2 })
     expect(result).toHaveLength(2)
     // most recent first, so limit slices the first 2
-    expect(result[0].capturedAt).toBe('2026-06-15T10:00:00.000Z')
-    expect(result[1].capturedAt).toBe('2026-06-15T09:00:00.000Z')
+    expect(result[0].capturedAt).toBe(ts3)
+    expect(result[1].capturedAt).toBe(ts2)
   })
 
   it('skips entries with malformed snapshot data', async () => {
     const ts1 = '2026-06-15T08:00:00.000Z'
     const ts2 = '2026-06-15T10:00:00.000Z'
 
-    mockStore.list.mockResolvedValue({
-      blobs: [
-        { key: buildHistoryKey(USER_ID, ts1) },
-        { key: buildHistoryKey(USER_ID, ts2) },
-      ],
-    })
+    const snap1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts1, used: 5001 }
+    const snap2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: ts2, used: 5002 }
+
+    const key1 = buildHistoryKey(USER_ID, snap1)
+    const key2 = buildHistoryKey(USER_ID, snap2)
+
+    mockStore.list.mockResolvedValue({ blobs: [{ key: key1 }, { key: key2 }] })
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.includes(ts1)) return { historyVersion: '1', userId: USER_ID, snapshot: null } // malformed
-      return { historyVersion: '1', userId: USER_ID, snapshot: { ...BASE_SNAPSHOT, capturedAt: ts2 } }
+      if (key === key1) return { historyVersion: '1', userId: USER_ID, snapshot: null } // malformed
+      if (key === key2) return { historyVersion: '1', userId: USER_ID, snapshot: snap2 }
+      return null
     })
 
     const result = await getHistory(USER_ID)
@@ -647,25 +671,22 @@ describe('appendSnapshot — deduplication', () => {
   })
 
   /**
-   * Helper: configure mockStore so the daily index is empty and the most recent
-   * stored snapshot has the given fields (or none, if null).
+   * Configure mockStore so the blob at the content-hash key for `snapshot`
+   * is already present (simulating a prior write of the same state) or absent.
+   * The daily index always reports count=0 so the cap is never hit.
    */
-  function setupLatestSnapshot(latest: UsageHistorySnapshot | null): void {
-    const existingEntryKey = buildHistoryKey(USER_ID, '2026-06-15T09:00:00.000Z')
+  function setupEntryExists(exists: boolean, snapshot: UsageHistorySnapshot): void {
+    const entryKey = buildHistoryKey(USER_ID, snapshot)
 
     mockStore.get.mockImplementation(async (key: string) => {
-      if (key.endsWith('_index.json')) return { count: 0, date: '2026-06-15' }
-      if (latest !== null) {
-        return { historyVersion: '1', userId: USER_ID, snapshot: latest } satisfies UsageHistoryEntry
+      if (key.endsWith('_index.json')) return { count: 0, date: buildHistoryKey(USER_ID, snapshot).slice(9, 19) }
+      if (key === entryKey && exists) {
+        return { historyVersion: '1', userId: USER_ID, snapshot } satisfies UsageHistoryEntry
       }
       return null
     })
 
-    mockStore.list.mockResolvedValue(
-      latest !== null
-        ? { blobs: [{ key: existingEntryKey }] }
-        : { blobs: [] }
-    )
+    mockStore.list.mockResolvedValue({ blobs: [] })
   }
 
   function entryWriteCount(): number {
@@ -674,34 +695,35 @@ describe('appendSnapshot — deduplication', () => {
     ).length
   }
 
-  it('skips write when all tracked fields are identical to the most recent snapshot', async () => {
-    setupLatestSnapshot(BASE_SNAPSHOT)
+  it('skips write when the content-hash key already exists (same state)', async () => {
     const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:30:00.000Z' }
+    setupEntryExists(true, incoming)
 
     await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
     expect(entryWriteCount()).toBe(0)
   })
 
-  it('writes the first snapshot when no history exists (empty store)', async () => {
-    setupLatestSnapshot(null)
+  it('writes when no prior entry exists for this state (first write)', async () => {
+    setupEntryExists(false, BASE_SNAPSHOT)
 
     await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG)
 
     expect(entryWriteCount()).toBe(1)
   })
 
-  it('writes snapshot when used value changes', async () => {
-    setupLatestSnapshot({ ...BASE_SNAPSHOT, used: 2999 })
+  it('writes when used value changes (different content-hash key)', async () => {
+    const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, used: 3000 }
+    setupEntryExists(false, incoming)
 
-    await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG) // BASE_SNAPSHOT.used = 3000
+    await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
     expect(entryWriteCount()).toBe(1)
   })
 
   it('writes snapshot when billing phase transitions', async () => {
-    setupLatestSnapshot({ ...BASE_SNAPSHOT, billingPhase: 'credits_available' })
     const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, billingPhase: 'budget_active' }
+    setupEntryExists(false, incoming)
 
     await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
@@ -709,12 +731,12 @@ describe('appendSnapshot — deduplication', () => {
   })
 
   it('writes snapshot when overageCount grows', async () => {
-    setupLatestSnapshot({ ...BASE_SNAPSHOT, billingPhase: 'budget_active', overageCount: 100 })
     const incoming: UsageHistorySnapshot = {
       ...BASE_SNAPSHOT,
       billingPhase: 'budget_active',
       overageCount: 150,
     }
+    setupEntryExists(false, incoming)
 
     await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
@@ -722,8 +744,8 @@ describe('appendSnapshot — deduplication', () => {
   })
 
   it('writes snapshot when derivedOverageCredits grows', async () => {
-    setupLatestSnapshot({ ...BASE_SNAPSHOT, derivedOverageCredits: 200 })
     const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, derivedOverageCredits: 473 }
+    setupEntryExists(false, incoming)
 
     await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
@@ -731,22 +753,35 @@ describe('appendSnapshot — deduplication', () => {
   })
 
   it('writes snapshot when overageCount appears for the first time (undefined → number)', async () => {
-    setupLatestSnapshot({ ...BASE_SNAPSHOT }) // no overageCount
     const incoming: UsageHistorySnapshot = { ...BASE_SNAPSHOT, overageCount: 0 }
+    setupEntryExists(false, incoming)
 
     await appendSnapshot(USER_ID, incoming, ENABLED_CONFIG)
 
     expect(entryWriteCount()).toBe(1)
   })
 
-  it('proceeds to write when getLatestStoredSnapshot list fails (allow-write fallback)', async () => {
-    // Daily index get succeeds, but the blob list for the prefix throws
-    mockStore.get.mockResolvedValue({ count: 0, date: '2026-06-15' })
-    mockStore.list.mockRejectedValue(new Error('list failure'))
+  it('proceeds to write when entry existence check fails (allow-write fallback)', async () => {
+    // First get (entry key check) throws; second get (index) succeeds
+    mockStore.get
+      .mockRejectedValueOnce(new Error('get failure'))
+      .mockResolvedValueOnce({ count: 0, date: '2026-06-15' })
+    mockStore.list.mockResolvedValue({ blobs: [] })
 
     await appendSnapshot(USER_ID, BASE_SNAPSHOT, ENABLED_CONFIG)
 
-    // Entry write should still proceed (fail-open dedup)
     expect(entryWriteCount()).toBe(1)
+  })
+
+  it('concurrent writes of identical state all target the same key (idempotent)', async () => {
+    // Simulate: both concurrent invocations find no existing entry (eventual-
+    // consistency gap) and both write.  They should both write to the SAME key
+    // because the key is derived from state, not from capturedAt.
+    setupEntryExists(false, BASE_SNAPSHOT)
+
+    const s1: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:00:00.000Z' }
+    const s2: UsageHistorySnapshot = { ...BASE_SNAPSHOT, capturedAt: '2026-06-15T10:00:00.500Z' }
+
+    expect(buildHistoryKey(USER_ID, s1)).toBe(buildHistoryKey(USER_ID, s2))
   })
 })

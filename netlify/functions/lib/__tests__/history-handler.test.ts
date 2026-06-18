@@ -174,7 +174,7 @@ describe('GET /api/history — response shape', () => {
       userId: USER_ID,
       snapshot: BASE_SNAPSHOT,
     }
-    const key = buildHistoryKey(USER_ID, BASE_SNAPSHOT.capturedAt)
+    const key = buildHistoryKey(USER_ID, BASE_SNAPSHOT)
     mockStore.list.mockResolvedValue({ blobs: [{ key }] })
     mockStore.get.mockResolvedValue(entry)
 
@@ -220,7 +220,7 @@ describe('GET /api/history — response shape', () => {
       userId: USER_ID,
       snapshot: BASE_SNAPSHOT,
     }
-    const key = buildHistoryKey(USER_ID, BASE_SNAPSHOT.capturedAt)
+    const key = buildHistoryKey(USER_ID, BASE_SNAPSHOT)
     mockStore.list.mockResolvedValue({ blobs: [{ key }] })
     mockStore.get.mockResolvedValue(entry)
 
