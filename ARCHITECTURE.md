@@ -60,6 +60,7 @@ This document describes the design decisions, data flows, and component boundari
 │  │  widget-tokens         (Tier 1 — AES-256-GCM encrypted)    │  │
 │  │  onboarding-sessions   (Tier 1 — AES-256-GCM encrypted)    │  │
 │  │  provider-captures     (Tier 2/3 — sanitized telemetry)    │  │
+│  │  usage-history         (Tier 2/3 — usage ledger snapshots) │  │
 │  │  usage-contexts        (Tier 1 — planned, Horizon 2)       │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
@@ -131,6 +132,9 @@ Shared code lives in `netlify/functions/lib/`:
 | `capture-config.ts` | Env var parsing for capture configuration |
 | `capture-sanitize.ts` | Field allow-listing + sensitive value redaction |
 | `capture-store.ts` | Blobs persistence for sanitised provider captures |
+| `usage-history-types.ts` | Types for the usage history ledger (`UsageHistorySnapshot`, `UsageHistoryEntry`, `UsageHistoryDelta`, `UsageHistoryConfig`) |
+| `usage-history-store.ts` | Blobs persistence for usage snapshots; `appendSnapshot`, `getHistory`, `calculateDelta` |
+| `finops-types.ts` | FinOps and AADLC attribution domain types (Horizon 3) |
 
 ---
 
@@ -237,6 +241,39 @@ Bootstrap tokens are deleted immediately on first use (single-use guarantee) and
 
 Old captures are deleted lazily when a new capture is written for the same provider/user prefix.
 
+### Blob store: `usage-history` (optional usage ledger)
+
+```
+<userId>/<YYYY-MM-DD>/<ISO-timestamp>.json  ← UsageHistoryEntry
+<userId>/<YYYY-MM-DD>/_index.json           ← HistoryDailyIndex (daily counter)
+```
+
+History is partitioned by user and UTC date. There is no provider dimension in
+the key because history is **provider-independent** — snapshots are derived from
+the normalised `Usage` shape returned by any provider.
+
+Entry (`UsageHistoryEntry`) fields persisted:
+- `historyVersion` — schema version (`"1"`)
+- `userId` — numeric GitHub user ID
+- `snapshot.capturedAt` — ISO 8601 timestamp
+- `snapshot.used` — credits/requests consumed
+- `snapshot.quota` — total quota
+- `snapshot.remaining` — `quota - used`, clamped to ≥ 0
+- `snapshot.billingPhase` — phase of the credit/budget lifecycle
+- `snapshot.overageCount?` — budget-backed credits consumed (when present)
+- `snapshot.derivedOverageCredits?` — settlement-lag overage estimate (when present)
+
+No `billingEntity`, no raw provider payloads, and no credential data are stored.
+
+Old entries are deleted lazily when a new snapshot is written for the same user
+prefix. The daily cap is enforced via `HistoryDailyIndex._index.json` (Tier 3).
+Loss of the daily index is non-blocking; the count is rebuilt from listed entries.
+
+**Storage functions** (`netlify/functions/lib/usage-history-store.ts`):
+- `appendSnapshot(userId, snapshot, config)` — fire-and-forget write; never throws.
+- `getHistory(userId, options?)` — read history with optional date range and limit.
+- `calculateDelta(before, after)` — pure function; computes `UsageHistoryDelta` from two snapshots.
+
 ### Blob record tiers
 
 Blob records are classified into tiers that determine their encryption
@@ -245,8 +282,8 @@ requirements:
 | Tier | Description | Examples | Encryption |
 |---|---|---|---|
 | **Tier 1** | Sensitive credential records | `widget-tokens`, `onboarding-sessions`, `usage-contexts` (planned) | AES-256-GCM required via `BLOB_ENCRYPTION_KEY`. Must not be written unencrypted. |
-| **Tier 2** | Sanitized append-only telemetry | `provider-captures/<provider>/<userId>/<date>/<ts>.json` | App-level encryption not required. Records contain only allowlisted, redacted fields. |
-| **Tier 3** | Mutable provider-capture control blobs | `provider-captures/<provider>/<userId>/<date>/_index.json` | Recoverable and non-blocking. Loss does not affect live usage display. |
+| **Tier 2** | Sanitized append-only telemetry | `provider-captures/<provider>/<userId>/<date>/<ts>.json`, `usage-history/<userId>/<date>/<ts>.json` | App-level encryption not required. Records contain only allowlisted, redacted fields. |
+| **Tier 3** | Mutable control blobs | `provider-captures/<provider>/<userId>/<date>/_index.json`, `usage-history/<userId>/<date>/_index.json` | Recoverable and non-blocking. Loss does not affect live usage display. |
 | **Tier 4** | Legacy plaintext migration | Tier 1 records written before encryption was introduced | Migrated automatically on first read. Applies to Tier 1 records only. |
 
 ### Encryption (Tier 1)

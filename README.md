@@ -12,6 +12,7 @@
 - 🍎 **iOS Scriptable widget** — home-screen widget with Fast Setup via iOS Shortcuts
 - 🔒 **Blob encryption** — all sensitive records in Netlify Blobs are AES-256-GCM encrypted at rest
 - 📡 **Provider-agnostic** — supports `github-copilot-internal`, `copilot-local`, and `mock` providers
+- 📜 **Usage history ledger** — optional timestamped snapshot persistence with delta calculation and configurable retention
 
 ---
 
@@ -54,7 +55,8 @@ Netlify Functions (netlify/functions/*.ts)
                 ▼
         Netlify Blobs (encrypted at rest)
         ├── widget-tokens       Per-user widget token records
-        └── onboarding-sessions Bootstrap token records (15-min TTL)
+        ├── onboarding-sessions Bootstrap token records (15-min TTL)
+        └── usage-history       Timestamped usage snapshots (optional ledger)
                 │
                 ▼
         GitHub API (api.github.com/copilot_internal/user)
@@ -126,6 +128,14 @@ The data source is controlled by the `COPELIMIT_PROVIDER` environment variable.
 | `PROVIDER_CAPTURE_RETENTION_DAYS` | `30` | Days to retain capture records |
 | `PROVIDER_CAPTURE_MAX_PER_DAY` | `10` | Max captures stored per user per day |
 | `PROVIDER_CAPTURE_INCLUDE_NORMALIZED` | `true` | Include normalised usage in captures |
+
+### Usage history ledger
+
+| Variable | Default | Description |
+|---|---|---|
+| `USAGE_HISTORY_ENABLED` | `false` | Enable timestamped usage snapshot persistence |
+| `USAGE_HISTORY_RETENTION_DAYS` | `90` | Days to retain history entries (lazy cleanup on next write) |
+| `USAGE_HISTORY_MAX_PER_DAY` | `48` | Max snapshots stored per user per UTC day (~every 30 min) |
 
 ---
 

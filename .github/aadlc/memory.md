@@ -49,9 +49,11 @@ templates, not instruction-pack logic.
 - Storage: Netlify Blobs. Records follow a tiered encryption model:
   sensitive credential records (Tier 1) are AES-256-GCM encrypted via
   `BLOB_ENCRYPTION_KEY`; sanitized append-only telemetry records (Tier 2)
-  do not require app-level encryption; mutable provider-capture control
-  blobs (Tier 3) are recoverable and non-blocking; legacy plaintext
-  migration (Tier 4) applies to Tier 1 records only.
+  do not require app-level encryption; mutable control blobs (Tier 3)
+  are recoverable and non-blocking; legacy plaintext migration (Tier 4)
+  applies to Tier 1 records only.
+- Blob stores: `widget-tokens` (Tier 1), `onboarding-sessions` (Tier 1),
+  `provider-captures` (Tier 2/3), `usage-history` (Tier 2/3).
 - External: `api.github.com/copilot_internal/user` (live quota),
   GitHub OAuth for authentication.
 - iOS: `public/scriptable/CopeLimitWidget.js` (home-screen widget) and
@@ -641,4 +643,24 @@ modes.
 
 ## Last updated
 
-2026-06-18 by review-copilot-quota-capture PR agent (negative-remaining findings)
+2026-06-18 by usage-history-ledger PR agent
+
+## Usage history ledger (implemented)
+
+`usage-history-store.ts` and `usage-history-types.ts` implement the provider-independent
+usage snapshot ledger. Key facts:
+
+- Blob store: `usage-history` (Tier 2/3).
+- Key layout: `<userId>/<YYYY-MM-DD>/<ISO-timestamp>.json` (entry) and
+  `<userId>/<YYYY-MM-DD>/_index.json` (daily counter, Tier 3).
+- No provider dimension in key; history is provider-independent.
+- Snapshot fields recorded: `capturedAt`, `used`, `quota`, `remaining`,
+  `billingPhase`, `overageCount?`, `derivedOverageCredits?`.
+  No `billingEntity`, no raw payloads, no credential data.
+- `appendSnapshot(userId, snapshot, config)` — fire-and-forget (never rethrows).
+- `getHistory(userId, options?)` — returns `UsageHistorySnapshot[]` sorted
+  by `capturedAt` descending. Supports `fromDate`, `toDate`, `limit`.
+- `calculateDelta(before, after)` — pure function returning `UsageHistoryDelta`.
+- Default config: `enabled=false`, `retentionDays=90`, `maxPerDay=48`.
+- Env vars: `USAGE_HISTORY_ENABLED`, `USAGE_HISTORY_RETENTION_DAYS`, `USAGE_HISTORY_MAX_PER_DAY`.
+- 39 contract tests in `__tests__/usage-history-store.test.ts`.
