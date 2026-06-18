@@ -12,7 +12,7 @@
 - 🍎 **iOS Scriptable widget** — home-screen widget with Fast Setup via iOS Shortcuts
 - 🔒 **Blob encryption** — all sensitive records in Netlify Blobs are AES-256-GCM encrypted at rest
 - 📡 **Provider-agnostic** — supports `github-copilot-internal`, `copilot-local`, and `mock` providers
-- 📜 **Usage history ledger** — optional timestamped snapshot persistence with delta calculation and configurable retention
+- 📜 **Usage history ledger** — optional timestamped snapshot persistence with deduplication, delta calculation, and configurable retention
 
 ---
 

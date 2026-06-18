@@ -643,7 +643,7 @@ modes.
 
 ## Last updated
 
-2026-06-18 by usage-history-ledger PR agent
+2026-06-18 by snapshot-dedup PR agent
 
 ## Usage history ledger (implemented)
 
@@ -657,13 +657,19 @@ usage snapshot ledger. Key facts:
 - Snapshot fields recorded: `capturedAt`, `used`, `quota`, `remaining`,
   `billingPhase`, `overageCount?`, `derivedOverageCredits?`.
   No `billingEntity`, no raw payloads, no credential data.
-- `appendSnapshot(userId, snapshot, config)` — fire-and-forget (never rethrows).
+- `appendSnapshot(userId, snapshot, config)` — fire-and-forget (never rethrows);
+  skips write when all six tracked fields match the most recent stored snapshot
+  (deduplication). First snapshot (empty history) is always written. Fail-open
+  if the latest-snapshot lookup fails.
 - `getHistory(userId, options?)` — returns `UsageHistorySnapshot[]` sorted
   by `capturedAt` descending. Supports `fromDate`, `toDate`, `limit`.
 - `calculateDelta(before, after)` — pure function returning `UsageHistoryDelta`.
+- `snapshotsAreEquivalent(a, b)` — pure function; compares `used`, `quota`,
+  `remaining`, `billingPhase`, `overageCount`, `derivedOverageCredits`; ignores
+  `capturedAt`.
 - Default config: `enabled=false`, `retentionDays=90`, `maxPerDay=48`.
 - Env vars: `USAGE_HISTORY_ENABLED`, `USAGE_HISTORY_RETENTION_DAYS`, `USAGE_HISTORY_MAX_PER_DAY`.
-- 39 contract tests in `__tests__/usage-history-store.test.ts`.
+- 58 contract tests in `__tests__/usage-history-store.test.ts`.
 
 ## Usage history API endpoint (implemented)
 
