@@ -115,10 +115,10 @@ widget.addSpacer(10);
 if (usage.error) {
   addLine(widget, "Error", usage.error, false);
 } else {
-  const pct = usage.percentUsed > 100
+  const usedDisplay = usage.percentUsed > 100
     ? `${usage.used} (${usage.percentUsed}%!)`
     : `${usage.used} (${usage.percentUsed}%)`;
-  addLine(widget, "Used", pct);
+  addLine(widget, "Used", usedDisplay);
   if (isBudgetActive && usage.overageEntitlement !== undefined) {
     addLine(widget, "Budget", usage.overageEntitlement);
   }

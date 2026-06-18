@@ -338,6 +338,7 @@ function App() {
                   </div>
                 )}
                 {usage.derivedOverageCredits !== undefined &&
+                  usage.overageCount !== undefined &&
                   usage.derivedOverageCredits !== usage.overageCount && (
                   <div>
                     <span>Derived overage (est.)</span>

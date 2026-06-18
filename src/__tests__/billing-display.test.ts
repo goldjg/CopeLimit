@@ -1,5 +1,5 @@
 /**
- * Unit tests for billing-display helper functions in src/main.tsx.
+ * Unit tests for billing display helper functions in src/billing-display.ts.
  *
  * We import only the exported pure helpers to keep tests
  * independent of the React rendering lifecycle.

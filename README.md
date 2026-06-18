@@ -162,7 +162,7 @@ Returns normalised Copilot quota data from the configured provider.
 **Response**
 ```json
 {
-  "mode": "ai_credits",
+  "mode": "premium_requests",
   "used": 321,
   "quota": 500,
   "remaining": 179,
