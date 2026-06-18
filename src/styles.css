@@ -275,6 +275,77 @@ button {
   margin-bottom: 0;
 }
 
+.billingMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.billingPhaseBadge {
+  background: rgba(96, 165, 250, 0.12);
+  color: #93c5fd;
+  border: 1px solid rgba(96, 165, 250, 0.28);
+}
+
+.billingPhaseBadge.phase-budget_active {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.billingPhaseBadge.phase-unlimited {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.billingPhaseBadge.phase-credits_exhausted,
+.billingPhaseBadge.phase-hard_stop {
+  background: rgba(161, 161, 170, 0.10);
+  color: #a1a1aa;
+  border-color: rgba(161, 161, 170, 0.2);
+}
+
+.budgetInfo,
+.historySummary {
+  margin-bottom: 20px;
+}
+
+.budgetGrid,
+.historyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.budgetGrid div,
+.historyGrid div {
+  background: rgba(255,255,255,0.05);
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.budgetGrid span,
+.historyGrid span {
+  display: block;
+  font-size: 0.82rem;
+  color: #a1a1aa;
+  margin-bottom: 4px;
+}
+
+.budgetGrid strong,
+.historyGrid strong {
+  font-size: 1.2rem;
+}
+
+.historyWindow {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: #71717a;
+}
+
 .widgetTokenCard {
   margin-top: 20px;
 }
