@@ -38,15 +38,24 @@
  * provider response is written to Netlify Blobs asynchronously (fire-and-forget)
  * via {@link maybeCapture}. This never blocks the usage response.
  *
+ * ## Usage History
+ * When `USAGE_HISTORY_ENABLED=true`, a {@link UsageHistorySnapshot} derived from
+ * the normalised usage result is appended to the `usage-history` Blobs store
+ * asynchronously (fire-and-forget) via {@link appendSnapshot}. The owner key is
+ * `result.userId` (numeric GitHub user ID). This never blocks the usage response.
+ *
  * ## Cache
  * Responses are marked `Cache-Control: private, max-age=60`.
  *
  * ## Required environment variables (provider-dependent)
- * - `COPELIMIT_PROVIDER`      – Provider selection
- * - `SESSION_SECRET`          – Required for `github-copilot-internal`
- * - `SESSION_ENCRYPTION_KEY`  – Recommended for `github-copilot-internal`
+ * - `COPELIMIT_PROVIDER`           – Provider selection
+ * - `SESSION_SECRET`               – Required for `github-copilot-internal`
+ * - `SESSION_ENCRYPTION_KEY`       – Recommended for `github-copilot-internal`
  * - `MOCK_USED` / `MOCK_QUOTA` / `MOCK_RESET_AT` – Mock provider overrides
- * - `COPILOT_API_URL`         – Override for `copilot-local` (default: `http://127.0.0.1:4141`)
+ * - `COPILOT_API_URL`              – Override for `copilot-local` (default: `http://127.0.0.1:4141`)
+ * - `USAGE_HISTORY_ENABLED`        – Enable usage snapshot persistence (default: `false`)
+ * - `USAGE_HISTORY_RETENTION_DAYS` – Days to retain history entries (default: `90`)
+ * - `USAGE_HISTORY_MAX_PER_DAY`    – Max snapshots per user per UTC day (default: `48`)
  */
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { parseCookies, verifySession } from './lib/session';
@@ -66,6 +75,9 @@ import {
 } from './lib/copilot';
 import { maybeCapture } from './lib/capture-store';
 import { readCaptureConfig } from './lib/capture-config';
+import { appendSnapshot } from './lib/usage-history-store';
+import { readUsageHistoryConfig } from './lib/usage-history-config';
+import type { UsageHistorySnapshot } from './lib/usage-history-types';
 
 type UsageResult = {
   usage: Usage;
@@ -328,6 +340,7 @@ export const handler: Handler = async (event) => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
     const captureConfig = readCaptureConfig();
+    const historyConfig = readUsageHistoryConfig();
     const result =
       provider === 'copilot-local'
         ? await getCopilotLocalUsage()
@@ -346,6 +359,21 @@ export const handler: Handler = async (event) => {
       usage,
       rawPayload: result.rawPayload
     });
+
+    // History persistence is fire-and-forget: failures are logged inside appendSnapshot
+    // and must never block the usage response.
+    if (result.userId !== undefined) {
+      const snapshot: UsageHistorySnapshot = {
+        capturedAt: usage.updatedAt,
+        used: usage.used,
+        quota: usage.quota,
+        remaining: usage.remaining,
+        billingPhase: usage.billingPhase,
+        overageCount: usage.overageCount,
+        derivedOverageCredits: usage.derivedOverageCredits,
+      };
+      void appendSnapshot(result.userId, snapshot, historyConfig);
+    }
 
     return {
       statusCode: 200,
