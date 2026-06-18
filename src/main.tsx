@@ -333,7 +333,7 @@ function App() {
                 <strong>{usage.quota}</strong>
               </div>
               <div>
-                <span>Used %</span>
+                <span>Usage share</span>
                 <strong>{usage.percentUsed}%</strong>
               </div>
             </div>
@@ -445,12 +445,13 @@ function App() {
                 <>
                   <p className="historyTrendLabel">Usage trend · {trendHeights.length} snapshots</p>
                   <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
-                    {trendHeights.map((height, index) => (
+                    {trendSnapshots.map((snapshot, index) => (
                       <span
-                      key={trendSnapshots[index].capturedAt}
+                      key={snapshot.capturedAt}
                         className="historyTrendBar"
-                        style={{ height: `${height}%` }}
-                      title={`${formatNumber(trendSnapshots[index].used)} used`}
+                      style={{ height: `${trendHeights[index] ?? 0}%` }}
+                      title={`${formatNumber(snapshot.used)} used`}
+                      aria-label={`${formatNumber(snapshot.used)} used at ${new Date(snapshot.capturedAt).toLocaleString()}`}
                       />
                     ))}
                   </div>

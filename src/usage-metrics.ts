@@ -14,7 +14,7 @@ const MIN_TREND_BAR_HEIGHT = 28;
 const TREND_BAR_HEIGHT_RANGE = 72;
 
 export function formatNumber(value: number): string {
-  return value.toLocaleString('en');
+  return value.toLocaleString();
 }
 
 export function formatBurnRate(creditsPerHour: number | null | undefined): string | null {
