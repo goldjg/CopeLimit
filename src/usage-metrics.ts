@@ -9,6 +9,10 @@ type UsageMetricsUsage = {
   derivedOverageCredits?: number;
 };
 
+const FLAT_TREND_BAR_HEIGHT = 60;
+const MIN_TREND_BAR_HEIGHT = 28;
+const TREND_BAR_HEIGHT_RANGE = 72;
+
 export function formatNumber(value: number): string {
   return value.toLocaleString('en');
 }
@@ -63,6 +67,6 @@ export function buildTrendBarHeights(values: number[]): number[] {
   if (values.length === 0) return [];
   const min = Math.min(...values);
   const max = Math.max(...values);
-  if (min === max) return values.map(() => 60);
-  return values.map((value) => 28 + (((value - min) / (max - min)) * 72));
+  if (min === max) return values.map(() => FLAT_TREND_BAR_HEIGHT);
+  return values.map((value) => MIN_TREND_BAR_HEIGHT + (((value - min) / (max - min)) * TREND_BAR_HEIGHT_RANGE));
 }

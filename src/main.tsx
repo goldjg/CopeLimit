@@ -118,20 +118,6 @@ function App() {
     return authErrorMessage(params.get('error'));
   }, []);
 
-  async function refresh() {
-    setError(null);
-    try {
-      const response = await fetch('/api/usage', { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Usage API returned HTTP ${response.status}`);
-      }
-      setUsage(await response.json());
-      void fetchHistorySummary();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    }
-  }
-
   async function fetchHistorySummary() {
     try {
       const response = await fetch('/api/history?summary=true&limit=50', { cache: 'no-store' });
@@ -142,6 +128,28 @@ function App() {
       }
     } catch {
       // History is optional — silently ignore failures
+    }
+  }
+
+  async function refresh() {
+    setError(null);
+    const [usageResult] = await Promise.allSettled([
+      fetch('/api/usage', { cache: 'no-store' }),
+      fetchHistorySummary(),
+    ]);
+
+    if (usageResult.status === 'rejected') {
+      setError(usageResult.reason instanceof Error ? usageResult.reason.message : 'Unknown error');
+      return;
+    }
+
+    try {
+      if (!usageResult.value.ok) {
+        throw new Error(`Usage API returned HTTP ${usageResult.value.status}`);
+      }
+      setUsage(await usageResult.value.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
     }
   }
 
@@ -439,7 +447,7 @@ function App() {
                   <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
                     {trendHeights.map((height, index) => (
                       <span
-                        key={`${trendSnapshots[index]?.capturedAt ?? index}-${trendSnapshots[index]?.used ?? 0}`}
+                      key={`${trendSnapshots[index]?.capturedAt ?? 'snapshot'}-${index}`}
                         className="historyTrendBar"
                         style={{ height: `${height}%` }}
                         title={`${formatNumber(trendSnapshots[index]?.used ?? 0)} used`}
