@@ -533,19 +533,21 @@ The API shape may change without notice.
  * The billing phase captures where in the credit/budget lifecycle the
  * current usage falls.
  *
- * Detection priority (first match wins):
+ * Detection priority (first match wins).
+ * Uses rawRemaining (pre-clamp API value) — see "Negative remaining" subsection.
+ *
  *  1. unlimited        — unlimited === true
- *  2. credits_available — remaining > 0
- *  3. budget_active    — overage_count > 0 && overage_permitted === true
- *  4. budget_available — remaining === 0 && overage_permitted === true && overage_count === 0
+ *  2. credits_available — rawRemaining > 0
+ *  3. budget_active    — (overage_count > 0 || rawRemaining < 0) && overage_permitted === true
+ *  4. budget_available — rawRemaining === 0 && overage_permitted === true && overage_count === 0
  *  5. hard_stop        — has_quota === false && unlimited !== true
- *  6. credits_exhausted — remaining === 0 && overage_permitted !== true
+ *  6. credits_exhausted — rawRemaining <= 0 && overage_permitted !== true (default)
  */
 type BillingPhase =
   | 'credits_available'   // Included credits remaining; budget not yet needed
   | 'credits_exhausted'   // Included credits = 0; no budget configured or enabled
   | 'budget_available'    // Included credits = 0; budget enabled; no overage consumed yet
-  | 'budget_active'       // Budget spending in progress (overage_count > 0)
+  | 'budget_active'       // Budget spending in progress (overage_count > 0 OR rawRemaining < 0)
   | 'unlimited'           // Unlimited usage (unlimited === true)
   | 'hard_stop';          // No quota, no budget, no unlimited (has_quota === false)
 ```
@@ -563,7 +565,7 @@ type BillingPhase =
           ▼                                                      │
   ┌──────────────────┐  credits     ┌───────────────────────┐   │
   │ credits_available│──exhausted──►│                       │   │
-  │  remaining > 0   │             │  overage_permitted?    │   │
+  │ rawRemaining > 0 │             │  overage_permitted?    │   │
   └──────────────────┘             └───────────┬───────────┘   │
                                               │                 │
                                ┌──────────────┴──────────────┐ │
@@ -572,9 +574,11 @@ type BillingPhase =
                                ▼                        ▼      │ │
                   ┌────────────────────┐  ┌─────────────────┐  │ │
                   │  budget_available  │  │credits_exhausted│  │ │
-                  │  overage_count = 0 │  │ (soft stop)     │  │ │
-                  └────────┬───────────┘  └─────────────────┘  │ │
+                  │  rawRemaining = 0  │  │ (soft stop)     │  │ │
+                  │  overage_count = 0 │  └─────────────────┘  │ │
+                  └────────┬───────────┘                        │ │
                            │ overage_count > 0                  │ │
+                           │ OR rawRemaining < 0 (settle lag)   │ │
                            ▼                                    │ │
                   ┌────────────────────┐                        │ │
                   │   budget_active    │                        │ │
@@ -593,43 +597,24 @@ type BillingPhase =
 
 | Phase | Detection condition | UI wording (suggested) | Warning level |
 |---|---|---|---|
-| `credits_available` | `remaining > 0` | "X AI credits remaining (Y of Z)" | derived from `percentUsed` |
-| `credits_exhausted` | `remaining == 0`, `overage_permitted !== true` (reached only after `hard_stop` guard) | "Included credits used — no budget configured" | `over` |
-| `budget_available` | `remaining == 0`, `overage_permitted === true`, `overage_count == 0` | "Included credits used — budget ready" | `over` (badge), informational |
-| `budget_active` | `overage_count > 0`, `overage_permitted === true` | "Using budget: X credits used" | derived from `overage_count / overage_entitlement` |
+| `credits_available` | `rawRemaining > 0` | "X AI credits remaining (Y of Z)" | derived from `percentUsed` |
+| `credits_exhausted` | `rawRemaining <= 0`, `overage_permitted !== true` (reached only after `hard_stop` guard) | "Included credits used — no budget configured" | `over` |
+| `budget_available` | `rawRemaining === 0`, `overage_permitted === true`, `overage_count === 0` | "Included credits used — budget ready" | `over` (badge), informational |
+| `budget_active` | `(overage_count > 0 \|\| rawRemaining < 0)`, `overage_permitted === true` | "Using budget: X credits used" | derived from `overage_count / overage_entitlement` (or `derivedOverageCredits` when overage_count = 0) |
 | `unlimited` | `unlimited === true` | "Unlimited usage" | `normal` |
 | `hard_stop` | `has_quota === false`, `unlimited !== true` | "No quota available" | `over` |
 
 ### Normalization implications
 
-1. **`Usage` type extension (Horizon 1 follow-up):**
-   - Add `billingPhase: BillingPhase` to the `Usage` type in `copilot.ts`.
-   - Add optional `overageCount?: number` and `overageEntitlement?: number`
-     for display in `budget_active` phase.
-   - `normaliseUsage` should accept these optional inputs and pass them
-     through; the detection function `detectBillingPhase` should live in
-     `copilot.ts`.
+See the updated "Normalization implications (updated)" subsection below the
+"Negative remaining: detection gap and proposed fix" subsection, which reflects
+the amended design including `rawRemaining`, `effectiveUsed`, and
+`derivedOverageCredits`. The implementation is tracked in
+`.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
 
-2. **`warningLevel` semantics:** The existing percentage-based `WarningLevel`
-   remains unchanged. For `budget_active` phase, `percentUsed` reflects the
-   included-credits fill (will be ≥ 100 %) while `billingPhase` provides the
-   richer context. No extension to `WarningLevel` is planned at this stage.
+### Current observed state (updated 2026-06-18, capture 2)
 
-3. **`UsageSnapshot` (Horizon 2):** The `UsageSnapshot` type stored inside
-   `UsageContext` should add `billingPhase?: BillingPhase` when the
-   Horizon 2 multi-context implementation lands.
-
-4. **Provider compatibility:** `BillingPhase` is a normalised abstraction.
-   The `github-copilot-internal` provider will populate it from the fields
-   listed above. Other providers (`mock`, `copilot-local`) should default
-   to `credits_available` unless they expose equivalent field semantics.
-
-5. **No-surprise-spend guard:** `budget_available` and `budget_active`
-   phases must only be presented when `overage_permitted === true` is
-   observed in the API response. CopeLimit must never surface assumed
-   additional usage without data evidence.
-
-### Current observed state (captured 2026-06-18)
+Capture 1 (prior observation):
 
 ```
 quota_snapshots.premium_interactions:
@@ -645,10 +630,162 @@ quota_snapshots.premium_interactions:
 
 Derived BillingPhase: credits_available
   (remaining = 31 > 0; overage not yet consumed)
-
-Next expected phase: budget_available
-  (after remaining 31 credits are consumed)
 ```
+
+Capture 2 (latest — reveals detection gap):
+
+```
+quota_snapshots.premium_interactions:
+  entitlement:        7000
+  remaining:          -473          ← raw API value; negative
+  overage_count:      0             ← billing page shows $0 / $50 consumed
+  overage_entitlement: (budget-equivalent; $50/month)
+  overage_permitted:  true
+  unlimited:          false
+  has_quota:          true
+  token_based_billing: true
+
+Normalized remaining:  0           ← current code clamps Math.max(0, remaining)
+Effective used:        7473        ← quota - rawRemaining = 7000 - (-473)
+GitHub billing page:   $0 / $50 consumed
+
+Derived BillingPhase under current logic: budget_available  ← INCORRECT
+Correct BillingPhase:                     budget_active
+```
+
+### Negative remaining: detection gap and proposed fix
+
+**Observation:** When `remaining` goes negative, the current normalisation
+pipeline clamps it to `0` before `detectBillingPhase` sees it. The call
+chain is:
+
+```
+usage.ts:
+  safeRemaining = Math.max(0, remaining)    // -473 → 0
+  used          = Math.max(0, quota - safeRemaining)  // 7000 - 0 = 7000
+              ↓
+copilot.ts normaliseUsage():
+  remaining = Math.max(0, quota - used)     // 7000 - 7000 = 0
+              ↓
+detectBillingPhase({ remaining: 0, overageCount: 0, overagePermitted: true })
+  → budget_available  ← WRONG
+```
+
+The result: 473 credits consumed beyond the included quota are invisible to
+phase detection. The correct phase is `budget_active`.
+
+**Root cause of discrepancy with billing page:** The GitHub billing page shows
+`$0 / $50` consumed while `remaining = -473`. This indicates a settlement lag:
+`remaining` reflects real-time credit consumption, while `overage_count`
+reflects credits that have been settled and charged against the budget — a
+distinct billing cycle event. Credits can accrue a negative `remaining` balance
+before the billing engine settles them into `overage_count`.
+
+**Proposed normalization change:**
+
+The `detectBillingPhase` function must receive the raw (pre-clamp) `remaining`
+value as a separate parameter so it can detect active budget consumption before
+`overage_count` updates:
+
+```typescript
+// Proposed amended signature
+detectBillingPhase(input: {
+  rawRemaining: number;   // ← NEW: raw API remaining, may be < 0
+  remaining: number;      // clamped to ≥ 0 (for display)
+  overageCount?: number;
+  overagePermitted?: boolean;
+  unlimited?: boolean;
+  hasQuota?: boolean;
+}): BillingPhase
+```
+
+**Amended detection priority (first match wins):**
+
+| Priority | Phase | Condition |
+|---|---|---|
+| 1 | `unlimited` | `unlimited === true` |
+| 2 | `credits_available` | `rawRemaining > 0` |
+| 3 | `budget_active` | `(overageCount > 0 \|\| rawRemaining < 0) && overagePermitted === true` |
+| 4 | `budget_available` | `rawRemaining === 0 && overagePermitted === true && overageCount === 0` |
+| 5 | `hard_stop` | `hasQuota === false && unlimited !== true` |
+| 6 | `credits_exhausted` | default (`rawRemaining <= 0 && overagePermitted !== true`) |
+
+Using `rawRemaining` as the input to all phase conditions eliminates the
+ambiguity introduced by early clamping.
+
+**Effective used and `percentUsed`:** When `rawRemaining < 0`:
+
+- `effectiveUsed = quota + abs(rawRemaining)` — exceeds quota; represents total
+  credits consumed including the overage portion.
+- `percentUsed = Math.round((effectiveUsed / quota) * 100)` — will exceed 100 %.
+  `warningLevel` already returns `'over'` for `percentUsed >= 100`, so no change
+  to `WarningLevel` semantics is required.
+- The `used` field on `Usage` should carry `effectiveUsed` (not clamped to quota)
+  so that FinOps checkpoints can record the true consumption.
+
+**Derived overage credits:** When `overage_count` has not yet updated,
+overage consumption can be estimated as:
+
+```
+derivedOverageCredits = Math.max(0, -(rawRemaining))
+```
+
+For capture 2: `Math.max(0, 473) = 473` credits.
+
+This value should be surfaced alongside `overageCount` in the `Usage` type
+(e.g. as `derivedOverageCredits?: number`) so the UI can display real-time
+consumption even during the settlement lag window.
+
+### Additional telemetry
+
+To support FinOps attribution and settlement-lag analysis, the following
+additional fields should be captured from the `copilot_internal/user` API
+response in provider captures (Tier 2 sanitized telemetry):
+
+| Field | Path in API response | Why capture it |
+|---|---|---|
+| `remaining` | `quota_snapshots.premium_interactions.remaining` | May be negative; raw value required for `detectBillingPhase` |
+| `overage_count` | `quota_snapshots.premium_interactions.overage_count` | Tracks settled budget spend; lags behind real-time `remaining` |
+| `overage_entitlement` | `quota_snapshots.premium_interactions.overage_entitlement` | Budget allocation in credit-equivalent units |
+| `overage_permitted` | `quota_snapshots.premium_interactions.overage_permitted` | Gate for budget-backed phase display |
+| `unlimited` | `quota_snapshots.premium_interactions.unlimited` | Required for `unlimited` phase detection |
+| `has_quota` | `quota_snapshots.premium_interactions.has_quota` | Required for `hard_stop` phase detection |
+
+The `capture-sanitize.ts` allowlist must be updated to include these fields
+before capture is enabled for `budget_active` observations. All values are
+numeric/boolean metadata — no credentials or PII.
+
+### Normalization implications (updated)
+
+1. **`detectBillingPhase` signature change:** Add `rawRemaining: number` as a
+   required input (separate from the clamped `remaining`). Detection priority 3
+   must use `rawRemaining < 0` as an additional trigger for `budget_active`.
+
+2. **`normaliseUsage` input change:** Accept `rawRemaining?: number` (the
+   pre-clamp value from the provider). Pass it through to `detectBillingPhase`.
+   When absent, fall back to the clamped `remaining` for backward compatibility.
+
+3. **`used` field:** `normaliseUsage` should pass `effectiveUsed` (including
+   the negative-remaining overage) rather than clamping `used` to `quota`.
+   The current `Math.max(0, quota - safeRemaining)` in `usage.ts` discards the
+   overage signal; the fix belongs in the provider code, not in `normaliseUsage`.
+
+4. **`derivedOverageCredits` field:** Add optional `derivedOverageCredits?: number`
+   to the `Usage` type, set to `Math.max(0, -(rawRemaining))` when `rawRemaining < 0`.
+   Useful during the settlement lag window before `overage_count` updates.
+
+5. **`warningLevel` semantics:** Unchanged. `percentUsed >= 100` already maps to
+   `'over'`. No extension required.
+
+6. **`UsageSnapshot` (Horizon 2):** Should add `rawRemaining?: number` and
+   `derivedOverageCredits?: number` alongside `billingPhase`.
+
+7. **Provider compatibility:** Providers that do not expose `remaining` as a raw
+   field (e.g. `mock`, `copilot-local`) should default `rawRemaining` to the
+   clamped `remaining` value, preserving existing `credits_available` defaults.
+
+8. **No-surprise-spend guard:** Unchanged. `budget_available` and `budget_active`
+   must only be presented when `overage_permitted === true` is observed.
 
 ### Roadmap
 

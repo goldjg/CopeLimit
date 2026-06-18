@@ -6,14 +6,22 @@ status: active
 run:
   type: implementation
   horizon: 1
-  title: Horizon 1 PR 2 — BillingPhase state model
+  title: Horizon 1 PR 2 — BillingPhase state model (including rawRemaining fix)
   intent: >-
     Add a BillingPhase type and detectBillingPhase() function to copilot.ts.
-    Extend the Usage type with billingPhase, overageCount, and overageEntitlement
-    optional fields. Update normaliseUsage to accept and pass these fields through.
-    Update github-copilot-internal provider to populate them from the observed
-    overage_* API fields. Add tests. Do not change the wire shape of existing
-    fields or break any existing caller.
+    Extend the Usage type with billingPhase, overageCount, overageEntitlement,
+    and derivedOverageCredits optional fields. Update normaliseUsage to accept
+    and pass these fields through. Update github-copilot-internal provider to
+    populate them from the observed overage_* API fields.
+
+    CRITICAL FIX: detectBillingPhase must receive rawRemaining (the pre-clamp
+    API value) as a parameter. Detection priority 3 (budget_active) must fire
+    when (overageCount > 0 || rawRemaining < 0) && overagePermitted === true,
+    not only when overageCount > 0. This corrects the settlement-lag detection
+    gap observed in capture 2 (remaining: -473, overage_count: 0, billing: $0).
+
+    Add tests for all contract assertions including the rawRemaining < 0 case.
+    Do not change the wire shape of existing fields or break any existing caller.
   modelRecommendation:
     planner: sonnet
     executor: gpt-5.4
@@ -21,14 +29,19 @@ run:
       - gpt-5.3-codex
 
 # Design contract: the BillingPhase model is fully specified in ARCHITECTURE.md
-# § "Billing state model". Read that section before implementation.
-# Detection priority (first match wins):
+# § "Billing state model". Read the full section including "Negative remaining:
+# detection gap and proposed fix" before implementation.
+#
+# AMENDED Detection priority (first match wins, uses rawRemaining):
 #   1. unlimited        — unlimited === true
-#   2. credits_available — remaining > 0
-#   3. budget_active    — overage_count > 0 && overage_permitted === true
-#   4. budget_available — remaining === 0 && overage_permitted === true && overage_count === 0
+#   2. credits_available — rawRemaining > 0
+#   3. budget_active    — (overage_count > 0 || rawRemaining < 0) && overage_permitted === true
+#   4. budget_available — rawRemaining === 0 && overage_permitted === true && overage_count === 0
 #   5. hard_stop        — has_quota === false && unlimited !== true
-#   6. credits_exhausted — remaining === 0 && overage_permitted !== true
+#   6. credits_exhausted — rawRemaining <= 0 && overage_permitted !== true (default)
+#
+# Key change from original: priority 3 now includes rawRemaining < 0 as an
+# additional trigger. The detectBillingPhase signature must include rawRemaining.
 
 scope:
   allowedFiles:
@@ -37,6 +50,7 @@ scope:
     - netlify/functions/lib/__tests__/copilot.test.ts
     - netlify/functions/usage.ts
     - netlify/functions/widget-usage.ts
+    - netlify/functions/lib/capture-sanitize.ts
   forbiddenFiles:
     - .github/aadlc/memory.md
     - .github/aadlc/current-pr-contract.md
@@ -50,7 +64,6 @@ scope:
     - netlify/functions/lib/widget-store.ts
     - netlify/functions/lib/onboarding-store.ts
     - netlify/functions/lib/capture-store.ts
-    - netlify/functions/lib/capture-sanitize.ts
     - netlify/functions/lib/blob-store.ts
     - netlify/functions/lib/blob-crypto.ts
     - package.json
@@ -64,6 +77,7 @@ scope:
     - provider-normalisation
     - tests
     - governance
+    - capture-allowlist-extension
   forbiddenChangeTypes:
     - auth
     - oauth
@@ -111,17 +125,25 @@ approvalGates:
 # Contract assertions (must be validated by tests):
 # 1. detectBillingPhase returns 'unlimited' when unlimited === true,
 #    regardless of remaining or overage fields.
-# 2. detectBillingPhase returns 'credits_available' when remaining > 0
+# 2. detectBillingPhase returns 'credits_available' when rawRemaining > 0
 #    and unlimited !== true.
-# 3. detectBillingPhase returns 'budget_active' when overage_count > 0
-#    and overage_permitted === true and remaining === 0.
-# 4. detectBillingPhase returns 'budget_available' when remaining === 0
-#    and overage_permitted === true and overage_count === 0.
-# 5. detectBillingPhase returns 'hard_stop' when has_quota === false
+# 3. detectBillingPhase returns 'budget_active' when overageCount > 0
+#    and overagePermitted === true and rawRemaining === 0.
+# 4. detectBillingPhase returns 'budget_active' when rawRemaining < 0
+#    and overagePermitted === true and overageCount === 0.
+#    (settlement-lag case — CRITICAL: this is the new assertion from capture 2)
+# 5. detectBillingPhase returns 'budget_available' when rawRemaining === 0
+#    and overagePermitted === true and overageCount === 0.
+# 6. detectBillingPhase returns 'hard_stop' when hasQuota === false
 #    and unlimited !== true.
-# 6. Usage type extension is backward-compatible: billingPhase, overageCount,
-#    overageEntitlement are all optional. Callers that don't pass them receive
-#    billingPhase derived from the included-credits fields only.
+# 7. Usage type extension is backward-compatible: billingPhase, overageCount,
+#    overageEntitlement, derivedOverageCredits are all optional. Callers that
+#    don't pass them receive billingPhase derived from rawRemaining/remaining fields.
+# 8. When rawRemaining < 0, derivedOverageCredits === Math.max(0, -rawRemaining).
+#    For rawRemaining = -473: derivedOverageCredits = 473.
+# 9. The provider code in usage.ts must NOT clamp remaining before computing used
+#    when rawRemaining < 0. safeRemaining clamping must not destroy the rawRemaining
+#    signal needed by detectBillingPhase.
 
 validation:
   required:
@@ -161,8 +183,11 @@ nonGoals:
 openQuestions:
   - Is overage_entitlement expressed as a raw credit integer, a
     dollar-equivalent, or a different unit? Confirm from live capture
-    before wiring the display value. If unit is unclear, store as-is
-    and annotate with a TODO.
+    where overage_count > 0 before wiring the display value. If unit is
+    unclear, store as-is and annotate with a TODO.
+  - What is the magnitude of the settlement lag between rawRemaining going
+    negative and overage_count incrementing? Hours? Days? Billing cycle?
+    This affects whether derivedOverageCredits needs a staleness caveat.
   - Does the mock provider need updated defaults (MOCK_QUOTA=7000)?
     Treat as a separate follow-up; do not block this PR on it.
   - Does copilot-local proxy expose equivalent overage fields?

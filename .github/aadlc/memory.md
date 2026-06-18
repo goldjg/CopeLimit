@@ -143,7 +143,8 @@ CopeLimit-specific boundaries:
   additional fields alongside the existing `entitlement`, `remaining`, and
   `reset_date`:
   - `overage_count` (`number`) — credits consumed beyond included quota.
-    Zero when budget spending has not started.
+    Zero when budget spending has not started; may also be zero during a
+    settlement lag window even when `remaining < 0`.
   - `overage_entitlement` (`number`) — budget allocation expressed in
     credit-equivalent headroom (e.g. a $50 budget maps to a
     credit-equivalent value).
@@ -152,11 +153,26 @@ CopeLimit-specific boundaries:
   - `unlimited` (`boolean`) — `true` when usage is not quota-capped.
   - `has_quota` (`boolean`) — `false` when the account has no quota at all
     (hard stop condition).
-- **Observed state (2026-06-18):** `entitlement: 7000`, `remaining: 31`,
-  `overage_count: 0`, `overage_permitted: true`, `unlimited: false`,
-  `has_quota: true`. Budget: $50/month configured but not yet consumed.
-  Current `BillingPhase`: `credits_available` (transitioning to
-  `budget_available` once remaining 31 credits are exhausted).
+- **Observed state, capture 1 (2026-06-18):** `entitlement: 7000`,
+  `remaining: 31`, `overage_count: 0`, `overage_permitted: true`,
+  `unlimited: false`, `has_quota: true`. Budget: $50/month configured but not
+  yet consumed. `BillingPhase`: `credits_available`.
+- **Observed state, capture 2 (2026-06-18 — detection gap):**
+  `entitlement: 7000`, `remaining: -473` (raw API), normalized to 0,
+  `overage_count: 0`, `overage_permitted: true`. GitHub billing page: $0 / $50
+  consumed. Correct `BillingPhase`: `budget_active` (473 credits consumed beyond
+  quota). Current detection incorrectly returns `budget_available` because
+  clamping destroys the `remaining < 0` signal before `detectBillingPhase` sees
+  it. **Fix required:** pass `rawRemaining` (pre-clamp) to `detectBillingPhase`
+  and extend detection priority 3 to fire on `rawRemaining < 0`.
+- **Settlement lag:** `remaining` tracks real-time credit consumption.
+  `overage_count` tracks credits that have been settled and charged against the
+  budget — a billing-cycle event. `remaining` can go negative before
+  `overage_count` increments. The billing page may show $0 consumed while
+  `remaining = -473`. Both signals are required to determine the true phase.
+- **Derived overage credits:** `Math.max(0, -(rawRemaining))` gives the
+  in-period overage estimate when `overage_count` has not yet updated. For
+  capture 2: 473 credits.
 - **Pay-as-you-go:** Additional / pay-as-you-go usage may be disabled
   and should not be assumed enabled. CopeLimit should not surface
   assumed additional usage without data support. The `overage_permitted`
@@ -168,31 +184,36 @@ CopeLimit-specific boundaries:
 ## BillingPhase state model
 
 The `BillingPhase` type captures which tier of the credit/budget lifecycle is
-active. It is derived from newly observed `copilot_internal/user` API fields
-and will be added to the `Usage` type in a follow-up implementation PR
-(see `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`).
+active. It is derived from newly observed `copilot_internal/user` API fields.
+`BillingPhase` is implemented in `copilot.ts`. Detection uses `rawRemaining`
+(pre-clamp API value) — see `ARCHITECTURE.md` § "Negative remaining".
 
 ```typescript
 type BillingPhase =
-  | 'credits_available'   // Included credits remaining
-  | 'credits_exhausted'   // Included credits = 0; no budget configured
-  | 'budget_available'    // Included credits = 0; budget enabled; overage_count = 0
-  | 'budget_active'       // Budget spending in progress (overage_count > 0)
+  | 'credits_available'   // rawRemaining > 0
+  | 'credits_exhausted'   // rawRemaining <= 0; no budget configured
+  | 'budget_available'    // rawRemaining === 0; budget enabled; overage_count = 0
+  | 'budget_active'       // overage_count > 0 OR rawRemaining < 0; overage_permitted = true
   | 'unlimited'           // unlimited === true
   | 'hard_stop';          // has_quota === false && unlimited !== true
 ```
 
-Detection priority (first match wins):
+Detection priority (first match wins; uses `rawRemaining`, the pre-clamp value):
 1. `unlimited` — `unlimited === true`
-2. `credits_available` — `remaining > 0`
-3. `budget_active` — `overage_count > 0 && overage_permitted === true`
-4. `budget_available` — `remaining === 0 && overage_permitted === true && overage_count === 0`
+2. `credits_available` — `rawRemaining > 0`
+3. `budget_active` — `(overage_count > 0 || rawRemaining < 0) && overage_permitted === true`
+4. `budget_available` — `rawRemaining === 0 && overage_permitted === true && overage_count === 0`
 5. `hard_stop` — `has_quota === false && unlimited !== true`
-6. `credits_exhausted` — `remaining === 0 && overage_permitted !== true`
+6. `credits_exhausted` — default (`rawRemaining <= 0 && overage_permitted !== true`)
 
 **Guard invariant:** `budget_available` and `budget_active` phases must
 only be presented when `overage_permitted === true` is observed in the API
 response. Never surface assumed additional usage without data evidence.
+
+**Implementation status:** `BillingPhase`, `detectBillingPhase()`, and
+`readOverageFields()` are implemented in `copilot.ts`. The `rawRemaining`
+parameter and detection priority 3 amendment are tracked as a required fix in
+`.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`.
 
 Full design (phase table, transition diagram, normalization implications):
 `ARCHITECTURE.md` § "Billing state model".
@@ -580,6 +601,21 @@ modes.
   `unlimited`, and `has_quota`. The `BillingPhase` state model (see
   `ARCHITECTURE.md` § "Billing state model") addresses presentation.
   Implementation tracked in `horizon-1-pr2-billing-phase.plan.yml`.
+- Can `remaining` go negative in the `copilot_internal/user` API response?
+  **OBSERVED (2026-06-18, capture 2):** Yes. `remaining: -473` with
+  `overage_count: 0` and billing page `$0 / $50`. Indicates a settlement lag:
+  real-time credit consumption outpaces billing cycle settlement. The current
+  normalization (clamping to 0) loses this signal, causing `budget_active`
+  detection to fail. Fix requires passing `rawRemaining` to `detectBillingPhase`.
+  See `ARCHITECTURE.md` § "Negative remaining: detection gap and proposed fix".
+- Is `overage_count` always in sync with `remaining` when budget consumption
+  begins, or does it lag behind? **OPEN** — capture 2 shows `remaining = -473`
+  with `overage_count = 0` and $0 billed, strongly suggesting lag. The magnitude
+  of the lag (hours vs days vs billing cycle) is not yet known.
+- What is the unit of `overage_entitlement`? Is it a raw credit integer
+  (consistent with `overage_count`) or a dollar-equivalent or some other unit?
+  Confirm from a live capture where `overage_count > 0`. If unit is unclear,
+  store as-is and annotate with a TODO.
 - Should the `mock` provider's default values be updated from
   `MOCK_USED=321 / MOCK_QUOTA=500` (premium request scale) to values
   representative of AI Credits (e.g. `MOCK_QUOTA=7000`)?
@@ -605,4 +641,4 @@ modes.
 
 ## Last updated
 
-2026-06-18 by billing-phase-model-docs PR agent
+2026-06-18 by review-copilot-quota-capture PR agent (negative-remaining findings)
