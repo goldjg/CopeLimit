@@ -68,6 +68,12 @@ function formatBurnRate(creditsPerHour) {
   return `${creditsPerHour.toFixed(1)}/hr`;
 }
 
+function formatUsd(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "$0.00";
+  return `$${n.toFixed(2)}`;
+}
+
 /**
  * Estimates hours until budget or included credits are exhausted.
  * Returns null when the burn rate is unknown or zero.
@@ -366,7 +372,11 @@ function createLargeWidget(usage) {
   const overageValue = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
   const extras = usage.widgetExtras || null;
   const burnRate = extras ? extras.burnRate : null;
+  const burnRateCostPerHourUsd = extras ? extras.burnRateCostPerHourUsd : null;
   const burnLabel = formatBurnRate(burnRate) || "—";
+  const burnCostLabel = burnRateCostPerHourUsd === null || burnRateCostPerHourUsd === undefined
+    ? "—"
+    : `${formatUsd(burnRateCostPerHourUsd)}/hr`;
   const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
   const sparkline = extras ? extras.sparkline : null;
 
@@ -402,9 +412,19 @@ function createLargeWidget(usage) {
     addTwoColRow(widget, "Overage", `+${formatNumber(overageValue)}`, "Budget", budgetDisplay,
       { leftColor: accent });
     widget.addSpacer(4);
+    addTwoColRow(
+      widget,
+      "Overage $",
+      formatUsd(usage.overageCostUsd),
+      "Budget rem $",
+      formatUsd(usage.estimatedRemainingBudgetCostUsd ?? usage.budgetRemainingCostUsd)
+    );
+    widget.addSpacer(4);
   }
 
   addTwoColRow(widget, "Burn rate", burnLabel, "ETA", etaLabel);
+  widget.addSpacer(4);
+  addTwoColRow(widget, "Burn $/hr", burnCostLabel, "Used $", formatUsd(usage.totalUsedCostUsd));
   widget.addSpacer(4);
 
   addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Phase",

@@ -81,6 +81,7 @@ describe('computeWidgetExtras — zero consumption', () => {
     expect(result).toBeDefined();
     // deltaUsed = 0, totalHours = 2 → creditsPerHour = 0/2 = 0
     expect(result!.burnRate).toBe(0);
+    expect(result!.burnRateCostPerHourUsd).toBe(0);
   });
 
   it('returns null burnRate only when timestamps are identical (zero-duration window)', () => {
@@ -107,6 +108,7 @@ describe('computeWidgetExtras — burn rate', () => {
     const result = computeWidgetExtras(snapshots);
     expect(result).toBeDefined();
     expect(result!.burnRate).toBeCloseTo(100, 2);
+    expect(result!.burnRateCostPerHourUsd).toBeCloseTo(1, 2);
   });
 
   it('computes burn rate across multiple intervals', () => {
