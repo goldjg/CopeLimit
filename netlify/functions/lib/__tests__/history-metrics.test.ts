@@ -27,6 +27,9 @@ describe('computeHistorySummary — empty and single-snapshot', () => {
     expect(result.creditsPerHour).toBeNull()
     expect(result.creditsPerDay).toBeNull()
     expect(result.averageBurnRate).toBeNull()
+    expect(result.burnRateCostPerHourUsd).toBeNull()
+    expect(result.averageBurnRateCostPerHourUsd).toBeNull()
+    expect(result.burnCostPerDayUsd).toBeNull()
     expect(result.snapshotCount).toBe(0)
     expect(result.oldestAt).toBeNull()
     expect(result.newestAt).toBeNull()
@@ -39,6 +42,9 @@ describe('computeHistorySummary — empty and single-snapshot', () => {
     expect(result.creditsPerHour).toBeNull()
     expect(result.creditsPerDay).toBeNull()
     expect(result.averageBurnRate).toBeNull()
+    expect(result.burnRateCostPerHourUsd).toBeNull()
+    expect(result.averageBurnRateCostPerHourUsd).toBeNull()
+    expect(result.burnCostPerDayUsd).toBeNull()
     expect(result.snapshotCount).toBe(1)
     expect(result.oldestAt).toBe('2026-06-15T10:00:00.000Z')
     expect(result.newestAt).toBe('2026-06-15T10:00:00.000Z')
@@ -113,6 +119,8 @@ describe('computeHistorySummary — creditsPerHour and creditsPerDay', () => {
     ]
     const result = computeHistorySummary(snapshots)
     expect(result.creditsPerDay).toBeCloseTo(500 * 24, 5)
+    expect(result.burnRateCostPerHourUsd).toBeCloseTo(5, 5)
+    expect(result.burnCostPerDayUsd).toBeCloseTo(120, 5)
   })
 
   it('returns creditsPerHour=0 when deltaUsed=0 and span>0', () => {
@@ -170,6 +178,8 @@ describe('computeHistorySummary — averageBurnRate', () => {
     expect(result.deltaUsed).toBe(1000)
     expect(result.creditsPerHour).toBeCloseTo(500, 5)
     expect(result.averageBurnRate).toBeCloseTo(1000, 5)
+    expect(result.burnRateCostPerHourUsd).toBeCloseTo(5, 5)
+    expect(result.averageBurnRateCostPerHourUsd).toBeCloseTo(10, 5)
   })
 
   it('returns null averageBurnRate when no qualifying intervals exist', () => {

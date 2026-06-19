@@ -32,6 +32,7 @@
  *   ...
  *   "widgetExtras": {
  *     "burnRate": 45.2,
+ *     "burnRateCostPerHourUsd": 0.45,
  *     "sparkline": [1000, 2500, 3200, 5550]
  *   }
  * }
@@ -61,6 +62,7 @@ import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolve
 import { getHistory } from './lib/usage-history-store';
 import { computeHistorySummary } from './lib/history-metrics';
 import type { UsageHistorySnapshot } from './lib/usage-history-types';
+import { creditsToUsd } from './lib/cost-metrics';
 
 /**
  * Extra telemetry derived from usage history, included in the widget-usage
@@ -70,6 +72,8 @@ import type { UsageHistorySnapshot } from './lib/usage-history-types';
 export type WidgetExtras = {
   /** Overall burn rate in credits per hour. `null` when fewer than 2 snapshots exist. */
   burnRate: number | null;
+  /** Overall burn rate in estimated USD per hour. `null` when fewer than 2 snapshots exist. */
+  burnRateCostPerHourUsd: number | null;
   /**
    * Ordered array of `used` values for sparkline rendering, oldest-first.
    * Contains at most 14 data points (the most recent snapshots, reversed).
@@ -96,8 +100,11 @@ export function computeWidgetExtras(
   // so the chart reads left-to-right chronologically.
   const sparklineSnapshots = snapshots.slice(0, 14).reverse();
   const sparkline = sparklineSnapshots.map(s => s.used);
+  const burnRateCostPerHourUsd =
+    summary.creditsPerHour === null ? null : creditsToUsd(summary.creditsPerHour);
   return {
     burnRate: summary.creditsPerHour,
+    burnRateCostPerHourUsd,
     sparkline
   };
 }

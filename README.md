@@ -4,6 +4,8 @@
 
 > "Your Copilot usage panic meter."
 
+**Cost model:** `1 AI credit = $0.01` (derived estimate). Credits remain the source of truth.
+
 ## Features
 
 - 📊 **Live quota meter** — shows used / remaining / quota with a colour-coded warning level
@@ -173,7 +175,13 @@ Returns normalised Copilot quota data from the configured provider.
   "warningLevel": "normal",
   "updatedAt": "2026-05-07T21:00:00.000Z",
   "notes": [],
-  "billingPhase": "credits_available"
+  "billingPhase": "credits_available",
+  "includedQuotaCostUsd": 32.1,
+  "totalUsedCostUsd": 32.1,
+  "overageCostUsd": 0,
+  "overageBudgetCostUsd": 0,
+  "budgetRemainingCostUsd": 0,
+  "estimatedRemainingBudgetCostUsd": 0
 }
 ```
 
@@ -197,6 +205,18 @@ When `billingPhase` is `budget_active`, the response may include:
 | `overageCount` | Budget-backed credits consumed beyond the included quota. |
 | `overageEntitlement` | Configured budget allocation in credit-equivalent units. |
 | `derivedOverageCredits` | Estimated overage from negative `rawRemaining` (settlement-lag window). |
+
+USD fields are **derived estimates** (`1 credit = $0.01`) and kept secondary to credits:
+
+| Field | Description |
+|---|---|
+| `includedQuotaCostUsd` | Estimated USD value of included credits consumed (`min(used, quota)`). |
+| `totalUsedCostUsd` | Estimated USD value of total credits consumed (`used`). |
+| `overageCostUsd` | Estimated USD value of overage credits consumed. |
+| `overageBudgetCostUsd` | Estimated USD value of configured overage budget. |
+| `budgetRemainingCostUsd` | Estimated USD budget remaining from settled counters. |
+| `estimatedRemainingBudgetCostUsd` | Estimated USD budget remaining using derived overage during settlement lag. |
+| `projectedCostAtResetUsd` | Optional projected USD total at reset (when available). |
 
 ---
 
@@ -239,6 +259,9 @@ Returns usage history snapshots for the authenticated user, ordered newest-first
     "creditsPerHour": 125.0,
     "creditsPerDay": 3000.0,
     "averageBurnRate": 130.0,
+    "burnRateCostPerHourUsd": 1.25,
+    "averageBurnRateCostPerHourUsd": 1.30,
+    "burnCostPerDayUsd": 30.0,
     "snapshotCount": 5,
     "oldestAt": "2026-06-15T02:00:00.000Z",
     "newestAt": "2026-06-15T14:00:00.000Z"
@@ -324,6 +347,14 @@ Widget-token-authenticated usage endpoint called by the Scriptable iOS widget.
 **Authentication**: `Authorization: Bearer <token>` or `X-Widget-Token: <token>` header.
 
 **Response**: same shape as `/api/usage`.
+
+When called with `?extras=1` (large widget), `widgetExtras` can include:
+
+| Field | Description |
+|---|---|
+| `burnRate` | Burn rate in credits/hour. |
+| `burnRateCostPerHourUsd` | Burn rate in derived USD/hour. |
+| `sparkline` | Up to 14 `used` values, oldest-first, for trend rendering. |
 
 ---
 

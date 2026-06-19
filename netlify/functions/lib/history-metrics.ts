@@ -17,6 +17,7 @@
  */
 
 import type { UsageHistorySnapshot } from './usage-history-types'
+import { creditsToUsd } from './cost-metrics'
 
 /**
  * Derived summary metrics computed from a set of usage history snapshots.
@@ -51,6 +52,12 @@ export type HistorySummary = {
    * `null` when no qualifying intervals exist.
    */
   averageBurnRate: number | null;
+  /** Overall burn rate in estimated USD per hour (`creditsPerHour × 0.01`). */
+  burnRateCostPerHourUsd: number | null;
+  /** Mean per-interval burn rate in estimated USD per hour (`averageBurnRate × 0.01`). */
+  averageBurnRateCostPerHourUsd: number | null;
+  /** Overall burn rate in estimated USD per day (`creditsPerDay × 0.01`). */
+  burnCostPerDayUsd: number | null;
   /** Number of snapshots used to produce this summary. */
   snapshotCount: number;
   /**
@@ -84,6 +91,9 @@ export function computeHistorySummary(snapshots: UsageHistorySnapshot[]): Histor
       creditsPerHour: null,
       creditsPerDay: null,
       averageBurnRate: null,
+      burnRateCostPerHourUsd: null,
+      averageBurnRateCostPerHourUsd: null,
+      burnCostPerDayUsd: null,
       snapshotCount: 0,
       oldestAt: null,
       newestAt: null,
@@ -100,6 +110,9 @@ export function computeHistorySummary(snapshots: UsageHistorySnapshot[]): Histor
       creditsPerHour: null,
       creditsPerDay: null,
       averageBurnRate: null,
+      burnRateCostPerHourUsd: null,
+      averageBurnRateCostPerHourUsd: null,
+      burnCostPerDayUsd: null,
       snapshotCount: 1,
       oldestAt,
       newestAt,
@@ -141,12 +154,19 @@ export function computeHistorySummary(snapshots: UsageHistorySnapshot[]): Histor
     intervalRates.length > 0
       ? intervalRates.reduce((sum, r) => sum + r, 0) / intervalRates.length
       : null
+  const burnRateCostPerHourUsd = creditsPerHour === null ? null : creditsToUsd(creditsPerHour)
+  const averageBurnRateCostPerHourUsd =
+    averageBurnRate === null ? null : creditsToUsd(averageBurnRate)
+  const burnCostPerDayUsd = creditsPerDay === null ? null : creditsToUsd(creditsPerDay)
 
   return {
     deltaUsed,
     creditsPerHour,
     creditsPerDay,
     averageBurnRate,
+    burnRateCostPerHourUsd,
+    averageBurnRateCostPerHourUsd,
+    burnCostPerDayUsd,
     snapshotCount: n,
     oldestAt,
     newestAt,

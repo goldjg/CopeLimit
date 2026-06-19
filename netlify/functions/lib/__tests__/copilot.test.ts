@@ -334,3 +334,45 @@ describe('normaliseUsage — settlement-lag (rawRemaining < 0)', () => {
     expect('derivedOverageCredits' in result).toBe(false)
   })
 })
+
+describe('normaliseUsage — derived USD fields', () => {
+  it('derives usd totals from credit fields', () => {
+    const result = normaliseUsage({
+      mode: 'ai_credits',
+      used: 7473,
+      quota: 7000,
+      rawRemaining: -473,
+      resetAt: '2026-07-01T00:00:00Z',
+      billingEntity: 'octocat',
+      source: 'github-copilot-internal',
+      overageCount: 473,
+      overageEntitlement: 5000,
+      overagePermitted: true
+    })
+
+    expect(result.includedQuotaCostUsd).toBeCloseTo(70, 6)
+    expect(result.totalUsedCostUsd).toBeCloseTo(74.73, 6)
+    expect(result.overageCostUsd).toBeCloseTo(4.73, 6)
+    expect(result.overageBudgetCostUsd).toBeCloseTo(50, 6)
+    expect(result.budgetRemainingCostUsd).toBeCloseTo(45.27, 6)
+    expect(result.estimatedRemainingBudgetCostUsd).toBeCloseTo(45.27, 6)
+  })
+
+  it('clamps budget remaining costs to zero in over-budget scenarios', () => {
+    const result = normaliseUsage({
+      mode: 'ai_credits',
+      used: 9000,
+      quota: 7000,
+      rawRemaining: -2000,
+      resetAt: '2026-07-01T00:00:00Z',
+      billingEntity: 'octocat',
+      source: 'github-copilot-internal',
+      overageCount: 2200,
+      overageEntitlement: 2000,
+      overagePermitted: true
+    })
+
+    expect(result.budgetRemainingCostUsd).toBe(0)
+    expect(result.estimatedRemainingBudgetCostUsd).toBe(0)
+  })
+})

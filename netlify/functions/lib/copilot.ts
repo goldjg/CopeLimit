@@ -1,3 +1,5 @@
+import { clampNonNegative, creditsToUsd } from './cost-metrics';
+
 /**
  * @file Core types and shared utilities for GitHub Copilot usage data.
  *
@@ -87,6 +89,20 @@ export type Usage = {
    * Present only when `rawRemaining < 0` at normalisation time.
    */
   derivedOverageCredits?: number;
+  /** Estimated USD value of included credits consumed in the current period. */
+  includedQuotaCostUsd: number;
+  /** Estimated USD value of all credits consumed (included + overage). */
+  totalUsedCostUsd: number;
+  /** Estimated USD value of overage credits consumed beyond included quota. */
+  overageCostUsd: number;
+  /** Estimated USD value of configured overage budget entitlement. */
+  overageBudgetCostUsd: number;
+  /** Estimated USD budget remaining based on settled overage counters. */
+  budgetRemainingCostUsd: number;
+  /** Estimated USD budget remaining using derived overage during settlement lag. */
+  estimatedRemainingBudgetCostUsd: number;
+  /** Optional projected estimated total cost at reset. */
+  projectedCostAtResetUsd?: number;
 };
 
 /** A plain JSON object whose values are unknown at compile time. */
@@ -301,6 +317,24 @@ export function normaliseUsage(input: {
   // beyond the quota before overage_count updated. Expose the estimated overage so
   // the UI can show real-time consumption.
   const derivedOverageCredits = rawRemaining < 0 ? Math.max(0, -rawRemaining) : undefined;
+  const includedCreditsUsed = Math.min(input.used, input.quota);
+  const overageUsedCredits = clampNonNegative(input.overageCount ?? derivedOverageCredits ?? 0);
+  const overageBudgetCredits = clampNonNegative(input.overageEntitlement);
+  const budgetRemainingCredits =
+    input.overageEntitlement === undefined
+      ? 0
+      : clampNonNegative(overageBudgetCredits - overageUsedCredits);
+  const estimatedOverageUsedCredits = clampNonNegative(derivedOverageCredits ?? overageUsedCredits);
+  const estimatedRemainingBudgetCredits =
+    input.overageEntitlement === undefined
+      ? 0
+      : clampNonNegative(overageBudgetCredits - estimatedOverageUsedCredits);
+  const includedQuotaCostUsd = creditsToUsd(includedCreditsUsed);
+  const totalUsedCostUsd = creditsToUsd(input.used);
+  const overageCostUsd = creditsToUsd(overageUsedCredits);
+  const overageBudgetCostUsd = creditsToUsd(overageBudgetCredits);
+  const budgetRemainingCostUsd = creditsToUsd(budgetRemainingCredits);
+  const estimatedRemainingBudgetCostUsd = creditsToUsd(estimatedRemainingBudgetCredits);
 
   // Fields are listed explicitly (rather than spreading ...input) so that
   // overagePermitted, unlimited, and hasQuota — which are computation inputs,
@@ -318,6 +352,12 @@ export function normaliseUsage(input: {
     updatedAt: new Date().toISOString(),
     notes: input.notes ?? [],
     billingPhase,
+    includedQuotaCostUsd,
+    totalUsedCostUsd,
+    overageCostUsd,
+    overageBudgetCostUsd,
+    budgetRemainingCostUsd,
+    estimatedRemainingBudgetCostUsd,
     ...(input.overageCount !== undefined ? { overageCount: input.overageCount } : {}),
     ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {}),
     ...(derivedOverageCredits !== undefined ? { derivedOverageCredits } : {})

@@ -17,11 +17,14 @@ import { labelForBillingPhase } from './billing-display';
 import type { BillingPhase } from './billing-display';
 import {
   buildTrendBarHeights,
+  creditsCostRateToUsd,
   computeEtaHours,
   formatBurnRate,
   formatEta,
   formatNumber,
+  formatUsd,
   getBudgetRemaining,
+  getBudgetRemainingCostUsd,
   getHeroCaption,
   getHeroValue,
   getOverageUsed,
@@ -44,6 +47,13 @@ type Usage = {
   overageCount?: number;
   overageEntitlement?: number;
   derivedOverageCredits?: number;
+  includedQuotaCostUsd: number;
+  totalUsedCostUsd: number;
+  overageCostUsd: number;
+  overageBudgetCostUsd: number;
+  budgetRemainingCostUsd: number;
+  estimatedRemainingBudgetCostUsd: number;
+  projectedCostAtResetUsd?: number;
 };
 
 type HistorySummary = {
@@ -51,6 +61,9 @@ type HistorySummary = {
   creditsPerHour: number | null;
   creditsPerDay: number | null;
   averageBurnRate: number | null;
+  burnRateCostPerHourUsd: number | null;
+  averageBurnRateCostPerHourUsd: number | null;
+  burnCostPerDayUsd: number | null;
   oldestAt: string | null;
   newestAt: string | null;
   snapshotCount: number;
@@ -235,8 +248,13 @@ function App() {
     historySummary?.creditsPerDay === null || historySummary?.creditsPerDay === undefined
       ? null
       : `${historySummary.creditsPerDay.toFixed(1)}/day`;
+  const dailyBurnCostLabel =
+    historySummary?.burnCostPerDayUsd === null || historySummary?.burnCostPerDayUsd === undefined
+      ? null
+      : `${formatUsd(historySummary.burnCostPerDayUsd)}/day`;
   const etaLabel = usage ? formatEta(computeEtaHours(usage, burnRate)) : null;
   const budgetRemaining = usage ? getBudgetRemaining(usage) : null;
+  const budgetRemainingCostUsd = usage ? getBudgetRemainingCostUsd(usage) : null;
   const overageUsed = usage ? getOverageUsed(usage) : 0;
   const trendSnapshots = useMemo(
     () => historySnapshots.slice(0, 14).reverse(),
@@ -327,10 +345,12 @@ function App() {
               <div>
                 <span>Used</span>
                 <strong>{usage.used}</strong>
+                <p className="subtle">≈ {formatUsd(usage.totalUsedCostUsd)} est.</p>
               </div>
               <div>
                 <span>Quota</span>
                 <strong>{usage.quota}</strong>
+                <p className="subtle">≈ {formatUsd(usage.includedQuotaCostUsd)} est.</p>
               </div>
               <div>
                 <span>Usage share</span>
@@ -368,23 +388,27 @@ function App() {
                 <div>
                   <span>Included quota used</span>
                   <strong>{Math.min(usage.used, usage.quota)}</strong>
+                  <p className="subtle">≈ {formatUsd(usage.includedQuotaCostUsd)} est.</p>
                 </div>
                 {(usage.overageCount !== undefined || usage.derivedOverageCredits !== undefined) && (
                   <div>
                     <span>Overage credits used</span>
                     <strong>{overageUsed}</strong>
+                    <p className="subtle">≈ {formatUsd(usage.overageCostUsd)} est.</p>
                   </div>
                 )}
                 {usage.overageEntitlement !== undefined && (
                   <div>
                     <span>Overage budget</span>
                     <strong>{usage.overageEntitlement}</strong>
+                    <p className="subtle">≈ {formatUsd(usage.overageBudgetCostUsd)} est.</p>
                   </div>
                 )}
                 {budgetRemaining !== null && (
                   <div>
                     <span>Budget remaining</span>
                     <strong>{budgetRemaining}</strong>
+                    <p className="subtle">≈ {formatUsd(budgetRemainingCostUsd)} est.</p>
                   </div>
                 )}
                 {usage.derivedOverageCredits !== undefined &&
@@ -393,6 +417,7 @@ function App() {
                   <div>
                     <span>Derived overage (est.)</span>
                     <strong>{usage.derivedOverageCredits}</strong>
+                    <p className="subtle">≈ {formatUsd(usage.estimatedRemainingBudgetCostUsd)} budget rem est.</p>
                   </div>
                 )}
               </div>
@@ -415,17 +440,22 @@ function App() {
                 <div>
                   <span>Consumed (window)</span>
                   <strong>{historySummary.deltaUsed}</strong>
+                  <p className="subtle">≈ {formatUsd(historySummary.deltaUsed * 0.01)} est.</p>
                 </div>
                 {burnRateLabel && (
                   <div>
                     <span>Burn rate</span>
                     <strong>{burnRateLabel}</strong>
+                    <p className="subtle">
+                      ≈ {formatUsd(historySummary.burnRateCostPerHourUsd ?? creditsCostRateToUsd(historySummary.creditsPerHour))}/hr est.
+                    </p>
                   </div>
                 )}
                 {dailyBurnLabel && (
                   <div>
                     <span>Burn / day</span>
                     <strong>{dailyBurnLabel}</strong>
+                    <p className="subtle">≈ {dailyBurnCostLabel} est.</p>
                   </div>
                 )}
                 {etaLabel && (
@@ -438,6 +468,7 @@ function App() {
                   <div>
                     <span>Avg burn rate</span>
                     <strong>{historySummary.averageBurnRate.toFixed(1)}/hr</strong>
+                    <p className="subtle">≈ {formatUsd(historySummary.averageBurnRateCostPerHourUsd)}/hr est.</p>
                   </div>
                 )}
               </div>

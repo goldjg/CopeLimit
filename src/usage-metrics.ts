@@ -1,12 +1,24 @@
 import type { BillingPhase } from './billing-display';
+import {
+  CREDIT_COST_USD,
+  clampNonNegative,
+  creditsToUsd,
+  formatUsd as formatUsdValue,
+} from '../netlify/functions/lib/cost-metrics';
 
 type UsageMetricsUsage = {
+  used: number;
   remaining: number;
   quota: number;
   billingPhase: BillingPhase;
   overageCount?: number;
   overageEntitlement?: number;
   derivedOverageCredits?: number;
+  totalUsedCostUsd?: number;
+  overageCostUsd?: number;
+  overageBudgetCostUsd?: number;
+  budgetRemainingCostUsd?: number;
+  estimatedRemainingBudgetCostUsd?: number;
 };
 
 const FLAT_TREND_BAR_HEIGHT = 60;
@@ -23,13 +35,34 @@ export function formatBurnRate(creditsPerHour: number | null | undefined): strin
   return `${creditsPerHour.toFixed(1)}/hr`;
 }
 
+export function formatUsd(value: number | null | undefined): string {
+  return formatUsdValue(value);
+}
+
 export function getOverageUsed(usage: UsageMetricsUsage): number {
   return usage.overageCount ?? usage.derivedOverageCredits ?? 0;
 }
 
 export function getBudgetRemaining(usage: UsageMetricsUsage): number | null {
   if (usage.overageEntitlement === undefined) return null;
-  return Math.max(0, usage.overageEntitlement - getOverageUsed(usage));
+  return clampNonNegative(usage.overageEntitlement - getOverageUsed(usage));
+}
+
+export function getBudgetRemainingCostUsd(usage: UsageMetricsUsage): number | null {
+  if (usage.overageEntitlement === undefined) return null;
+  if (usage.budgetRemainingCostUsd !== undefined) return usage.budgetRemainingCostUsd;
+  const budgetRemaining = getBudgetRemaining(usage);
+  return budgetRemaining === null ? null : creditsToUsd(budgetRemaining);
+}
+
+export function getTotalUsedCostUsd(usage: UsageMetricsUsage): number {
+  if (usage.totalUsedCostUsd !== undefined) return usage.totalUsedCostUsd;
+  return creditsToUsd(usage.used);
+}
+
+export function creditsCostRateToUsd(creditsPerHour: number | null | undefined): number | null {
+  if (creditsPerHour === null || creditsPerHour === undefined) return null;
+  return creditsPerHour * CREDIT_COST_USD;
 }
 
 export function computeEtaHours(usage: UsageMetricsUsage, burnRate: number | null | undefined): number | null {
