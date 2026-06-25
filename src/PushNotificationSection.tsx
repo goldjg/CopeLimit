@@ -26,6 +26,11 @@ type SubscriptionStatus = {
   hasSubscriptions: boolean;
 };
 
+type TestNotifFeedback =
+  | null
+  | { result: 'success' }
+  | { result: 'error'; message: string };
+
 type PushSectionState =
   | { phase: 'loading' }
   | { phase: 'unsupported' }
@@ -62,7 +67,9 @@ async function deregisterSubscription(sub: PushSubscription): Promise<void> {
 
 export default function PushNotificationSection(): React.ReactElement | null {
   const [state, setState] = useState<PushSectionState>({ phase: 'loading' });
-  const [busy, setBusy] = useState(false);
+  const [busyOp, setBusyOp] = useState<null | 'subscribe' | 'test' | 'unsubscribe'>(null);
+  const [testFeedback, setTestFeedback] = useState<TestNotifFeedback>(null);
+  const busy = busyOp !== null;
 
   const loadStatus = useCallback(async () => {
     try {
@@ -113,7 +120,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
 
   const handleSubscribe = useCallback(async () => {
     if (state.phase !== 'unsubscribed') return;
-    setBusy(true);
+    setBusyOp('subscribe');
     try {
       const permission = await requestNotificationPermission();
       if (permission !== 'granted') {
@@ -130,13 +137,39 @@ export default function PushNotificationSection(): React.ReactElement | null {
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : 'Subscribe failed.' });
     } finally {
-      setBusy(false);
+      setBusyOp(null);
     }
   }, [state, loadStatus]);
 
+  const handleSendTest = useCallback(async () => {
+    if (state.phase !== 'subscribed') return;
+    setBusyOp('test');
+    setTestFeedback(null);
+    try {
+      const res = await fetch('/api/push/test', { method: 'POST' });
+      if (res.ok) {
+        setTestFeedback({ result: 'success' });
+      } else {
+        const body = await res.json() as { error?: string };
+        setTestFeedback({
+          result: 'error',
+          message: body.error ?? `Request failed (${res.status}).`,
+        });
+      }
+    } catch (err) {
+      setTestFeedback({
+        result: 'error',
+        message: err instanceof Error ? err.message : 'Could not reach the server.',
+      });
+    } finally {
+      setBusyOp(null);
+    }
+  }, [state]);
+
   const handleUnsubscribe = useCallback(async () => {
     if (state.phase !== 'subscribed') return;
-    setBusy(true);
+    setBusyOp('unsubscribe');
+    setTestFeedback(null);
     try {
       const sub = await getActiveSubscription();
       if (sub) {
@@ -147,7 +180,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : 'Unsubscribe failed.' });
     } finally {
-      setBusy(false);
+      setBusyOp(null);
     }
   }, [state, loadStatus]);
 
@@ -178,13 +211,26 @@ export default function PushNotificationSection(): React.ReactElement | null {
             ✓ Browser notifications active
             {state.subscriptionCount > 1 ? ` (${state.subscriptionCount} devices)` : ''}.
           </p>
+          {testFeedback?.result === 'success' && (
+            <p className="pushNotificationSuccess">✓ Test notification sent.</p>
+          )}
+          {testFeedback?.result === 'error' && (
+            <p className="pushNotificationError">{testFeedback.message}</p>
+          )}
           <div className="pushNotificationActions">
+            <button
+              onClick={() => void handleSendTest()}
+              disabled={busy}
+              className="pushNotificationBtn"
+            >
+              {busyOp === 'test' ? 'Sending…' : 'Send test notification'}
+            </button>
             <button
               onClick={() => void handleUnsubscribe()}
               disabled={busy}
               className="pushNotificationBtn pushNotificationBtnSecondary"
             >
-              {busy ? 'Removing…' : 'Unsubscribe'}
+              {busyOp === 'unsubscribe' ? 'Removing…' : 'Unsubscribe'}
             </button>
           </div>
         </>
@@ -201,7 +247,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
               disabled={busy}
               className="pushNotificationBtn"
             >
-              {busy ? 'Enabling…' : 'Enable notifications'}
+              {busyOp === 'subscribe' ? 'Enabling…' : 'Enable notifications'}
             </button>
           </div>
         </>

@@ -65,6 +65,11 @@
   to = "/.netlify/functions/push-subscribe"
   status = 200
 
+[[redirects]]
+  from = "/api/push/test"
+  to = "/.netlify/functions/push-send-test"
+  status = 200
+
 [[headers]]
   for = "/sw.js"
   [headers.values]

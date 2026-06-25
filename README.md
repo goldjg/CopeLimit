@@ -12,6 +12,7 @@
 - 🔐 **GitHub OAuth login** — server-side session cookies; tokens never exposed to the browser
 - 📱 **PWA** — installable on iOS (Add to Home Screen) and Android (`beforeinstallprompt`)
 - 🍎 **iOS Scriptable widget** — home-screen widget with Fast Setup via iOS Shortcuts
+- 🔔 **Web push notifications** — optional browser push alerts via the Web Push / VAPID standard
 - 🔒 **Blob encryption** — all sensitive records in Netlify Blobs are AES-256-GCM encrypted at rest
 - 📡 **Provider-agnostic** — supports `github-copilot-internal`, `copilot-local`, and `mock` providers
 - 📜 **Usage history ledger** — optional timestamped snapshot persistence with deduplication, delta calculation, and configurable retention
@@ -52,6 +53,8 @@ Netlify Functions (netlify/functions/*.ts)
         ├── history             Usage history snapshots (session-authenticated)
         ├── widget-token        Widget bearer token CRUD
         ├── widget-usage        Widget-token-authenticated quota endpoint
+        ├── push-subscribe      WebPush subscription CRUD (GET/POST/DELETE)
+        ├── push-send-test      Send a test push notification to all subscriptions
         ├── onboarding-session  Bootstrap token issuance (iOS setup)
         └── onboarding-exchange Bootstrap-to-widget-token exchange (iOS setup)
                 │
@@ -59,6 +62,7 @@ Netlify Functions (netlify/functions/*.ts)
         Netlify Blobs (encrypted at rest)
         ├── widget-tokens       Per-user widget token records
         ├── onboarding-sessions Bootstrap token records (15-min TTL)
+        ├── push-subscriptions  Per-user WebPush subscription records
         └── usage-history       Timestamped usage snapshots (optional ledger)
                 │
                 ▼
@@ -139,6 +143,22 @@ The data source is controlled by the `COPELIMIT_PROVIDER` environment variable.
 | `USAGE_HISTORY_ENABLED` | `false` | Enable timestamped usage snapshot persistence |
 | `USAGE_HISTORY_RETENTION_DAYS` | `90` | Days to retain history entries (lazy cleanup on next write) |
 | `USAGE_HISTORY_MAX_PER_DAY` | `48` | Max snapshots stored per user per UTC day (~every 30 min) |
+
+### Web push notifications
+
+Push notifications require three VAPID environment variables. When any is absent, push endpoints return a `503` or report `vapidPublicKey: null`; the rest of the app is unaffected.
+
+| Variable | Required | Description |
+|---|---|---|
+| `VAPID_PUBLIC_KEY` | Yes (for push) | Base64url-encoded VAPID public key — served to browsers for subscription |
+| `VAPID_PRIVATE_KEY` | Yes (for push) | Base64url-encoded VAPID private key — **never sent to clients** |
+| `VAPID_SUBJECT` | Yes (for push) | VAPID contact URI: `mailto:admin@example.com` or `https://your-domain.com` |
+
+Generate a VAPID key pair with the `web-push` CLI:
+
+```sh
+npx web-push generate-vapid-keys
+```
 
 ---
 
@@ -358,6 +378,79 @@ When called with `?extras=1` (large widget), `widgetExtras` can include:
 
 ---
 
+### Push notification endpoints (session-authenticated)
+
+#### `GET /api/push/subscribe`
+
+Returns the VAPID public key and subscription status for the authenticated user.
+
+**Response**
+```json
+{
+  "vapidPublicKey": "<base64url-key or null>",
+  "subscriptionCount": 1,
+  "hasSubscriptions": true
+}
+```
+
+`vapidPublicKey` is `null` when `VAPID_PUBLIC_KEY` is not configured. The client should show a "notifications not available" state in that case.
+
+#### `POST /api/push/subscribe`
+
+Registers (or updates) a push subscription for the authenticated user.
+
+**Request body**
+```json
+{
+  "endpoint": "https://push.example.com/...",
+  "keys": { "p256dh": "...", "auth": "..." },
+  "userAgent": "Mozilla/5.0 ...",
+  "source": "copelimit-pwa"
+}
+```
+
+**Response**
+```json
+{ "registered": true, "createdAt": "2026-06-25T20:00:00.000Z" }
+```
+
+#### `DELETE /api/push/subscribe`
+
+Unregisters a push subscription by endpoint.
+
+**Request body**
+```json
+{ "endpoint": "https://push.example.com/..." }
+```
+
+**Response**
+```json
+{ "unregistered": true }
+```
+
+---
+
+#### `POST /api/push/test`
+
+Sends a test push notification to all registered subscriptions for the authenticated user. Useful for verifying that VAPID keys and delivery are configured correctly end-to-end.
+
+**Response (200 — at least one delivery succeeded)**
+```json
+{ "sent": true, "successCount": 1, "failCount": 0 }
+```
+
+**Error responses**
+
+| Status | Condition |
+|---|---|
+| `401` | No valid session cookie |
+| `404` | No push subscriptions registered for this user |
+| `503` | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, or `VAPID_SUBJECT` not configured |
+| `500` | All deliveries failed (provider error or expired subscription) |
+| `405` | Method not allowed |
+
+---
+
 ### iOS onboarding endpoints
 
 #### `POST /api/onboarding/session`
@@ -482,5 +575,6 @@ Tests cover the backend library (`netlify/functions/lib/__tests__/`) and fronten
 - **CSRF protection** — OAuth state parameter validated against a `HttpOnly` cookie.
 - **Redirect validation** — Shortcut callback URLs are validated to ensure they share the same origin as the PWA.
 - **Key isolation** — `BLOB_ENCRYPTION_KEY` and `SESSION_ENCRYPTION_KEY` are independent keys with separate purposes.
+- **VAPID private key** — `VAPID_PRIVATE_KEY` is used server-side only and is never returned to the browser; only the public key is served to clients.
 
 For self-hosted deployments, rotate both keys immediately if they are believed compromised. Existing sessions and widget tokens will become invalid (users will need to sign in again and re-generate their widget token).
