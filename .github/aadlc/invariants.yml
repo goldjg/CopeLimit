@@ -85,9 +85,25 @@ invariants:
       missed during the lag window, incorrectly showing budget_available.
       Both conditions require overage_permitted === true as the guard.
     severity: high
+
+  - id: github-token-never-exposed
     name: GitHub access token never exposed
     rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
     severity: critical
+
+  - id: chart-data-derived-only
+    name: Burn-trail chart data is derived-only and surface-consistent
+    rule: |
+      The shared burn-trail chart normaliser (netlify/functions/lib/chart-data.ts)
+      must derive its series only from existing usage-history fields. It must not
+      change history storage, burn-rate/projection logic, comfort-status logic, or
+      alert logic. Output points must always be finite and non-negative (never NaN
+      or Infinity). Quota resets must be flagged (RESET_DROP_RATIO) so renderers
+      break the trail instead of drawing a misleading vertical cliff. The PWA
+      (src/chart-geometry.ts, src/BurnTrailChart.tsx) and the Scriptable widget
+      (public/scriptable/CopeLimitWidget.js) must share the same reset-detection
+      semantics so the fuel-tank metaphor stays consistent across surfaces.
+    severity: medium
 
   - id: blobs-encryption-by-tier
     name: Netlify Blobs encryption by record tier

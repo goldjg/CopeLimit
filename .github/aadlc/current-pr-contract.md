@@ -12,17 +12,19 @@ promoted to durable invariants.
 
 ## Goal
 
-Document findings from a new Copilot quota capture where `remaining = -473`
-(raw API value), `entitlement = 7000`, normalized remaining = 0, and the
-GitHub billing page shows `$0 / $50` budget consumed. Investigate and record:
+Add fuel-gauge "burn-trail" charts to the PWA and the iOS Scriptable
+widget, driven by the existing usage-history ledger, and then bring the
+AADLC durable artefacts and documentation up to date with the change.
 
-1. Whether negative `remaining` should be preserved before normalization.
-2. Whether `effectiveUsed` can exceed quota.
-3. Whether overage consumption can be derived from raw `remaining`.
-4. Whether `budget_active` can be detected when `overage_count = 0` but
-   `remaining < 0`.
+The chart layer:
 
-Update roadmap and durable artefacts only. No application code changes.
+1. A shared, pure normaliser (`netlify/functions/lib/chart-data.ts`) that
+   turns `UsageHistorySnapshot[]` into a finite, clamped, reset-flagged
+   `ChartPoint[]` series consumed by both surfaces.
+2. PWA rendering via `src/chart-geometry.ts` (pure geometry) and
+   `src/BurnTrailChart.tsx` (SVG component), wired into `src/main.tsx`.
+3. Widget rendering via `createBurnTrailImage` in
+   `public/scriptable/CopeLimitWidget.js`, using `widgetExtras.quotaCeiling`.
 
 ## Contract status
 
@@ -30,101 +32,103 @@ active
 
 ## Non-goals
 
-- No changes to TypeScript application code in `src/`, `netlify/functions/`,
-  or `public/scriptable/`.
-- No new npm dependencies.
-- No changes to `tsconfig.json`, `package.json`, `netlify.toml`, or
-  `vitest.config.ts`.
-- No new tests (documentation-only PR; tests are scoped to the follow-up
-  implementation plan).
+- No changes to history storage, burn-rate/projection, comfort-status, or
+  alert logic — the chart layer derives only from existing fields.
+- No new npm dependencies (charts are hand-rolled SVG / Scriptable drawing).
+- No changes to authentication, authorization, or secret handling.
+- No raw provider payloads exposed to chart consumers.
 
 ## Carry-forward rules
 
 All invariants in `invariants.yml` are durable and carry forward beyond
-this PR. The `no-surprise-spend` and `overage-permitted-gate` invariants
-are particularly relevant. The BillingPhase detection priority established
-in `ARCHITECTURE.md` is amended by this PR to account for `rawRemaining < 0`.
+this PR. The newly added `chart-data-derived-only` invariant governs the
+chart layer. The `negative-remaining-is-real-overage`,
+`budget-active-negative-remaining`, and `github-token-never-exposed`
+invariants remain in force unchanged.
 
 ## Approved scope
 
-- `ARCHITECTURE.md` — update "Current observed state" with the new capture;
-  add a "Negative remaining: detection gap and proposed fix" subsection;
-  amend detection priority 3 to include `rawRemaining < 0`; add a
-  "Additional telemetry" subsection.
-- `.github/aadlc/memory.md` — update field findings with new observed state;
-  update BillingPhase detection priority; add new open questions; update
+- `netlify/functions/lib/chart-data.ts` — shared chart normaliser.
+- `src/chart-geometry.ts`, `src/BurnTrailChart.tsx`, `src/main.tsx` — PWA
+  chart rendering and wiring.
+- `public/scriptable/CopeLimitWidget.js` — widget mini-chart rendering.
+- `ARCHITECTURE.md` — document the chart layer (library, frontend, widget).
+- `README.md` — note the burn-trail chart feature.
+- `.github/aadlc/memory.md` — add durable burn-trail chart facts; update
   "Last updated".
-- `.github/aadlc/invariants.yml` — add two new invariants:
-  `negative-remaining-is-real-overage` and `budget-active-negative-remaining`.
-- `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml` — amend
-  detection priority 3 comment; add `rawRemaining` parameter to
-  `detectBillingPhase`; add contract assertions for negative-remaining case.
+- `.github/aadlc/invariants.yml` — add `chart-data-derived-only`; repair the
+  corrupted `budget-active-negative-remaining` / token invariant entry.
 - `.github/aadlc/current-pr-contract.md` — this file.
 
 ## Intentional amendments
 
-This PR amends the `BillingPhase` detection priority established in the
-previous billing-phase documentation PR. Specifically, detection priority 3
-(`budget_active`) is extended to also fire when `rawRemaining < 0 &&
-overage_permitted === true`, in addition to the existing `overage_count > 0`
-condition. This amendment is justified by the newly observed state where
-`remaining = -473` indicates active overage consumption even when
-`overage_count = 0` (settlement lag).
+This PR repairs a malformed entry in `invariants.yml` where the
+`budget-active-negative-remaining` invariant and the
+"GitHub access token never exposed" invariant had been merged, leaving the
+token invariant without an `id`. The token invariant is restored under the
+explicit id `github-token-never-exposed`. No invariant rule text is weakened.
 
 ## Forbidden scope
 
-- `src/**` — no frontend code changes.
-- `netlify/functions/**` — no backend or library code changes.
-- `public/scriptable/**` — no iOS widget script changes.
-- `package.json`, `package-lock.json`, `tsconfig.json`, `netlify.toml`
-- Any runtime-affecting file.
+- Any change to history storage keys, retention, or dedup semantics.
+- Any change to burn-rate/projection, comfort-status, or alert thresholds.
+- `package.json`, `package-lock.json`, `tsconfig.json`, `netlify.toml`,
+  `vitest.config.ts`.
+- Any new secret, credential, or token in source or documentation.
 
 ## Architectural constraints
 
-- `ARCHITECTURE.md` changes must use the existing section / heading style.
-- Plan file changes must stay within the existing `aadlc.plan.v0.2` schema.
-- `memory.md` changes must follow the existing cache structure; do not
-  restructure sections or remove durable entries.
+- `chart-data.ts` must remain a pure function with no I/O.
+- Chart output must never contain `NaN` or `Infinity`; negatives are
+  dropped or clamped.
+- PWA and widget reset detection must share the same `RESET_DROP_RATIO`
+  semantics so the visual metaphor stays consistent across surfaces.
+- `ARCHITECTURE.md` and `memory.md` changes must follow the existing
+  section / cache structure; do not restructure or remove durable entries.
 
 ## Security constraints
 
-No secrets, credentials, or tokens may appear in documentation changes.
-The observed fields (`remaining`, `entitlement`) are numeric metadata only.
+No secrets, credentials, or tokens may appear in code or documentation
+changes. The chart layer consumes only sanitized, derived usage-history
+fields; no raw provider payloads are surfaced.
 
 ## Files expected to change
 
+- `netlify/functions/lib/chart-data.ts`
+- `src/chart-geometry.ts`
+- `src/BurnTrailChart.tsx`
+- `src/main.tsx`
+- `public/scriptable/CopeLimitWidget.js`
 - `ARCHITECTURE.md`
+- `README.md`
 - `.github/aadlc/memory.md`
 - `.github/aadlc/invariants.yml`
-- `.github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml`
 - `.github/aadlc/current-pr-contract.md` (this file)
 
 ## Tests / validation
 
-Documentation-only PR. No automated test gates apply. Manual review should
-confirm:
+`npm test` (Vitest) and `npm run build` must pass. Chart normalisation has
+unit coverage; documentation changes have no automated gate. Manual review
+should confirm:
 
-- The negative-remaining detection gap is clearly documented with example
-  values.
-- The amended detection priority 3 is consistent across ARCHITECTURE.md,
-  memory.md, and the plan file.
-- New invariants are precise and actionable.
+- Chart data is derived-only and never emits non-finite values.
+- Reset detection is consistent between the PWA and widget.
+- Documentation accurately describes the new chart layer.
 
 ## Stop conditions
 
-- Any request to modify application code (`src/`, `netlify/functions/`,
-  `public/scriptable/`).
-- Any request to add npm dependencies.
+- Any request to change history storage, projection, comfort-status, or
+  alert logic under cover of "chart work".
+- Any request to add npm dependencies for rendering.
 
 ## Escalation triggers
 
-- If additional undocumented fields are observed beyond those implied by
-  the problem statement — record them but do not widen the plan scope
-  without user confirmation.
+- If a chart requirement appears to need a new persisted field, record it as
+  an open question and stop before widening the ledger schema.
 
 ## Context reset notes
 
-On merge, reset `current-pr-contract.md` to the blank template. The amended
-`BillingPhase` detection priority and the two new invariants are promoted to
-durable architectural truth. The updated `horizon-1-pr2-billing-phase.plan.yml`
-governs the follow-up implementation PR including the rawRemaining parameter.
+On merge, reset `current-pr-contract.md` to the blank template. The
+`chart-data-derived-only` invariant and the repaired
+`github-token-never-exposed` invariant are promoted to durable
+architectural truth.

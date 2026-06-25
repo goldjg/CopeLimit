@@ -643,7 +643,7 @@ modes.
 
 ## Last updated
 
-2026-06-18 by snapshot-dedup PR agent
+2026-06-25 by burn-trail-charts PR agent
 
 ## Usage history ledger (implemented)
 
@@ -686,3 +686,52 @@ usage snapshot ledger. Key facts:
 - Returns 405 for non-GET methods; 400 for bad params; 500 on unexpected store failure.
 - Netlify redirect: `/api/history` → `/.netlify/functions/history` in `netlify.toml`.
 - 17 contract tests in `__tests__/history-handler.test.ts`; 17 tests in `__tests__/history-metrics.test.ts`.
+
+## Burn-trail charts (implemented)
+
+Fuel-gauge "burn-trail" charts visualise the usage-history ledger on both
+the PWA and the iOS Scriptable widget. The visual metaphor is a fuel tank
+consumed over time: quota is the ceiling, the trail is consumption, and the
+projection marker is the direction of travel.
+
+Shared normaliser — `netlify/functions/lib/chart-data.ts`:
+
+- `buildChartSeries()` is a pure function (no I/O) that turns
+  `UsageHistorySnapshot[]` into a `ChartPoint[]` series consumed by all
+  surfaces, so the metaphor stays consistent across PWA and widget.
+- Defensive guarantees: snapshots sorted chronologically (oldest → newest);
+  empty/single-snapshot history handled gracefully; non-finite or impossible
+  values (NaN, Infinity, negatives) dropped or clamped — output never
+  contains `NaN` or `Infinity`.
+- Quota resets (a sharp drop in `used` at the start of a new period) are
+  detected via `RESET_DROP_RATIO = 0.5` and flagged with `isPeriodStart` so
+  renderers break the trail instead of drawing a misleading vertical cliff.
+- Small negative deltas from settlement-lag noise are smoothed (carried
+  forward) so the trail does not show fake dips within a period.
+- `ChartPoint` fields: `capturedAt`, `t` (epoch ms), `used`, `quota`,
+  `remaining` (= `max(0, quota - used)`), `percentUsed` (clamped 0..100),
+  `isPeriodStart`. Optional `ChartProjection` passes through an existing
+  `BurnRateProjection` (projected exhaustion + `ProjectionStatus`) without
+  recomputing projection logic.
+- Derives only from existing fields; does not change history storage,
+  burn-rate/projection, comfort-status, or alert logic.
+
+PWA rendering:
+
+- `src/chart-geometry.ts` — pure geometry helpers (no DOM).
+- `src/BurnTrailChart.tsx` — SVG chart component.
+- Wired into `src/main.tsx`.
+
+Widget rendering — `public/scriptable/CopeLimitWidget.js`:
+
+- `createBurnTrailImage(points, quota, width, height, colorHex)` draws the
+  mini chart with `DrawContext`.
+- Uses `widgetExtras.quotaCeiling` (falls back to `usage.quota`).
+- Mirrors `RESET_DROP_RATIO = 0.5` from `chart-data.ts`; splits the trail
+  into segments at quota resets (a drop below `RESET_DROP_RATIO` of the
+  prior value) so reset detection matches the PWA.
+
+Governance:
+
+- `chart-data-derived-only` invariant (`invariants.yml`) locks in the
+  derived-only, finite-output, cross-surface-consistent contract.
