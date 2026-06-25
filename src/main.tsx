@@ -20,13 +20,14 @@ import { labelForComfortLevel, classForComfortLevel } from './comfort-display';
 import type { ComfortStatus } from './comfort-display';
 import { labelForAlertSeverity, classForAlertSeverity, labelForAlertType } from './alert-display';
 import type { AlertDecision } from './alert-display';
+import { BurnTrailChart } from './BurnTrailChart';
+import { buildChartSeries } from '../netlify/functions/lib/chart-data';
+import type { ProjectionStatus } from '../netlify/functions/lib/burn-rate-projection';
 import {
-  buildTrendBarHeights,
   creditsCostRateToUsd,
   computeEtaHours,
   formatBurnRate,
   formatEta,
-  formatNumber,
   formatUsd,
   getBudgetRemaining,
   getBudgetRemainingCostUsd,
@@ -61,6 +62,12 @@ type Usage = {
   projectedCostAtResetUsd?: number;
   comfortStatus?: ComfortStatus;
   alertDecision?: AlertDecision;
+  burnRateProjection?: BurnRateProjection;
+};
+
+type BurnRateProjection = {
+  projectedExhaustionAt?: string;
+  projectionStatus?: ProjectionStatus;
 };
 
 type HistorySummary = {
@@ -79,6 +86,8 @@ type HistorySummary = {
 type HistorySnapshot = {
   capturedAt: string;
   used: number;
+  quota?: number;
+  remaining?: number;
 };
 
 type User = {
@@ -263,13 +272,17 @@ function App() {
   const budgetRemaining = usage ? getBudgetRemaining(usage) : null;
   const budgetRemainingCostUsd = usage ? getBudgetRemainingCostUsd(usage) : null;
   const overageUsed = usage ? getOverageUsed(usage) : 0;
-  const trendSnapshots = useMemo(
-    () => historySnapshots.slice(0, 14).reverse(),
-    [historySnapshots],
-  );
-  const trendHeights = useMemo(
-    () => buildTrendBarHeights(trendSnapshots.map((snapshot) => snapshot.used)),
-    [trendSnapshots],
+  const chartSeries = useMemo(
+    () =>
+      buildChartSeries(
+        historySnapshots,
+        usage?.burnRateProjection ?? null,
+      ),
+    [
+      historySnapshots,
+      usage?.burnRateProjection?.projectedExhaustionAt,
+      usage?.burnRateProjection?.projectionStatus,
+    ],
   );
 
   return (
@@ -524,20 +537,12 @@ function App() {
                   </div>
                 )}
               </div>
-              {trendHeights.length >= 2 && (
+              {chartSeries.hasData && chartSeries.points.length >= 2 && (
                 <>
-                  <p className="historyTrendLabel">Usage trend · {trendHeights.length} snapshots</p>
-                  <div className="historyTrend" aria-label={`Usage trend across ${trendHeights.length} snapshots`}>
-                    {trendSnapshots.map((snapshot, index) => (
-                      <span
-                      key={snapshot.capturedAt}
-                        className="historyTrendBar"
-                      style={{ height: `${trendHeights[index] ?? 0}%` }}
-                      title={`${formatNumber(snapshot.used)} used`}
-                      aria-label={`${formatNumber(snapshot.used)} used at ${new Date(snapshot.capturedAt).toLocaleString()}`}
-                      />
-                    ))}
-                  </div>
+                  <p className="historyTrendLabel">
+                    Burn trail · {chartSeries.points.length} snapshots
+                  </p>
+                  <BurnTrailChart series={chartSeries} warningLevel={usage?.warningLevel} />
                 </>
               )}
               {historySummary.oldestAt && historySummary.newestAt && (

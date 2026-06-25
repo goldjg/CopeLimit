@@ -167,33 +167,113 @@ function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
   rv.lineLimit = 1;
 }
 
+// Reset-detection threshold for the burn trail. A drop below this fraction of
+// the previous `used` value is treated as a quota reset (new billing period)
+// rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
+const RESET_DROP_RATIO = 0.5;
+
 /**
- * Draws a bar-chart sparkline using DrawContext.
+ * Draws a fuel-gauge "burn trail" using DrawContext.
+ *
+ * Renders the `used` series as a filled area trail rising from the baseline,
+ * with a dashed quota ceiling line so the trail reads against the size of the
+ * tank. Quota resets (a sharp drop in `used`) break the trail into separate
+ * fills instead of drawing a misleading vertical cliff. No axes, no labels.
+ *
  * @param points  Oldest-first array of `used` values.
+ * @param quota   Quota ceiling (tank size). `0`/undefined hides the ceiling.
  * @param width   Image width in points.
  * @param height  Image height in points.
- * @param color   Scriptable Color for the bars.
+ * @param colorHex Hex string (e.g. "#60a5fa") for the trail.
  */
-function createSparklineImage(points, width, height, color) {
+function createBurnTrailImage(points, quota, width, height, colorHex) {
   const ctx = new DrawContext();
   ctx.size = new Size(width, height);
   ctx.respectScreenScale = true;
   ctx.opaque = false;
 
+  const hex = typeof colorHex === "string" && colorHex ? colorHex : "#60a5fa";
+  const trailColor = new Color(hex, 0.95);
+
   const n = points.length;
   if (n === 0) return ctx.getImage();
 
-  const maxVal = Math.max(...points, 1);
-  const barWidth = width / n;
-  const gap = Math.max(0.5, barWidth * 0.12);
+  // Sanitise: clamp to finite, non-negative values.
+  const safe = points.map(v => (typeof v === "number" && isFinite(v) && v > 0 ? v : 0));
+  const quotaSafe = typeof quota === "number" && isFinite(quota) && quota > 0 ? quota : 0;
 
+  const padY = 6;
+  const usable = Math.max(1, height - padY * 2);
+  const maxVal = Math.max(...safe, quotaSafe, 1);
+
+  const xFor = i => (n === 1 ? width / 2 : (i / (n - 1)) * width);
+  const yFor = v => {
+    const frac = Math.max(0, Math.min(1, v / maxVal));
+    return padY + (1 - frac) * usable;
+  };
+
+  // Split into segments at quota resets (a drop below RESET_DROP_RATIO of the prior value).
+  const segments = [];
+  let current = [];
   for (let i = 0; i < n; i++) {
-    const barHeight = Math.max(2, (points[i] / maxVal) * height);
-    const x = i * barWidth + gap / 2;
-    const y = height - barHeight;
-    const w = Math.max(1, barWidth - gap);
-    ctx.setFillColor(color);
-    ctx.fillRect(new Rect(x, y, w, barHeight));
+    if (i > 0 && safe[i] < safe[i - 1] * RESET_DROP_RATIO) {
+      if (current.length) segments.push(current);
+      current = [];
+    }
+    current.push({ x: xFor(i), y: yFor(safe[i]) });
+  }
+  if (current.length) segments.push(current);
+
+  // Quota ceiling reference line (dashed, faint).
+  if (quotaSafe > 0) {
+    const cy = yFor(quotaSafe);
+    ctx.setStrokeColor(new Color("#ffffff", 0.32));
+    ctx.setLineWidth(1);
+    const dash = new Path();
+    const dashLen = 5;
+    const gap = 4;
+    for (let x = 0; x < width; x += dashLen + gap) {
+      dash.move(new Point(x, cy));
+      dash.addLine(new Point(Math.min(width, x + dashLen), cy));
+    }
+    ctx.addPath(dash);
+    ctx.strokePath();
+  }
+
+  const baseY = padY + usable;
+
+  for (const seg of segments) {
+    if (seg.length === 0) continue;
+
+    // Filled area under the trail.
+    const area = new Path();
+    area.move(new Point(seg[0].x, baseY));
+    for (const p of seg) area.addLine(new Point(p.x, p.y));
+    area.addLine(new Point(seg[seg.length - 1].x, baseY));
+    area.closeSubpath();
+    ctx.setFillColor(new Color(hex, 0.22));
+    ctx.addPath(area);
+    ctx.fillPath();
+
+    // Trail line on top.
+    if (seg.length >= 2) {
+      const line = new Path();
+      line.move(new Point(seg[0].x, seg[0].y));
+      for (let i = 1; i < seg.length; i++) line.addLine(new Point(seg[i].x, seg[i].y));
+      ctx.setStrokeColor(trailColor);
+      ctx.setLineWidth(2);
+      ctx.addPath(line);
+      ctx.strokePath();
+    }
+  }
+
+  // Current position dot (last point of the last segment).
+  const last = segments[segments.length - 1];
+  if (last && last.length) {
+    const tip = last[last.length - 1];
+    const dot = 3.5;
+    ctx.setFillColor(trailColor);
+    ctx.fillEllipse(new Rect(tip.x - dot, tip.y - dot, dot * 2, dot * 2));
   }
 
   return ctx.getImage();
@@ -358,12 +438,12 @@ function createMediumWidget(usage) {
 }
 
 /**
- * Large widget — telemetry dashboard with sparkline trend visual.
+ * Large widget — telemetry dashboard with a fuel-gauge burn-trail visual.
  *
  * Information architecture:
  *   Header:   CopeLimit + source badge
  *   Grid:     Used/Quota | Overage/Budget | Burn rate/ETA | Resets/Phase
- *   Trend:    Bar sparkline (oldest-to-newest, up to 14 snapshots)
+ *   Trail:    Fuel-gauge burn trail with quota ceiling (oldest-to-newest, up to 14 snapshots)
  */
 function createLargeWidget(usage) {
   const widget = makeBaseWidget(16);
@@ -379,6 +459,7 @@ function createLargeWidget(usage) {
     : `${formatUsd(burnRateCostPerHourUsd)}/hr`;
   const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
   const sparkline = extras ? extras.sparkline : null;
+  const quotaCeiling = extras && typeof extras.quotaCeiling === "number" ? extras.quotaCeiling : usage.quota;
 
   // Header
   const headerRow = widget.addStack();
@@ -430,7 +511,7 @@ function createLargeWidget(usage) {
   addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Phase",
     billingPhaseLabel(usage.billingPhase), { rightColor: accent });
 
-  // Sparkline
+  // Burn trail
   widget.addSpacer(8);
 
   const sep = widget.addText("—————————————————————————————");
@@ -440,16 +521,15 @@ function createLargeWidget(usage) {
   widget.addSpacer(6);
 
   if (sparkline && sparkline.length >= 2) {
-    const trendLabel = widget.addText(`Usage trend  ·  ${sparkline.length} snapshots`);
+    const trendLabel = widget.addText(`Burn trail  ·  ${sparkline.length} snapshots`);
     trendLabel.font = Font.mediumSystemFont(10);
     trendLabel.textColor = Color.gray();
 
     widget.addSpacer(5);
 
-    const sparkColor = new Color(colourHexFor(usage), 0.8);
-    const sparkImg = createSparklineImage(sparkline, 294, 44, sparkColor);
-    const imgWidget = widget.addImage(sparkImg);
-    imgWidget.imageSize = new Size(294, 44);
+    const trailImg = createBurnTrailImage(sparkline, quotaCeiling, 294, 48, colourHexFor(usage));
+    const imgWidget = widget.addImage(trailImg);
+    imgWidget.imageSize = new Size(294, 48);
     imgWidget.cornerRadius = 3;
   } else {
     const noData = widget.addText("No usage trend data available");

@@ -85,8 +85,10 @@ The frontend is a single-page React application built with Vite. It is served as
 
 | File | Purpose |
 |---|---|
-| `src/main.tsx` | Root `App` component, usage fetch, billing/overage display, history summary, PWA install prompt, service worker registration |
+| `src/main.tsx` | Root `App` component, usage fetch, billing/overage display, history summary, burn-trail chart, PWA install prompt, service worker registration |
 | `src/billing-display.ts` | Pure `labelForBillingPhase()` helper (unit-tested independently of browser globals) |
+| `src/BurnTrailChart.tsx` | SVG burn-trail (fuel-gauge) chart component for the usage-history series |
+| `src/chart-geometry.ts` | Pure geometry helpers (no DOM) for the burn-trail chart |
 | `src/WidgetTokenSection.tsx` | Widget token lifecycle UI, iOS onboarding state machine |
 | `src/widget-onboarding.ts` | Platform-agnostic onboarding types and pure helper functions (unit-tested) |
 | `src/styles.css` | Application styles |
@@ -102,6 +104,14 @@ When `billingPhase === 'budget_active'` a **Budget usage** card is shown below t
 The `billingPhase` label is shown inline in the billing entity card as a colour-coded badge.
 
 A **Usage history** summary card is fetched from `GET /api/history?summary=true&limit=50` on page load. It is shown when at least two snapshots are available and displays `deltaUsed`, `creditsPerHour`, `averageBurnRate`, and the oldest/newest window. History is session-gated; the fetch fails silently for unauthenticated sessions.
+
+A **burn-trail chart** (`src/BurnTrailChart.tsx`) renders the same history as a
+fuel-gauge: quota is the ceiling, the trail is consumption over time, and an
+optional projection marker indicates the direction of travel. The series is
+produced by the shared `buildChartSeries` normaliser
+(`netlify/functions/lib/chart-data.ts`) and laid out by the pure geometry
+helpers in `src/chart-geometry.ts`. Quota resets break the trail rather than
+drawing a misleading vertical cliff.
 
 ### PWA features
 
@@ -149,6 +159,7 @@ Shared code lives in `netlify/functions/lib/`:
 | `usage-history-types.ts` | Types for the usage history ledger (`UsageHistorySnapshot`, `UsageHistoryEntry`, `UsageHistoryDelta`, `UsageHistoryConfig`) |
 | `usage-history-store.ts` | Blobs persistence for usage snapshots; `appendSnapshot`, `getHistory`, `calculateDelta` |
 | `history-metrics.ts` | Pure derived-metrics functions for `GET /api/history`; `computeHistorySummary` |
+| `chart-data.ts` | Pure burn-trail chart normaliser shared by the PWA and widget; `buildChartSeries` (`ChartPoint[]`), reset detection via `RESET_DROP_RATIO` |
 | `finops-types.ts` | FinOps and AADLC attribution domain types (Horizon 3) |
 
 ---
@@ -426,6 +437,7 @@ Home-screen widget that:
    - When `billingPhase === 'budget_active'`: large overage credits value (`+N`) and "overage of Q" caption in red; a **Budget** line showing `overageEntitlement` when available.
    - Otherwise: remaining credits value and "remaining of Q" caption.
    - Used percentage shown as `>100%!` when over quota.
+   - A mini **burn-trail** chart drawn by `createBurnTrailImage(...)` using `widgetExtras.quotaCeiling` as the ceiling. It mirrors the PWA's `RESET_DROP_RATIO = 0.5` so quota resets split the trail into segments consistently across surfaces.
    - Reset date and source label.
 
 ### `CopeLimitInstall.js`

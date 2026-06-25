@@ -16,6 +16,7 @@
 - 🔒 **Blob encryption** — all sensitive records in Netlify Blobs are AES-256-GCM encrypted at rest
 - 📡 **Provider-agnostic** — supports `github-copilot-internal`, `copilot-local`, and `mock` providers
 - 📜 **Usage history ledger** — optional timestamped snapshot persistence with deduplication, delta calculation, and configurable retention
+- 📈 **Burn-trail charts** — fuel-gauge usage charts on the PWA and the iOS widget, derived from the history ledger with quota-reset detection
 
 ---
 

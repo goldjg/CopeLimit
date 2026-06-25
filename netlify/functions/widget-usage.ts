@@ -33,7 +33,8 @@
  *   "widgetExtras": {
  *     "burnRate": 45.2,
  *     "burnRateCostPerHourUsd": 0.45,
- *     "sparkline": [1000, 2500, 3200, 5550]
+ *     "sparkline": [1000, 2500, 3200, 5550],
+ *     "quotaCeiling": 7000
  *   }
  * }
  * ```
@@ -77,6 +78,12 @@ export type WidgetExtras = {
    * Contains at most 14 data points (the most recent snapshots, reversed).
    */
   sparkline: number[];
+  /**
+   * Representative quota ceiling (the largest quota across the sparkline
+   * window). Lets the widget draw a fuel-gauge ceiling reference line so the
+   * burn trail reads against the size of the tank. `0` when unknown.
+   */
+  quotaCeiling: number;
 };
 
 /**
@@ -98,12 +105,20 @@ export function computeWidgetExtras(
   // so the chart reads left-to-right chronologically.
   const sparklineSnapshots = snapshots.slice(0, 14).reverse();
   const sparkline = sparklineSnapshots.map(s => s.used);
+  // Quota ceiling: the largest quota seen across the sparkline window, so the
+  // widget can render the tank size as a reference line. Defensive against
+  // missing/non-finite quotas.
+  const quotaCeiling = sparklineSnapshots.reduce((max, s) => {
+    const q = typeof s.quota === 'number' && Number.isFinite(s.quota) && s.quota > 0 ? s.quota : 0;
+    return q > max ? q : max;
+  }, 0);
   const burnRateCostPerHourUsd =
     summary.creditsPerHour === null ? null : creditsToUsd(summary.creditsPerHour);
   return {
     burnRate: summary.creditsPerHour,
     burnRateCostPerHourUsd,
-    sparkline
+    sparkline,
+    quotaCeiling
   };
 }
 
