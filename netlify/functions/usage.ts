@@ -80,6 +80,8 @@ import { projectBurnRate } from './lib/burn-rate-projection';
 import type { BurnRateProjection } from './lib/burn-rate-projection';
 import { computeComfortStatus } from './lib/comfort-status';
 import type { ComfortStatus } from './lib/comfort-status';
+import { evaluateAlertDecision } from './lib/alert-decision';
+import type { AlertDecision } from './lib/alert-decision';
 
 type UsageResult = {
   usage: Usage;
@@ -381,10 +383,22 @@ export const handler: Handler = async (event) => {
     // warningLevel/percentUsed when the projection is absent or unavailable.
     const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection);
 
+    // Alert decision: additive, optional field. Evaluates whether the user
+    // should be alerted based on the comfort status and optional projection.
+    // Consumes comfortStatus as the primary signal to avoid duplicating
+    // billing-phase logic. Never throws.
+    let alertDecision: AlertDecision | undefined;
+    try {
+      alertDecision = evaluateAlertDecision({ usage, projection: burnRateProjection, comfortStatus });
+    } catch {
+      // Non-blocking: alert-decision failures must not affect the usage response.
+    }
+
     const responseBody = {
       ...usage,
       ...(burnRateProjection !== undefined ? { burnRateProjection } : {}),
       comfortStatus,
+      ...(alertDecision !== undefined ? { alertDecision } : {}),
     };
 
     return {
