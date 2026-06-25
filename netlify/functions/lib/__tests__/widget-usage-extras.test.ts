@@ -181,3 +181,30 @@ describe('computeWidgetExtras — minimum viable input', () => {
     expect(result!.sparkline).toEqual([1000, 2000]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Contract assertion 6: quota ceiling for the fuel-gauge reference line
+// ---------------------------------------------------------------------------
+
+describe('computeWidgetExtras — quota ceiling', () => {
+  it('reports the largest quota across the sparkline window', () => {
+    const snapshots = [
+      makeSnapshot('2026-06-15T12:00:00.000Z', 3000, 9000),
+      makeSnapshot('2026-06-15T10:00:00.000Z', 2000, 7000),
+      makeSnapshot('2026-06-15T08:00:00.000Z', 1000, 7000),
+    ];
+    const result = computeWidgetExtras(snapshots);
+    expect(result).toBeDefined();
+    expect(result!.quotaCeiling).toBe(9000);
+  });
+
+  it('defaults the quota ceiling to 0 when quotas are unusable', () => {
+    const snapshots = [
+      { capturedAt: '2026-06-15T10:00:00.000Z', used: 2000, quota: 0, remaining: 0, billingPhase: 'credits_available' as const },
+      { capturedAt: '2026-06-15T08:00:00.000Z', used: 1000, quota: 0, remaining: 0, billingPhase: 'credits_available' as const },
+    ];
+    const result = computeWidgetExtras(snapshots);
+    expect(result).toBeDefined();
+    expect(result!.quotaCeiling).toBe(0);
+  });
+});

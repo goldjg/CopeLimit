@@ -536,24 +536,33 @@ button {
   color: #a1a1aa;
 }
 
-.historyTrend {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  height: 88px;
-  min-height: 88px;
-  padding: 14px 12px 10px;
+.burnTrail {
+  margin-top: 4px;
+  padding: 14px 12px 12px;
   border-radius: 18px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.08);
 }
 
-.historyTrendBar {
-  flex: 1;
-  min-width: 0;
-  border-radius: 999px 999px 6px 6px;
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.95), rgba(59, 130, 246, 0.35));
-  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+.burnTrailSvg {
+  display: block;
+  width: 100%;
+  height: 96px;
+}
+
+.burnTrailCaption {
+  margin-top: 8px;
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  color: #a1a1aa;
+}
+
+.burnTrailCaption-risk {
+  color: #ef4444;
+}
+
+.burnTrailCaption-safe {
+  color: #22c55e;
 }
 
 .widgetTokenCard {
