@@ -351,7 +351,7 @@ export const handler: Handler = async (event) => {
     // Only attempted when history is enabled and a userId is known (i.e. the
     // authenticated github-copilot-internal provider).  A missing or empty
     // history returns projectionStatus: 'unavailable' — never an error.
-    let burnRateProjection: BurnRateProjection | undefined
+    let burnRateProjection: BurnRateProjection | undefined = undefined
     if (historyConfig.enabled && result.userId !== undefined) {
       try {
         const recentSnapshots = await getHistory(result.userId, { limit: 50 })

@@ -257,8 +257,8 @@ export function projectBurnRate(
   if (projectedExhaustionMs > resetAtMs) {
     // Reset arrives before projected exhaustion.
     let projectedOverageCreditsAtReset: number | undefined
-    if (usage.billingPhase === 'budget_active') {
-      // Already burning overage: project how much more will be used by reset.
+    if (usage.billingPhase === 'budget_active' || usage.billingPhase === 'budget_available') {
+      // Burning (or about to start burning) overage: project how much will be used by reset.
       projectedOverageCreditsAtReset = Math.max(0, creditsPerHour * hoursUntilReset)
     }
     return {

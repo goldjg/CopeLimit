@@ -489,6 +489,30 @@ describe('projectBurnRate — budget_available phase', () => {
     expect(result.projectionStatus).toBe('unavailable')
     expect(result.projectionReason).toMatch(/overage entitlement/i)
   })
+
+  it('sets projectedOverageCreditsAtReset for budget_available when reset is before exhaustion', () => {
+    // Huge entitlement → reset happens long before budget exhaustion.
+    // snapshots: +1000 cr over 24h → 1000/day, ~41.67/hr
+    // effectiveRemaining = 100000 - 0 = 100000 (enormous)
+    // projectedExhaustion = far in the future; reset is in ~6 days → reset_before_exhaustion
+    // projectedOverageCreditsAtReset = 41.67 * hoursUntilReset (≈144h) ≈ 6000
+    const snapshots: UsageHistorySnapshot[] = [
+      makeSnapshot('2026-06-25T10:00:00.000Z', 8000, 7000),
+      makeSnapshot('2026-06-24T10:00:00.000Z', 7000, 7000), // +1000/day
+    ]
+    const usage = makeUsage({
+      billingPhase: 'budget_available',
+      used: 8000,
+      remaining: 0,
+      overageCount: 0,
+      overageEntitlement: 100000,
+      overagePermitted: true,
+    })
+    const result = projectBurnRate(usage, snapshots, NOW)
+    expect(result.projectionStatus).toBe('reset_before_exhaustion')
+    expect(result.projectedOverageCreditsAtReset).toBeDefined()
+    expect(result.projectedOverageCreditsAtReset!).toBeGreaterThan(0)
+  })
 })
 
 // ---------------------------------------------------------------------------
