@@ -6,40 +6,67 @@ single task. Update it only when a stable fact, decision, invariant, or
 unresolved question should carry forward.
 
 ## Project purpose
-cARL (Cognitive Agent Runtime Layer) is a reusable governance and
-instruction layer for GitHub Copilot coding agents. It provides modular
-instruction packs, durable memory artefacts, and cARLv2 cognition
-governance for consistent, secure, maintainable, and governed
-AI-assisted development.
+
+CopeLimit is a GitHub Copilot usage visibility tool — a "panic meter"
+for Copilot consumption. It reads live Copilot quota data from the
+GitHub Copilot internal API (`api.github.com/copilot_internal/user`),
+normalises it into a stable app-facing `Usage` shape, and surfaces it
+as a React PWA dashboard and an iOS Scriptable home-screen widget
+deployed on Netlify.
+
+CopeLimit exists partly to support AADLCv2 / cARL cost-observability
+experiments by making Copilot consumption visible across PRs, so that
+future PRs can compare cost/request behaviour against a hydrated
+baseline.
 
 ## Non-goals
-<!-- Populate with explicitly out-of-scope outcomes to prevent scope creep. -->
+
+- CopeLimit does not provision, configure, or manage Copilot
+  subscriptions, billing, or account settings.
+- CopeLimit must not assume that additional or pay-as-you-go usage is
+  enabled. Avoid surprise-spend assumptions and clearly distinguish
+  included credits from additional usage where the data supports it.
+- CopeLimit does not expose raw GitHub access tokens to the browser or
+  the iOS widget (tokens are stored only in encrypted cookies and blobs).
+- CopeLimit does not modify GitHub account settings or access any GitHub
+  API beyond quota data and OAuth endpoints.
 
 ## Architecture summary
 
-cARL artefacts are the canonical source of governance truth for this repository.
+cARL artefacts in `.github/carl/` are the canonical source of governance truth for this repository.
+`.github/instructions/` contains modular single-concern instruction packs.
+`.github/aadlc/` retains legacy AADLC governance artefacts for historical reference only.
 
-`.github/carl/` contains durable governance artefacts, repository memory, PR contracts, invariants, trust boundaries, tool policy, plans, runtime metadata, and generated repository maps.
+**CopeLimit project shape:**
+- Frontend: Vite + React PWA served as a Netlify static site (`dist/`).
+  Key files: `src/main.tsx` (root app), `src/WidgetTokenSection.tsx`
+  (iOS onboarding state machine), `src/widget-onboarding.ts`
+  (platform-agnostic onboarding helpers, unit-tested).
+- Backend: Netlify Functions in `netlify/functions/` (TypeScript).
+  Shared library in `netlify/functions/lib/`. `copilot.ts` is the
+  single source of truth for the `Usage` type and `normaliseUsage`.
+- Storage: Netlify Blobs. Records follow a tiered encryption model:
+  sensitive credential records (Tier 1) are AES-256-GCM encrypted via
+  `BLOB_ENCRYPTION_KEY`; sanitized append-only telemetry records (Tier 2)
+  do not require app-level encryption; mutable control blobs (Tier 3)
+  are recoverable and non-blocking; legacy plaintext migration (Tier 4)
+  applies to Tier 1 records only.
+- Blob stores: `widget-tokens` (Tier 1), `onboarding-sessions` (Tier 1),
+  `provider-captures` (Tier 2/3), `usage-history` (Tier 2/3).
+- External: `api.github.com/copilot_internal/user` (live quota),
+  GitHub OAuth for authentication.
+- iOS: `public/scriptable/CopeLimitWidget.js` (home-screen widget) and
+  `public/scriptable/CopeLimitInstall.js` (bootstrap token installer),
+  orchestrated via iOS Shortcuts Fast Setup.
 
-`.github/instructions/` contains modular single-concern instruction packs used by supported harnesses.
-
-Harness-specific files such as `.github/copilot-instructions.md`, `CLAUDE.md`, `AGENTS.md`, `.cursor/rules/carl.mdc`, and `.agents/rules/carl.md` are adapters/shims. They may load, summarise, or route agents toward cARL, but they are not the canonical governance authority.
-
-`.github/copilot-instructions.md` is both the GitHub Copilot harness entrypoint and the **shared cARL adapter loader** for all other harness shims. It is located at that path for Copilot compatibility. All other harness entrypoints (CLAUDE.md, AGENTS.md, .cursor/rules/carl.mdc, .agents/rules/carl.md) are tiny shim files that tell the harness to read `.github/copilot-instructions.md` before any repository work. It should remain a thin, procedural loader that makes the cARL lifecycle explicit:
-
-1. hydrate cARL before planning or implementation;
-2. apply cARL governance during execution;
-3. validate contract, implementation, and tests together;
-4. reconcile documentation and durable cARL artefacts before final response;
-5. report whether cARL/docs updates were required.
+Harness-specific files such as `.github/copilot-instructions.md`, `CLAUDE.md`,
+`AGENTS.md`, `.cursor/rules/carl.mdc`, and `.agents/rules/carl.md` are
+adapter shims. They route agents to cARL canonical artefacts; they are not
+the source of governance authority.
 
 If prompt/session memory conflicts with cARL artefacts, trust cARL and report the conflict.
 
 If `.github/carl/memory.md` conflicts with current repository state, current repository state wins and memory should be updated.
-
-## Repository snapshot
-
-This section is regenerated by `carl reconcile`. Do not edit manually.
 
 <!-- BEGIN GENERATED: reconcile -->
 ## Repository snapshot
@@ -99,91 +126,82 @@ This section is regenerated by `carl reconcile`. Do not edit manually.
 - `README.md` — Repository overview and pack catalogue
 <!-- END GENERATED: reconcile -->
 
-## Command behaviour
-
-`carl reconcile` refreshes the generated repository snapshot in `.github/carl/memory.md`. It is idempotent: when generated content is unchanged, it should perform no write. It does not modify `runtime.json`, harness adapter files, or other managed artefacts. It requires no network access and exits non-zero with an actionable message if `repo-map.json` or `memory.md` is missing.
-
-`carl harness` manages and inspects harness adapters for AI coding agents. Its subcommands are `list`, `status`, and `sync`.
-
-Harness adapters bridge cARL canonical artefacts to agent context injection mechanisms. cARL artefacts are the canonical source of truth; harness files are adapters, not authorities.
-
-`carl harness list` shows all known adapters with support tier:
-
-- `copilot` — `production`: tested, production-validated, primary development target;
-- `claude` — `experimental`: partial validation, governance loading under investigation;
-- `codex`, `cursor`, and `antigravity` — `theoretical`: adapter exists, not yet validated end-to-end.
-
-`carl harness status` reports both detection-file presence and sync health by comparing adapter file bytes against the canonical embedded source.
-
-`carl harness sync [<harness-id>...]` generates adapter files for all adapters with defined adapter files, or only named harnesses when harness IDs are supplied. Syncing a shim harness writes both the shared loader (`.github/copilot-instructions.md`) and the harness-specific shim. The shared loader is written once even when syncing all harnesses. Adapter files are disposable and always overwritten. Sync works for all tiers regardless of support level. Sync is idempotent and does not require `carl init`.
-
-`carl doctor` surfaces missing or drifted harness adapters as warning findings with `carl harness sync` remediation.
-
-`carl status` includes a separate harness summary covering active, missing, drifted, and healthy harnesses without changing overall runtime status semantics.
-
-Detection files:
-
-- Copilot: `.github/copilot-instructions.md`
-- Claude: `CLAUDE.md`
-- Codex: `AGENTS.md`
-- Cursor: `.cursor/rules/carl.mdc`
-- Antigravity: `.agents/rules/carl.md`
-
-A shim harness is healthy only when both the shared loader (`.github/copilot-instructions.md`) and the harness-specific shim are present and synced.
-
-`harness.Command` accepts an `Artifacts` dependency using the same interface pattern as `repair`, `doctor`, and `status`.
-
-The `repair` package exports `Inspect(rootDir, managed, arts)`, which returns separate missing and drifted slices while skipping protected paths. `repair.Command.detectDrift` delegates to `Inspect` internally.
-
-`repair.CompareFile(rootDir, targetPath, canonicalPath, arts)` is the shared byte-comparison helper used by both runtime artefact inspection and harness adapter health checks.
-
-The `repomap` package implements `carl map`. Its `Build(rootDir)` function derives all map sections from the filesystem using `filepath.WalkDir`. It exports `RunInDir(rootDir)` for testability. `OutputFile` is `.github/carl/repo-map.json`.
-
-The `convert` package implements `carl convert <source> [--dry-run | --apply]`, an AADLC-to-cARL governance migration command.
-
-`convert` uses a converter framework: each source implements the `Converter` interface and is registered in the `converters` slice. A shared converter-agnostic engine performs duplicate detection, conflict detection, routing, and deterministic reporting. New converters can be added without changing the engine.
-
-The AADLC converter discovers artefacts under `.aadlc/`, `.github/aadlc/`, `aadlc/`, and `AADLC.md`. It classifies Markdown and YAML bullet content by section-heading keywords into invariants, durable memory, and governance rules.
-
-AADLC invariants are appended to `.github/carl/invariants.yml` using namespaced `aadlc-` IDs and `high` severity. Memory and governance entries go into a managed block in `.github/carl/memory.md`.
-
-AADLC artefacts are never modified or deleted. Default mode is `--dry-run`. Conversion is idempotent and deterministic.
-
-Malformed managed convert block markers cause conversion to fail before writing anything, rather than treating the block as absent and appending a second block.
-
 ## Core invariants
 
-- cARL artefacts are the canonical source of durable governance truth.
-- Harness-specific files are adapters/loaders, not authorities.
-- Harness adapters must remain disposable and regenerable from canonical cARL assets.
 - Instruction packs should remain modular and focused on a single concern.
-- `.github/copilot-instructions.md` is both the Copilot harness entrypoint and the shared cARL adapter loader for all harness shims. It should remain a thin, procedural loader rather than duplicating the full operating model.
+- `.github/carl/` is the canonical source of durable governance truth for this repository.
+- Harness adapter files (copilot-instructions.md, CLAUDE.md, AGENTS.md, etc.) are loaders, not authorities.
+- The raw GitHub access token must never be returned to the browser or the iOS widget.
+- Netlify Blob Tier 1 records must be AES-256-GCM encrypted via `BLOB_ENCRYPTION_KEY`.
+- `chart-data.ts` derives only from existing history fields; it must never trigger I/O, change billing state, or modify history storage.
 - cARLv2 artefacts should reduce semantic rediscovery without becoming a per-turn session diary.
-- Prompt-as-code should be used for substantial, long, nested, model-comparison, or boundary-sensitive agent tasks.
+- Prompt-as-code should be used for substantial, long, nested, or boundary-sensitive agent tasks.
 - Every implementation PR must make an explicit cARL/docs update decision before final response.
+
+## Trust boundaries
+
+Full boundary table: `.github/carl/trust-boundaries.md`.
+
+CopeLimit-specific boundaries:
+- `copilot_internal/user` API responses are external/low-trust. They
+  must not drive repository write targets without validation. The API
+  shape has changed historically and may change again.
+- The raw GitHub access token must never be returned to the browser or
+  the iOS widget. It lives only in encrypted session cookies and
+  encrypted Netlify Blob records.
+- Netlify Blob records follow a tiered encryption model:
+  - **Tier 1** (sensitive credential records — widget tokens, bootstrap
+    tokens, session-linked access tokens): application-level AES-256-GCM
+    encryption via `BLOB_ENCRYPTION_KEY` is required. These records must
+    not be written unencrypted.
+  - **Tier 2** (sanitized append-only telemetry — provider captures):
+    application-level encryption is not required. Records contain only
+    allowlisted, redacted fields.
+  - **Tier 3** (mutable provider-capture control blobs — e.g.
+    `_index.json`): recoverable and non-blocking. Loss does not affect
+    live usage display.
+  - **Tier 4** (legacy plaintext migration): applies to Tier 1 records
+    only. Legacy plaintext records written before encryption was
+    introduced are migrated automatically on first read.
+- Bootstrap tokens (iOS onboarding) are single-use and 15-minute TTL.
+  They must be consumed atomically and deleted on first use.
 
 ## Known sharp edges
 
-- Instruction availability is not instruction adherence: a harness may load an instruction file, but different models vary in their ability to operationalise the full governance lifecycle without explicit checkpoints.
-- Agents may over-anchor on completed PR contracts; distinguish durable invariants from historical PR constraints.
-- Model availability and capability can vary; fallback models must preserve the active PR contract.
-- Repeated corrective prompting is a failure signal; reset the session or switch model instead of continuing prompt ping-pong.
-- Derived data support does not guarantee equivalent UX surface support.
+- Long nested prompts in agent UIs may truncate or misparse; prefer
+  committed plan files for boundary-sensitive work.
+- Agents may over-anchor on completed PR contracts; distinguish durable
+  invariants from historical PR constraints.
+- Model availability and capability can vary; fallback models must
+  preserve the active PR contract.
+- Repeated corrective prompting is a failure signal; reset the session
+  or switch model instead of continuing prompt ping-pong.
+- `npm run lint` fails on TS5107 (deprecated `moduleResolution: Node` in
+  `tsconfig.json`). Do not treat as a blocking gate. `npm run build` and
+  `npm test` both pass.
+- iOS standalone PWA never sees `?shortcut=complete` because Shortcuts
+  and Scriptable open callbacks in Safari (not the PWA). The
+  `visibilitychange` + `pageshow` event listeners in
+  `WidgetTokenSection.tsx` advance onboarding state when the PWA
+  regains foreground.
 
 ## Canonical validation commands
 
-- Build CLI: `go build ./cmd/carl`
-- Run tests: `go test ./...`
-- Build tagged release: `go build -ldflags "-X main.cliVersion=<tag> -X main.sourceCommit=$(git rev-parse HEAD)" ./cmd/carl`
+- `npm run build` — TypeScript compilation + Vite bundle. Last known validation state: passes.
+- `npm test` — Vitest unit tests covering `netlify/functions/lib/` backend and `src/` frontend utilities. Last known validation state: passes (568 tests).
+- `npm run lint` — TypeScript `--noEmit` check. Last known validation state: fails on TS5107 (deprecated `moduleResolution: Node` in `tsconfig.json`). Not a blocking gate until tsconfig is updated.
 
 ## Current operating assumptions
 
-Model availability and capability are not stable invariants. The PR contract remains the source of truth across model fallback.
+Model availability is not a stable invariant. The PR contract remains
+the source of truth across model fallback.
 
-Harness behaviour is not equivalent to model compliance. A harness may place instructions in context, but cARL must still make the required governance lifecycle explicit enough for weaker or cheaper models to follow.
+The billing model is AI Credits as of 1 June 2026. Any PR that touches
+usage normalisation must reason about both `premium_requests` (legacy
+fields / fallback) and `ai_credits` (token-based billing detected)
+modes.
 
 The active authority order is:
-
 1. current repository state;
 2. active user instruction within approved scope;
 3. `.github/carl/current-pr-contract.md`;
@@ -196,10 +214,18 @@ The active authority order is:
 
 ## Open questions
 
-<!-- Populate with unresolved questions that should persist into future work. -->
+- Is `overage_count` always in sync with `remaining` when budget consumption
+  begins, or does it lag? Capture 2 shows `remaining = -473` with `overage_count = 0`
+  and $0 billed, strongly suggesting lag. The magnitude (hours vs days vs billing
+  cycle) is not yet known.
+- What is the unit of `overage_entitlement`? Confirm from a live capture where
+  `overage_count > 0`. If unit is unclear, store as-is with a TODO annotation.
+- Should the `mock` provider's default values be updated from
+  `MOCK_USED=321 / MOCK_QUOTA=500` (premium request scale) to AI Credits scale
+  (e.g. `MOCK_QUOTA=7000`)?
 
 ## Last updated
-2026-06-21 by harness loader governance update
+2026-06-25 by cARL migration hydration
 
 <!-- BEGIN GENERATED: convert aadlc -->
 ## Migrated from AADLC
