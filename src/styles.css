@@ -839,6 +839,12 @@ a:focus-visible {
   margin: 0 0 12px;
 }
 
+.pushNotificationSuccess {
+  color: #22c55e;
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+
 .pushNotificationActions {
   display: flex;
   gap: 10px;
