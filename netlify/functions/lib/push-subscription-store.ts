@@ -56,10 +56,10 @@ function isValidUserId(userId: number | undefined): userId is number {
  * and to keep the key format stable.
  *
  * @param endpoint - The push subscription endpoint URL.
- * @returns A 32-character lowercase hex string.
+ * @returns A 64-character lowercase hex string (full SHA-256 output).
  */
 export function endpointHash(endpoint: string): string {
-  return createHash('sha256').update(endpoint).digest('hex').slice(0, 32)
+  return createHash('sha256').update(endpoint).digest('hex')
 }
 
 /**
@@ -126,7 +126,12 @@ export async function saveSubscription(
   const key = buildSubscriptionKey(userId, payload.endpoint)
   const nowIso = now.toISOString()
 
-  // Preserve createdAt from existing record if present
+  // Preserve createdAt from existing record if present.
+  // Trade-off: if the blob read throws (transient error), createdAt resets to
+  // nowIso. This is fail-open: the subscription is still saved successfully and
+  // the registration date will reflect the re-registration time rather than the
+  // original. Acceptable for a non-critical metadata field; the alternative of
+  // failing the entire save on a transient read error would be worse UX.
   let createdAt = nowIso
   try {
     const existing = await store.get(key, { type: 'json' }) as PushSubscriptionRecord | null
@@ -134,7 +139,7 @@ export async function saveSubscription(
       createdAt = existing.createdAt
     }
   } catch {
-    // Fail-open: if the read throws, use nowIso for createdAt
+    // Fail-open: see trade-off note above
   }
 
   const record: PushSubscriptionRecord = {

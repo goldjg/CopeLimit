@@ -72,7 +72,7 @@ const BASE_RECORD: PushSubscriptionRecord = {
 describe('buildSubscriptionKey', () => {
   it('produces a key in the expected format', () => {
     const key = buildSubscriptionKey(USER_ID, ENDPOINT)
-    expect(key).toMatch(/^12345\/[0-9a-f]{32}\.json$/)
+    expect(key).toMatch(/^12345\/[0-9a-f]{64}\.json$/)
   })
 
   it('is deterministic for the same endpoint', () => {
@@ -98,9 +98,9 @@ describe('buildSubscriptionKey', () => {
 })
 
 describe('endpointHash', () => {
-  it('returns a 32-character lowercase hex string', () => {
+  it('returns a 64-character lowercase hex string', () => {
     const hash = endpointHash(ENDPOINT)
-    expect(hash).toMatch(/^[0-9a-f]{32}$/)
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('is deterministic', () => {

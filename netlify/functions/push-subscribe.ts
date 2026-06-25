@@ -267,13 +267,15 @@ export const handler: Handler = async (event: HandlerEvent) => {
       }
     }
 
-    // Attach user-agent from request headers if not already in payload
-    if (!payload.userAgent) {
+    // Attach user-agent from request headers if not already in payload.
+    // Build enriched payload as a new object to avoid mutating the validated value.
+    const enrichedPayload = { ...payload }
+    if (!enrichedPayload.userAgent) {
       const ua = event.headers['user-agent']
-      if (ua) payload.userAgent = ua
+      if (ua) enrichedPayload.userAgent = ua
     }
 
-    const record = await saveSubscription(auth.session.id, payload)
+    const record = await saveSubscription(auth.session.id, enrichedPayload)
     if (!record) {
       return {
         statusCode: 500,

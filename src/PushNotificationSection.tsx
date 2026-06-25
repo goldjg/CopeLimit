@@ -95,10 +95,14 @@ export default function PushNotificationSection(): React.ReactElement | null {
       if (status.hasSubscriptions) {
         setState({ phase: 'subscribed', subscriptionCount: status.subscriptionCount });
       } else {
-        setState({ phase: 'unsubscribed', vapidPublicKey: status.vapidPublicKey! });
+        // vapidPublicKey is guaranteed non-null here: detectPushSupport returned
+        // 'supported' above, which requires a non-empty key.
+        setState({ phase: 'unsubscribed', vapidPublicKey: status.vapidPublicKey ?? '' });
       }
-    } catch {
-      // Silently ignore status load errors — component simply doesn't render
+    } catch (err) {
+      // Log in development to aid diagnosis; fall back to 'unsupported' so the
+      // card is hidden rather than showing a confusing error on page load.
+      if (typeof console !== 'undefined') console.warn('[PushNotificationSection] failed to load status:', err);
       setState({ phase: 'unsupported' });
     }
   }, []);
