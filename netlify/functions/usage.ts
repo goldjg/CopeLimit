@@ -73,9 +73,11 @@ import {
 } from './lib/copilot';
 import { maybeCapture } from './lib/capture-store';
 import { readCaptureConfig } from './lib/capture-config';
-import { appendSnapshot } from './lib/usage-history-store';
+import { appendSnapshot, getHistory } from './lib/usage-history-store';
 import { readUsageHistoryConfig } from './lib/usage-history-config';
 import type { UsageHistorySnapshot } from './lib/usage-history-types';
+import { projectBurnRate } from './lib/burn-rate-projection';
+import type { BurnRateProjection } from './lib/burn-rate-projection';
 
 type UsageResult = {
   usage: Usage;
@@ -345,13 +347,27 @@ export const handler: Handler = async (event) => {
       void appendSnapshot(result.userId, snapshot, historyConfig);
     }
 
+    // Burn-rate projection: computed from history when available.
+    // Only attempted when history is enabled and a userId is known (i.e. the
+    // authenticated github-copilot-internal provider).  A missing or empty
+    // history returns projectionStatus: 'unavailable' — never an error.
+    let burnRateProjection: BurnRateProjection | undefined
+    if (historyConfig.enabled && result.userId !== undefined) {
+      try {
+        const recentSnapshots = await getHistory(result.userId, { limit: 50 })
+        burnRateProjection = projectBurnRate(usage, recentSnapshots)
+      } catch {
+        // Non-blocking: projection failures must not affect the usage response.
+      }
+    }
+
     return {
       statusCode: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'private, max-age=60'
       },
-      body: JSON.stringify(usage)
+      body: JSON.stringify(burnRateProjection !== undefined ? { ...usage, burnRateProjection } : usage)
     };
   } catch (error) {
     return {
