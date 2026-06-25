@@ -78,6 +78,8 @@ import { readUsageHistoryConfig } from './lib/usage-history-config';
 import type { UsageHistorySnapshot } from './lib/usage-history-types';
 import { projectBurnRate } from './lib/burn-rate-projection';
 import type { BurnRateProjection } from './lib/burn-rate-projection';
+import { computeComfortStatus } from './lib/comfort-status';
+import type { ComfortStatus } from './lib/comfort-status';
 
 type UsageResult = {
   usage: Usage;
@@ -374,13 +376,24 @@ export const handler: Handler = async (event) => {
       }
     }
 
+    // Comfort status: always included. Derived from the current usage and the
+    // optional burn-rate projection. Never throws — falls back gracefully to
+    // warningLevel/percentUsed when the projection is absent or unavailable.
+    const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection);
+
+    const responseBody = {
+      ...usage,
+      ...(burnRateProjection !== undefined ? { burnRateProjection } : {}),
+      comfortStatus,
+    };
+
     return {
       statusCode: 200,
       headers: {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'private, max-age=60'
       },
-      body: JSON.stringify(burnRateProjection !== undefined ? { ...usage, burnRateProjection } : usage)
+      body: JSON.stringify(responseBody)
     };
   } catch (error) {
     return {
