@@ -371,7 +371,6 @@ function decideFromComfortLevel(
     default: {
       // Exhaustive check — TypeScript will flag any unhandled ComfortLevel.
       const _exhaustive: never = level
-      void _exhaustive
       return null
     }
   }

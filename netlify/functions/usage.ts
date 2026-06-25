@@ -387,7 +387,7 @@ export const handler: Handler = async (event) => {
     // should be alerted based on the comfort status and optional projection.
     // Consumes comfortStatus as the primary signal to avoid duplicating
     // billing-phase logic. Never throws.
-    let alertDecision: AlertDecision | undefined
+    let alertDecision: AlertDecision | undefined;
     try {
       alertDecision = evaluateAlertDecision({ usage, projection: burnRateProjection, comfortStatus });
     } catch {
