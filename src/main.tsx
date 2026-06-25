@@ -362,7 +362,7 @@ function App() {
               </div>
             )}
 
-            {usage.alertDecision?.shouldAlert === true && (
+            {usage.alertDecision?.shouldAlert && (
               <div className={`alertPreview alertPreview-active ${classForAlertSeverity(usage.alertDecision.severity)}`}>
                 <div className="alertPreviewHeader">
                   <span className={`badge alertSeverityBadge ${classForAlertSeverity(usage.alertDecision.severity)}`}>
@@ -385,7 +385,7 @@ function App() {
               </div>
             )}
 
-            {usage.alertDecision?.shouldAlert === false && (
+            {usage.alertDecision && !usage.alertDecision.shouldAlert && (
               <details className="alertPreview alertPreview-quiet">
                 <summary>No alert would be sent right now</summary>
                 <p className="subtle">{usage.alertDecision.reason}</p>
