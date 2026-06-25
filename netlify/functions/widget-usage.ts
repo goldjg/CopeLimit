@@ -57,6 +57,8 @@ import { getHistory } from './lib/usage-history-store';
 import { computeHistorySummary } from './lib/history-metrics';
 import type { UsageHistorySnapshot } from './lib/usage-history-types';
 import { creditsToUsd } from './lib/cost-metrics';
+import { computeComfortStatus } from './lib/comfort-status';
+import type { ComfortStatus } from './lib/comfort-status';
 
 /**
  * Extra telemetry derived from usage history, included in the widget-usage
@@ -192,6 +194,11 @@ export const handler: Handler = async (event) => {
 
     const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
+    // Comfort status is always included. Computed from usage only — the widget
+    // endpoint does not load history, so no burn-rate projection is supplied.
+    // computeComfortStatus falls back to warningLevel/percentUsed gracefully.
+    const comfortStatus: ComfortStatus = computeComfortStatus(usage);
+
     // When the caller requests extras (e.g. the large widget), attempt to
     // enrich the response with burn-rate and sparkline data from history.
     // History failures are non-fatal: the widget falls back gracefully.
@@ -212,7 +219,7 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    const responseBody = widgetExtras ? { ...usage, widgetExtras } : usage;
+    const responseBody = widgetExtras ? { ...usage, widgetExtras, comfortStatus } : { ...usage, comfortStatus };
 
     return {
       statusCode: 200,
