@@ -92,7 +92,7 @@ When validation fails, throw a descriptive error or reject the request with a 4x
 
 Avoid leaking secrets, tokens, credentials, request bodies, or sensitive file contents in logs.
 
-Use the project’s existing logging style.
+Use the project's existing logging style.
 
 ## Security
 
@@ -121,7 +121,7 @@ If running commands, pass arguments as lists and validate user-controlled values
 
 For simple proof-of-concept or research scripts, prefer standard library HTTP where practical.
 
-For production-quality API clients, use the project’s existing HTTP library if present.
+For production-quality API clients, use the project's existing HTTP library if present.
 
 For code that runs in both browser and Node.js, avoid runtime-specific globals such as `process`, `window`, and `document` without feature detection.
 

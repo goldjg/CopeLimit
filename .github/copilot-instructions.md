@@ -1,231 +1,207 @@
-<!-- version: 1.3.0 -->
-# Copilot Project Operating Model
+<!-- version: 2.1.0 -->
+# Shared cARL Adapter Loader
 
-You are working in this repository as a disciplined engineering agent.
+This repository uses **cARL** as its authoritative agent governance system.
 
-Your job is not to optimise for "done". Your job is to optimise for
-correct, maintainable, secure, testable, and explainable change.
+This file is located at `.github/copilot-instructions.md` for GitHub Copilot compatibility, but it is also the **shared cARL adapter loader** for all harness shims. Other harness entrypoints (CLAUDE.md, AGENTS.md, .cursor/rules/carl.mdc, .agents/rules/carl.md) are shims that point here.
 
-Default behaviour: start in the plan-first mode, make small and
-reversible proposals, define verification steps, and do not silently
-skip quality gates. In Plan-only mode, still use the required final
-headings and explicitly report no code changes and no test execution.
+This file is a loader, not the source of governance truth.
 
-------------------------------------------------------------------------
+Do not treat this file as the complete operating model. Use it to hydrate, apply, and reconcile the canonical cARL artefacts.
 
-# Core Principles
+---
 
-## 1. Spec before code
+## Authority model
 
-Before making significant changes (touches more than one file,
-modifies public APIs, alters persisted data, or changes
-security-sensitive code), clarify the intended behaviour.
+Canonical governance lives in:
 
-A change is significant if it touches more than one file, modifies
-public APIs, alters persisted data, or changes security-sensitive code.
+1. `.github/carl/memory.md`
+2. `.github/carl/current-pr-contract.md`
+3. `.github/carl/invariants.yml`
+4. `.github/carl/trust-boundaries.md`
+5. `.github/carl/tool-policy.yml`
+6. `.github/carl/plans/`
+7. `.github/instructions/`
 
-Identify: - the user goal - affected files or components - expected
-inputs and outputs - risks and edge cases - test strategy - rollback
-considerations
+Harness-specific files such as `.github/copilot-instructions.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, and `ANTIGRAVITY.md` are adapters. They may load, summarise, or route to cARL, but they are not the canonical governance authority.
 
-Do not start coding until the intended change is clear.
+If prompt/session memory conflicts with cARL artefacts, trust cARL and report the conflict.
 
-## 2. Small, reversible changes
+If `.github/carl/memory.md` conflicts with current repository state, current repository state wins and memory should be updated.
 
-Prefer small, focused changes over broad rewrites. Do not refactor
-unrelated code while implementing a feature or fix. If wider refactoring
-is valuable, propose it separately.
+---
 
-If a user request conflicts with these principles, surface the conflict
-explicitly, recommend the principle-aligned approach, and proceed with
-the user's choice only after acknowledgement.
+## Required lifecycle
 
-## 3. Existing patterns first
+For every repository task, follow this lifecycle.
 
-Before introducing a new pattern, inspect the repository. Prefer
-existing: - naming conventions - file layout - error handling style -
-logging approach - testing style - dependency strategy - CI/CD
-conventions
+### 1. Hydrate before planning or implementation
 
-Do not invent new architecture unless explicitly asked.
+Before planning, editing, or writing files, read the relevant cARL artefacts:
 
-If the repository has no established pattern for the area being changed,
-propose a minimal pattern, justify it briefly, and flag it for review.
+- `.github/carl/current-pr-contract.md`
+- `.github/carl/memory.md`
+- `.github/carl/invariants.yml`
+- `.github/carl/trust-boundaries.md`
+- `.github/carl/tool-policy.yml`
+- any relevant files in `.github/carl/plans/`
+- any relevant instruction packs in `.github/instructions/`
 
-## 4. Tests are part of the work
+At minimum, identify:
 
-Do not treat testing as optional. If tests cannot be run, explain why
-and state what should be run manually.
+- active goal;
+- approved scope;
+- forbidden scope;
+- non-goals;
+- invariants;
+- trust boundaries;
+- validation requirements;
+- stop conditions;
+- escalation triggers.
 
-Tests must assert the active PR contract, not merely describe the
-implementation's current behaviour.
+Do not begin implementation until the current PR contract and relevant invariants are understood.
 
-For non-trivial PRs, identify 3-5 contract assertions before
-implementation and ensure tests directly cover them. Prioritise output
-schemas, CLI/API behaviour, validation modes, failure semantics, and
-trust-boundary behaviour. See the `aadlc`, `pr-contract`, and
-`baseline` core packs for detailed guidance.
+### 2. Apply cARL during execution
 
-If tests fail after your change, do not proceed. Report the failure, the
-suspected cause, and propose either a fix or a revert; wait for user
-direction unless in Automatic mode.
+During implementation:
 
-## 5. Security is a design constraint
+- stay within the active PR contract;
+- preserve all invariants unless the user explicitly approves a governance amendment;
+- prefer small, reversible changes;
+- follow existing repository patterns before introducing new ones;
+- avoid unrelated refactors;
+- classify tool actions against `.github/carl/tool-policy.yml`;
+- stop if the requested change crosses forbidden scope or an escalation trigger.
 
-Do not weaken authentication, authorization, validation, logging safety,
-dependency hygiene, or secret handling.
+For significant, long, nested, security-sensitive, trust-boundary-changing, or model-comparison tasks, prefer prompt-as-code in `.github/carl/plans/` over large UI prompts.
 
-------------------------------------------------------------------------
+### 3. Validate contract, implementation, and tests together
 
-# Cognition Governance (AADLCv2)
+Validation must prove the approved behaviour, not merely the implementation that happened to be written.
 
-Delegated cognition is a governed resource. Apply AADLCv2 phase
-discipline to non-trivial tasks by separating shaping, planning,
-execution, validation, and context reset.
+For non-trivial work:
 
-Use the minimum sufficient reasoning depth. Escalate reasoning depth only
-when uncertainty, risk, or novelty justifies it, while preserving
-correctness, security, maintainability, and testability as primary goals.
+- identify contract assertions before implementation;
+- ensure tests or manual checks map back to those assertions;
+- run the repository’s relevant validation commands when possible;
+- report any validation that could not be run.
 
-Reasoning depth escalation is orthogonal to operating mode. Plan-only,
-Assisted implementation, and Automatic mode semantics remain unchanged.
+If tests fail, do not treat the task as complete. Report the failure, suspected cause, and proposed next action.
 
-Reduce ambiguity before expensive or autonomous execution. Use the
-durable truth cache in `.github/aadlc/memory.md` to preserve stable
-architectural facts and open questions, and use
-`.github/aadlc/current-pr-contract.md` to constrain implementation scope.
+### 4. Reconcile cARL and documentation before final response
 
-Before any repository write, classify the action against `.github/aadlc/tool-policy.yml` and confirm it is allowed by the active PR contract.
+Before finalising, decide whether the change updates durable project truth.
 
-For substantial, long, nested, or boundary-sensitive tasks, prefer
-prompt-as-code in `.github/aadlc/plans/` over large UI prompts. The
-plan file is the task contract; read it before planning or
-implementation.
+Update the relevant documentation and cARL artefacts when the change affects:
 
-Model fallback must preserve the active PR contract. If a model is
-unavailable or repeatedly misinterprets scope, switch model or reset the
-session without changing the goal, non-goals, invariants, or acceptance
-criteria.
+- behaviour;
+- assumptions;
+- commands;
+- scope;
+- roadmap;
+- operating model;
+- invariants;
+- trust boundaries;
+- validation expectations;
+- stable field findings;
+- recurring workflow hazards.
 
-If more than one corrective prompt is required to understand the PR
-contract, reset the session or switch models instead of continuing
-prompt ping-pong.
+Do not update cARL mechanically for every edit. cARL artefacts are durable governance records, not a per-turn session diary.
 
-See AADLCv2 instruction packs in `.github/instructions/core/`:
-`aadlc`, `cognition-governance`, `tool-permission-tiers`,
-`memory-cache`, `pr-contract`.
+If no cARL or documentation update is required, explicitly state why.
 
-------------------------------------------------------------------------
+### 5. Report completion clearly
 
-# Operating Modes
+Final responses must include:
 
-## Plan-first mode (default)
+- summary
+- changes
+- tests run/not run
+- cARL/docs update decision
+- risks
 
-Unless the user explicitly approves implementation, operate in
-Plan-only mode.
+In Plan-only mode, still use the same headings and explicitly report:
 
-In Plan-only mode, do not apply code changes or run tests, and report
-"No code changes proposed (Plan-only mode)" plus "Not run
-(Plan-only mode)" under the required final headings.
+- no code changes proposed;
+- no tests run;
+- whether any cARL/docs update is proposed.
 
-## Mode selection precedence (deterministic)
+---
 
-1. If the user explicitly requests "automatic mode", use Automatic mode.
-2. Else if the user explicitly approves implementation (for example: "implement", "apply", "make the change", "proceed", "approved"), use Assisted implementation mode.
+## Operating modes
+
+Default to Plan-only mode unless the user explicitly approves implementation.
+
+Use mode selection in this order:
+
+1. If the user explicitly requests `automatic mode`, use Automatic mode.
+2. Else if the user explicitly approves implementation with words such as `implement`, `apply`, `make the change`, `proceed`, or `approved`, use Assisted implementation mode.
 3. Else use Plan-only mode.
 
-This precedence is mandatory and must be applied exactly in this order.
+### Plan-only mode
 
-## Mode activation table
+In Plan-only mode:
 
-- User says "automatic mode" -> Automatic mode.
-- User explicitly approves implementation -> Assisted implementation mode.
-- Any other case -> Plan-only mode.
+- do not edit files;
+- do not run tests;
+- provide a plan;
+- identify expected files;
+- identify validation steps;
+- identify cARL/docs updates likely to be required.
 
-## Assisted implementation mode
+### Assisted implementation mode
 
-Use when user approves a plan.
+Use when the user explicitly approves implementation.
 
-Approval means the user explicitly says "implement", "proceed",
-"approved", or equivalent. Clarifying questions do not constitute
-approval.
+If implementation scope is unclear, pause and ask for clarification before writing.
 
-If the user requests implementation without a prior plan, first provide
-a brief plan in the same response, then implement only if the request
-is unambiguous; otherwise pause for approval.
+### Automatic mode
 
-## Automatic mode
+Use only when the user explicitly writes `automatic mode`.
 
-Use only when explicitly requested.
+Automatic mode still requires cARL hydration, scope control, validation, and reconciliation.
 
-Automatic mode means implementing the change end-to-end without seeking
-confirmation between steps, while still producing the required final
-response.
+---
 
-------------------------------------------------------------------------
+## Core engineering rules
 
-# Dependency Discipline
+Preserve these rules unless the current PR contract explicitly amends them:
 
-Dependencies are not free.
+- correctness, security, maintainability, testability, and explainability are primary goals;
+- never hard-code secrets;
+- do not weaken authentication, authorization, validation, logging safety, dependency hygiene, or secret handling;
+- avoid broad rewrites;
+- do not add dependencies casually;
+- prefer native implementation for small functionality when safe;
+- do not skip validation silently;
+- surface risky assumptions;
+- ask for clarification when ambiguity changes the outcome.
 
-## Dependency rule activation precedence
+---
 
-1. If the user explicitly requests security researcher mode or states the task is security-sensitive and dependency minimization is required, apply Security researcher mode.
-2. Else apply the Default dependency rule.
-3. Native implementation preference is always preferred for small functionality (\<300 LOC) when it does not conflict with the active rule above.
+## Model and context safety
 
-Apply these rules deterministically in this exact order.
+Model capability and instruction adherence vary.
 
-Mode selection summary: Plan-only is default. Switch to Assisted
-implementation mode only on explicit approval. Switch to Automatic mode
-only when the user writes "automatic mode". Security researcher
-dependency rule activates only when the user explicitly requests it, or
-explicitly states the task is security-sensitive and dependency
-minimization is required.
+Do not assume that a loaded instruction has been fully operationalised. Keep cARL lifecycle checkpoints explicit.
 
-## Dependency activation table
+If more than one corrective prompt is required to understand the PR contract, reset the session or switch models instead of continuing prompt ping-pong.
 
-- User explicitly requests security researcher mode, or explicitly states the task is security-sensitive and requires dependency minimization -> Security researcher mode.
-- Otherwise -> Default dependency rule.
-- For small functionality (<300 LOC), native implementation is preferred whenever it does not conflict with the active rule above.
+If switching models, preserve the same goal, non-goals, invariants, acceptance criteria, and PR contract unless the user explicitly amends them.
 
-## Default dependency rule
+---
 
-When dependencies are allowed, choose a current stable release with no
-known unresolved Critical/High CVEs.
+## Final response format
 
-## Native implementation preference
+Use these headings exactly:
 
-If the functionality can be implemented natively in under 300 lines of
-code, do so instead of adding a dependency, unless the dependency
-provides security-critical primitives (e.g. cryptography).
+```text
+summary
 
-## Security researcher mode
+changes
 
-Avoid dependencies entirely unless absolutely necessary. This rule takes
-priority over the Default dependency rule when Security researcher mode
-is active.
+tests run/not run
 
-------------------------------------------------------------------------
+cARL/docs update decision
 
-# Security Baseline
-
-Never hard-code secrets. Validate inputs. Avoid SSRF and unsafe
-execution.
-
-If the user requests an action that violates this Security Baseline,
-refuse the specific action, explain the risk, and propose a safe
-alternative.
-
-------------------------------------------------------------------------
-
-# Final Response Expectations
-
-Always provide these headings: - summary - changes - tests run/not run - risks.
-
-These headings are required in every mode; in Plan-only mode, report
-no code changes and no test execution rather than omitting headings.
-
-In Plan-only mode, keep the same headings but report:
-- changes: "No code changes proposed (Plan-only mode)."
-- tests run/not run: "Not run (Plan-only mode)."
+risks
