@@ -101,8 +101,14 @@ export type ChartProjectionInput = {
 }
 
 /**
- * A drop in `used` larger than this fraction of the previous value is treated
- * as a genuine quota reset (new billing period) rather than settlement noise.
+ * Reset-detection threshold. When `used` falls below this fraction of the
+ * previous value, the drop is treated as a genuine quota reset (new billing
+ * period) rather than settlement-lag noise. A 50% drop is implausible for
+ * normal incremental consumption but typical of a period rollover where `used`
+ * returns toward zero, so it cleanly separates resets from small noisy dips.
+ *
+ * The widget renderer (`createBurnTrailImage` in CopeLimitWidget.js) mirrors
+ * this 0.5 ratio for its own client-side reset segmentation.
  */
 const RESET_DROP_RATIO = 0.5
 

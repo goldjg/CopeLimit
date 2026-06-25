@@ -167,6 +167,11 @@ function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
   rv.lineLimit = 1;
 }
 
+// Reset-detection threshold for the burn trail. A drop below this fraction of
+// the previous `used` value is treated as a quota reset (new billing period)
+// rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
+const RESET_DROP_RATIO = 0.5;
+
 /**
  * Draws a fuel-gauge "burn trail" using DrawContext.
  *
@@ -207,11 +212,11 @@ function createBurnTrailImage(points, quota, width, height, colorHex) {
     return padY + (1 - frac) * usable;
   };
 
-  // Split into segments at quota resets (a drop to less than half the prior value).
+  // Split into segments at quota resets (a drop below RESET_DROP_RATIO of the prior value).
   const segments = [];
   let current = [];
   for (let i = 0; i < n; i++) {
-    if (i > 0 && safe[i] < safe[i - 1] * 0.5) {
+    if (i > 0 && safe[i] < safe[i - 1] * RESET_DROP_RATIO) {
       if (current.length) segments.push(current);
       current = [];
     }

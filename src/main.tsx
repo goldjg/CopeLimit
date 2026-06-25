@@ -278,7 +278,11 @@ function App() {
         historySnapshots,
         usage?.burnRateProjection ?? null,
       ),
-    [historySnapshots, usage?.burnRateProjection],
+    [
+      historySnapshots,
+      usage?.burnRateProjection?.projectedExhaustionAt,
+      usage?.burnRateProjection?.projectionStatus,
+    ],
   );
 
   return (
