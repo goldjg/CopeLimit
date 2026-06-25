@@ -454,6 +454,9 @@ export type NormalizedCopilotPayload = {
  * @param source - Provider identifier string (e.g. `'github-copilot-internal'`).
  * @param notes  - Optional provider-specific notes appended to the `Usage.notes` array.
  * @returns `{ usage }` where `usage` is the normalised record or `null` when quota fields are absent.
+ *   The wrapper intentionally exposes only `{ usage }` — no resolution metadata such as which quota
+ *   path matched. No caller currently requires that detail; if diagnostic tracing is needed in future,
+ *   extend `NormalizedCopilotPayload` with an optional `resolution` field at that point.
  */
 export function normalizeCopilotInternalPayload(
   body: JsonObject,
