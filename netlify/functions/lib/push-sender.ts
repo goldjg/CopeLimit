@@ -68,9 +68,9 @@ export async function sendPushNotification(
   }
 
   const vapidDetails = {
-    subject: config.vapidSubject as string,
-    publicKey: config.vapidPublicKey as string,
-    privateKey: config.vapidPrivateKey as string,
+    subject: config.vapidSubject,
+    publicKey: config.vapidPublicKey,
+    privateKey: config.vapidPrivateKey,
   }
 
   try {

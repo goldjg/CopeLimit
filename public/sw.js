@@ -80,7 +80,15 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/'));
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      const existing = windowClients.find((c) => c.url.startsWith(self.location.origin));
+      if (existing) {
+        return existing.focus();
+      }
+      return clients.openWindow('/');
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {
