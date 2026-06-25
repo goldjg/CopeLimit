@@ -59,6 +59,8 @@ import type { UsageHistorySnapshot } from './lib/usage-history-types';
 import { creditsToUsd } from './lib/cost-metrics';
 import { computeComfortStatus } from './lib/comfort-status';
 import type { ComfortStatus } from './lib/comfort-status';
+import { evaluateAlertDecision } from './lib/alert-decision';
+import type { AlertDecision } from './lib/alert-decision';
 
 /**
  * Extra telemetry derived from usage history, included in the widget-usage
@@ -199,6 +201,16 @@ export const handler: Handler = async (event) => {
     // computeComfortStatus falls back to warningLevel/percentUsed gracefully.
     const comfortStatus: ComfortStatus = computeComfortStatus(usage);
 
+    // Alert decision: additive, optional field. Evaluates whether the user
+    // should be alerted based on the comfort status. The widget endpoint does
+    // not supply a burn-rate projection. Never throws.
+    let alertDecision: AlertDecision | undefined;
+    try {
+      alertDecision = evaluateAlertDecision({ usage, comfortStatus });
+    } catch {
+      // Non-blocking: alert-decision failures must not affect the widget response.
+    }
+
     // When the caller requests extras (e.g. the large widget), attempt to
     // enrich the response with burn-rate and sparkline data from history.
     // History failures are non-fatal: the widget falls back gracefully.
@@ -219,7 +231,12 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    const responseBody = widgetExtras ? { ...usage, widgetExtras, comfortStatus } : { ...usage, comfortStatus };
+    const responseBody = {
+      ...usage,
+      comfortStatus,
+      ...(alertDecision !== undefined ? { alertDecision } : {}),
+      ...(widgetExtras !== undefined ? { widgetExtras } : {}),
+    };
 
     return {
       statusCode: 200,

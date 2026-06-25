@@ -17,6 +17,8 @@ import { labelForBillingPhase } from './billing-display';
 import type { BillingPhase } from './billing-display';
 import { labelForComfortLevel, classForComfortLevel } from './comfort-display';
 import type { ComfortStatus } from './comfort-display';
+import { labelForAlertSeverity, classForAlertSeverity, labelForAlertType } from './alert-display';
+import type { AlertDecision } from './alert-display';
 import {
   buildTrendBarHeights,
   creditsCostRateToUsd,
@@ -57,6 +59,7 @@ type Usage = {
   estimatedRemainingBudgetCostUsd: number;
   projectedCostAtResetUsd?: number;
   comfortStatus?: ComfortStatus;
+  alertDecision?: AlertDecision;
 };
 
 type HistorySummary = {
@@ -357,6 +360,36 @@ function App() {
                   <p className="subtle comfortAction">{usage.comfortStatus.recommendedAction}</p>
                 )}
               </div>
+            )}
+
+            {usage.alertDecision?.shouldAlert && (
+              <div className={`alertPreview alertPreview-active ${classForAlertSeverity(usage.alertDecision.severity)}`}>
+                <div className="alertPreviewHeader">
+                  <span className={`badge alertSeverityBadge ${classForAlertSeverity(usage.alertDecision.severity)}`}>
+                    {labelForAlertSeverity(usage.alertDecision.severity)}
+                  </span>
+                  {usage.alertDecision.alertType && (
+                    <span className="alertPreviewType">{labelForAlertType(usage.alertDecision.alertType)}</span>
+                  )}
+                </div>
+                {usage.alertDecision.title && (
+                  <p className="alertPreviewTitle">{usage.alertDecision.title}</p>
+                )}
+                {usage.alertDecision.message && (
+                  <p className="subtle alertPreviewMessage">{usage.alertDecision.message}</p>
+                )}
+                <details className="alertPreviewReasonDetails">
+                  <summary>Why this alert?</summary>
+                  <p className="subtle">{usage.alertDecision.reason}</p>
+                </details>
+              </div>
+            )}
+
+            {usage.alertDecision && !usage.alertDecision.shouldAlert && (
+              <details className="alertPreview alertPreview-quiet">
+                <summary>No alert would be sent right now</summary>
+                <p className="subtle">{usage.alertDecision.reason}</p>
+              </details>
             )}
 
             <div className="stats">
