@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTrendBarHeights,
   creditsCostRateToUsd,
+  creditsToUsd,
   computeEtaHours,
   formatBurnRate,
   formatEta,
@@ -81,5 +82,12 @@ describe('usage-metrics helpers', () => {
     expect(formatUsd(Number.NaN)).toBe('$0.00');
     expect(formatUsd(undefined)).toBe('$0.00');
     expect(creditsCostRateToUsd(123.4)).toBeCloseTo(1.234, 6);
+  });
+
+  it('creditsToUsd converts derived overage credits to dollar cost', () => {
+    // Verifies the re-export used by the "Derived overage (est.)" card subtitle.
+    expect(creditsToUsd(473)).toBeCloseTo(4.73, 6);
+    expect(creditsToUsd(0)).toBe(0);
+    expect(formatUsd(creditsToUsd(473))).toBe('$4.73');
   });
 });
