@@ -379,11 +379,13 @@ export const handler: Handler = async (event) => {
     // Comfort status: always included. Derived from the current usage and the
     // optional burn-rate projection. Never throws — falls back gracefully to
     // warningLevel/percentUsed when the projection is absent or unavailable.
-    const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection)
+    const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection);
 
-    const responseBody = burnRateProjection !== undefined
-      ? { ...usage, burnRateProjection, comfortStatus }
-      : { ...usage, comfortStatus }
+    const responseBody = {
+      ...usage,
+      ...(burnRateProjection !== undefined ? { burnRateProjection } : {}),
+      comfortStatus,
+    };
 
     return {
       statusCode: 200,

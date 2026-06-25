@@ -92,6 +92,7 @@ export type ComfortStatus = {
 // ---------------------------------------------------------------------------
 
 const HOURS_24 = 24
+const MS_PER_HOUR = 3_600_000
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -228,7 +229,7 @@ export function computeComfortStatus(
 
     if (projectionStatus === 'exhaustion_before_reset') {
       const hoursUntilExhaustion = projectedExhaustionAt !== undefined
-        ? (new Date(projectedExhaustionAt).getTime() - now.getTime()) / 3_600_000
+        ? (new Date(projectedExhaustionAt).getTime() - now.getTime()) / MS_PER_HOUR
         : Infinity
       const level = hoursUntilExhaustion <= HOURS_24 ? 'hot' : 'warm'
       return {
