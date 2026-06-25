@@ -12,6 +12,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WidgetTokenSection } from './WidgetTokenSection';
+import PushNotificationSection from './PushNotificationSection';
 import { isLikelyIosNavigator } from './widget-onboarding';
 import { labelForBillingPhase } from './billing-display';
 import type { BillingPhase } from './billing-display';
@@ -552,6 +553,7 @@ function App() {
       )}
 
       {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} isStandalone={isInstalled} />}
+      {user?.authenticated && <PushNotificationSection />}
     </main>
   );
 }
