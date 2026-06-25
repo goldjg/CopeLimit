@@ -60,6 +60,11 @@
   to = "/.netlify/functions/onboarding-status"
   status = 200
 
+[[redirects]]
+  from = "/api/push/subscribe"
+  to = "/.netlify/functions/push-subscribe"
+  status = 200
+
 [[headers]]
   for = "/sw.js"
   [headers.values]

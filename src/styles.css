@@ -813,3 +813,44 @@ a:focus-visible {
     transition: none !important;
   }
 }
+
+/* Push notification settings card */
+
+.pushNotificationCard {
+  margin-top: 20px;
+}
+
+.pushNotificationHeading {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f9fafb;
+  margin: 0 0 8px;
+}
+
+.pushNotificationNote {
+  color: #a1a1aa;
+  font-size: 0.9rem;
+  margin: 0 0 14px;
+}
+
+.pushNotificationError {
+  color: #ef4444;
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+
+.pushNotificationActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pushNotificationBtn {
+  font-size: 0.875rem;
+  padding: 10px 18px;
+}
+
+.pushNotificationBtnSecondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f9fafb;
+}
