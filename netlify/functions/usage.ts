@@ -334,8 +334,9 @@ export const handler: Handler = async (event) => {
 
     // History persistence is fire-and-forget: failures are logged inside appendSnapshot
     // and must never block the usage response.
+    let currentSnapshot: UsageHistorySnapshot | undefined
     if (result.userId !== undefined) {
-      const snapshot: UsageHistorySnapshot = {
+      currentSnapshot = {
         capturedAt: usage.updatedAt,
         used: usage.used,
         quota: usage.quota,
@@ -344,18 +345,30 @@ export const handler: Handler = async (event) => {
         overageCount: usage.overageCount,
         derivedOverageCredits: usage.derivedOverageCredits,
       };
-      void appendSnapshot(result.userId, snapshot, historyConfig);
+      void appendSnapshot(result.userId, currentSnapshot, historyConfig);
     }
 
     // Burn-rate projection: computed from history when available.
     // Only attempted when history is enabled and a userId is known (i.e. the
     // authenticated github-copilot-internal provider).  A missing or empty
     // history returns projectionStatus: 'unavailable' — never an error.
+    //
+    // Because appendSnapshot is fire-and-forget, the current snapshot may not
+    // yet be persisted when getHistory runs. To ensure the projection always
+    // includes the latest data point, the current snapshot is prepended to the
+    // fetched history. Deduplication by capturedAt prevents double-counting if
+    // the snapshot was already written (e.g. by a concurrent request or a rapid
+    // refresh where updatedAt did not change).
     let burnRateProjection: BurnRateProjection | undefined = undefined
-    if (historyConfig.enabled && result.userId !== undefined) {
+    if (historyConfig.enabled && result.userId !== undefined && currentSnapshot !== undefined) {
       try {
         const recentSnapshots = await getHistory(result.userId, { limit: 50 })
-        burnRateProjection = projectBurnRate(usage, recentSnapshots)
+        const snapshotCapturedAt = currentSnapshot.capturedAt
+        const allSnapshots = [
+          currentSnapshot,
+          ...recentSnapshots.filter(s => s.capturedAt !== snapshotCapturedAt),
+        ]
+        burnRateProjection = projectBurnRate(usage, allSnapshots)
       } catch {
         // Non-blocking: projection failures must not affect the usage response.
       }

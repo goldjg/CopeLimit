@@ -4,7 +4,7 @@
  * Scenarios covered:
  * 1. No history (empty snapshots)
  * 2. One snapshot only
- * 3. Steady burn rate → stable status with projectedExhaustionAt
+ * 3. Steady burn rate → exhaustion_before_reset status with projectedExhaustionAt
  * 4. Negative / noisy delta only → unavailable
  * 5. Already exhausted (billingPhase: credits_exhausted)
  * 6. Already exhausted (billingPhase: hard_stop)
@@ -109,10 +109,10 @@ describe('projectBurnRate — one snapshot', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Scenario 3: Steady burn rate → stable
+// Scenario 3: Steady burn rate → exhaustion_before_reset
 // ---------------------------------------------------------------------------
 
-describe('projectBurnRate — steady burn rate (stable)', () => {
+describe('projectBurnRate — steady burn rate (exhaustion_before_reset)', () => {
   it('projects exhaustion date when burn rate is positive and exhaustion is before reset', () => {
     // 1000 credits consumed over 24 hours → 1000 cr/day, ~41.67 cr/hour
     // usage.remaining = 4000. hours to exhaust = 4000 / 41.67 ≈ 96h
@@ -124,7 +124,7 @@ describe('projectBurnRate — steady burn rate (stable)', () => {
     const usage = makeUsage({ used: 3000, remaining: 4000 })
     const result = projectBurnRate(usage, snapshots, NOW)
 
-    expect(result.projectionStatus).toBe('stable')
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
     expect(result.creditsUsedInWindow).toBe(1000)
     expect(result.windowHours).toBeCloseTo(24, 1)
     expect(result.averageCreditsPerDay).toBeCloseTo(1000, 1)
@@ -307,8 +307,8 @@ describe('projectBurnRate — budget_active with projected overage', () => {
     // 36h from NOW = 2026-06-27T00:00Z, before reset 2026-07-01 → exhaustion before reset?
     // Wait: projectedExhaustionMs = NOW(2026-06-25T12:00Z) + 36h = 2026-06-27T00:00Z
     // resetAtMs = 2026-07-01T00:00Z
-    // projectedExhaustionMs (2026-06-27) < resetAtMs (2026-07-01) → stable (exhaustion before reset)
-    expect(result.projectionStatus).toBe('stable')
+    // projectedExhaustionMs (2026-06-27) < resetAtMs (2026-07-01) → exhaustion_before_reset
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
     expect(result.projectedExhaustionAt).toBeDefined()
   })
 
@@ -348,7 +348,7 @@ describe('projectBurnRate — budget_active with projected overage', () => {
 //             exhaustion and reset when exhaustion is before reset
 // ---------------------------------------------------------------------------
 
-describe('projectBurnRate — credits_available + overagePermitted + stable', () => {
+describe('projectBurnRate — credits_available + overagePermitted + exhaustion_before_reset', () => {
   it('projects overage credits that will accumulate between exhaustion and reset', () => {
     // Burn rate: 500 cr/day → creditsPerHour ≈ 20.83.
     // remaining = 500. hoursUntilExhaustion = 500/20.83 ≈ 24h.
@@ -368,7 +368,7 @@ describe('projectBurnRate — credits_available + overagePermitted + stable', ()
     })
     const result = projectBurnRate(usage, snapshots, NOW)
 
-    expect(result.projectionStatus).toBe('stable')
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
     expect(result.projectedExhaustionAt).toBeDefined()
     expect(result.projectedOverageCreditsAtReset).toBeDefined()
     expect(result.projectedOverageCreditsAtReset!).toBeGreaterThan(0)
@@ -451,7 +451,7 @@ describe('projectBurnRate — budget_available phase', () => {
     // Included credits exhausted, budget available but no overage consumed yet.
     // overageEntitlement = 1000, overageCount = 0.
     // Burn rate = 200 cr/day → hours to exhaust 1000 = 5 days.
-    // Reset is in 6 days → exhaustion before reset → stable.
+    // Reset is in 6 days → exhaustion before reset → exhaustion_before_reset.
     const snapshots: UsageHistorySnapshot[] = [
       makeSnapshot('2026-06-25T10:00:00.000Z', 7200, 7000),
       makeSnapshot('2026-06-24T10:00:00.000Z', 7000, 7000), // +200/day
@@ -468,8 +468,8 @@ describe('projectBurnRate — budget_available phase', () => {
     // effectiveRemaining = 1000 - 0 = 1000
     // creditsPerHour = 200/24 ≈ 8.33; hoursUntilExhaustion = 1000/8.33 ≈ 120h (5 days)
     // projectedExhaustion = NOW(12:00 Jun 25) + 120h = Jun 30 12:00 UTC
-    // Reset = Jul 1 → exhaustion before reset → stable
-    expect(result.projectionStatus).toBe('stable')
+    // Reset = Jul 1 → exhaustion before reset → exhaustion_before_reset
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
     expect(result.projectedExhaustionAt).toBeDefined()
   })
 
@@ -532,11 +532,87 @@ describe('projectBurnRate — zero-length window', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Additional: field completeness for stable projection
+// Scenario 14: reset-boundary — resetAt in the past or equal to now
 // ---------------------------------------------------------------------------
 
-describe('projectBurnRate — stable projection field completeness', () => {
-  it('returns all required fields for a stable projection', () => {
+describe('projectBurnRate — resetAt at or before now (reset-boundary)', () => {
+  it('returns reset_before_exhaustion when resetAt is 1 hour in the past', () => {
+    // resetAt is already past → hoursUntilReset clamped to 0.
+    // Any positive burn rate means projectedExhaustionMs > nowMs > resetAtMs
+    // → projectedExhaustionMs > resetAtMs → reset_before_exhaustion.
+    // No projectedExhaustionAt should be set (reset already happened).
+    const pastReset = '2026-06-25T11:00:00.000Z' // 1 hour before NOW
+    const snapshots: UsageHistorySnapshot[] = [
+      makeSnapshot('2026-06-25T10:00:00.000Z', 3000),
+      makeSnapshot('2026-06-24T10:00:00.000Z', 2000), // +1000 cr/day
+    ]
+    const usage = makeUsage({ used: 3000, remaining: 4000, resetAt: pastReset })
+    const result = projectBurnRate(usage, snapshots, NOW)
+
+    expect(result.projectionStatus).toBe('reset_before_exhaustion')
+    expect(result.projectedExhaustionAt).toBeUndefined()
+    // projectedOverageCreditsAtReset must not be set for credits_available without overage
+    expect(result.projectedOverageCreditsAtReset).toBeUndefined()
+  })
+
+  it('returns reset_before_exhaustion when resetAt equals now exactly', () => {
+    const resetAtNow = NOW.toISOString() // resetAt === now → hoursUntilReset = 0
+    const snapshots: UsageHistorySnapshot[] = [
+      makeSnapshot('2026-06-25T10:00:00.000Z', 3000),
+      makeSnapshot('2026-06-24T10:00:00.000Z', 2000),
+    ]
+    const usage = makeUsage({ used: 3000, remaining: 4000, resetAt: resetAtNow })
+    const result = projectBurnRate(usage, snapshots, NOW)
+
+    expect(result.projectionStatus).toBe('reset_before_exhaustion')
+    expect(result.projectedExhaustionAt).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Scenario 15: overagePermitted absent → no projectedOverageCreditsAtReset
+// ---------------------------------------------------------------------------
+
+describe('projectBurnRate — overagePermitted absent does not produce overage projection', () => {
+  it('does not set projectedOverageCreditsAtReset when overagePermitted is undefined', () => {
+    // exhaustion_before_reset path: burn rate is high enough to exhaust before reset.
+    // Without overagePermitted, projectedOverageCreditsAtReset must remain unset
+    // so callers do not show misleading future-overage figures.
+    const snapshots: UsageHistorySnapshot[] = [
+      makeSnapshot('2026-06-25T10:00:00.000Z', 6500),
+      makeSnapshot('2026-06-24T10:00:00.000Z', 6000), // +500 cr/day → exhaustion in ~24h
+    ]
+    const usage = makeUsage({
+      used: 6500,
+      remaining: 500,
+      overagePermitted: undefined, // absent
+    })
+    const result = projectBurnRate(usage, snapshots, NOW)
+
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
+    expect(result.projectedExhaustionAt).toBeDefined()
+    // Key contract: no overage projection when overagePermitted is absent
+    expect(result.projectedOverageCreditsAtReset).toBeUndefined()
+  })
+
+  it('does not set projectedOverageCreditsAtReset for reset_before_exhaustion in credits_available without overage', () => {
+    // credits_available + low burn rate → reset_before_exhaustion.
+    // overagePermitted absent: must not fabricate an overage figure.
+    const snapshots: UsageHistorySnapshot[] = [
+      makeSnapshot('2026-06-25T10:00:00.000Z', 3000),
+      makeSnapshot('2026-06-24T10:00:00.000Z', 2900), // only +100/day
+    ]
+    const usage = makeUsage({ used: 3000, remaining: 4000 }) // overagePermitted not set
+    const result = projectBurnRate(usage, snapshots, NOW)
+
+    expect(result.projectionStatus).toBe('reset_before_exhaustion')
+    expect(result.projectedOverageCreditsAtReset).toBeUndefined()
+  })
+})
+
+
+describe('projectBurnRate — exhaustion_before_reset projection field completeness', () => {
+  it('returns all required fields for an exhaustion_before_reset projection', () => {
     const snapshots: UsageHistorySnapshot[] = [
       makeSnapshot('2026-06-25T10:00:00.000Z', 3000),
       makeSnapshot('2026-06-24T10:00:00.000Z', 2000),
@@ -548,9 +624,9 @@ describe('projectBurnRate — stable projection field completeness', () => {
     expect(typeof result.windowHours).toBe('number')
     expect(typeof result.creditsUsedInWindow).toBe('number')
     expect(typeof result.averageCreditsPerDay).toBe('number')
-    expect(result.projectionStatus).toBe('stable')
+    expect(result.projectionStatus).toBe('exhaustion_before_reset')
 
-    // windowHours must be positive for stable
+    // windowHours must be positive for exhaustion_before_reset
     expect(result.windowHours).toBeGreaterThan(0)
     expect(result.creditsUsedInWindow).toBeGreaterThan(0)
     expect(result.averageCreditsPerDay).toBeGreaterThan(0)

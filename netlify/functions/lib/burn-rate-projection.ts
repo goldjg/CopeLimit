@@ -10,7 +10,7 @@
  * - Insufficient or zero-delta history → `projectionStatus: 'unavailable'`
  * - Already exhausted (no budget)      → `projectionStatus: 'exhausted'`
  * - Reset before projected exhaustion  → `projectionStatus: 'reset_before_exhaustion'`
- * - Exhaustion before reset            → `projectionStatus: 'stable'`
+ * - Exhaustion before reset            → `projectionStatus: 'exhaustion_before_reset'`
  *
  * @see {@link projectBurnRate} for the main entry point
  */
@@ -22,7 +22,10 @@ import type { UsageHistorySnapshot } from './usage-history-types'
  * Status of the burn-rate projection.
  *
  * - `'unavailable'`             – Not enough history, or burn rate is zero/negative.
- * - `'stable'`                  – Credits will be exhausted before the next billing reset.
+ * - `'exhaustion_before_reset'` – Credits will be exhausted before the next billing reset
+ *                                 at the current burn rate. This indicates the projection
+ *                                 is confident (stable maths), **not** that usage is safe —
+ *                                 the user is on track to run out of credits this period.
  * - `'exhausted'`               – Credits are already exhausted (`billingPhase` is
  *                                 `credits_exhausted` or `hard_stop`).
  * - `'reset_before_exhaustion'` – The billing reset will occur before credits run out
@@ -30,7 +33,7 @@ import type { UsageHistorySnapshot } from './usage-history-types'
  */
 export type ProjectionStatus =
   | 'unavailable'
-  | 'stable'
+  | 'exhaustion_before_reset'
   | 'exhausted'
   | 'reset_before_exhaustion'
 
@@ -49,15 +52,15 @@ export type BurnRateProjection = {
   averageCreditsPerDay: number;
   /**
    * ISO 8601 timestamp when credits are projected to reach zero.
-   * Present when `projectionStatus === 'stable'` (exhaustion before reset).
+   * Present when `projectionStatus === 'exhaustion_before_reset'`.
    */
   projectedExhaustionAt?: string;
   /**
    * Projected overage credits consumed by the next billing reset.
    *
    * Set when:
-   * - `projectionStatus === 'stable'` and `overagePermitted === true`: the
-   *   overage that will accumulate between projected exhaustion and reset.
+   * - `projectionStatus === 'exhaustion_before_reset'` and `overagePermitted === true`:
+   *   the overage that will accumulate between projected exhaustion and reset.
    * - `projectionStatus === 'reset_before_exhaustion'` and currently in
    *   `budget_active` phase: overage that will accumulate between now and reset.
    */
@@ -288,6 +291,6 @@ export function projectBurnRate(
     averageCreditsPerDay,
     projectedExhaustionAt,
     projectedOverageCreditsAtReset,
-    projectionStatus: 'stable',
+    projectionStatus: 'exhaustion_before_reset',
   }
 }
