@@ -15,6 +15,8 @@ import { WidgetTokenSection } from './WidgetTokenSection';
 import { isLikelyIosNavigator } from './widget-onboarding';
 import { labelForBillingPhase } from './billing-display';
 import type { BillingPhase } from './billing-display';
+import { labelForComfortLevel, classForComfortLevel } from './comfort-display';
+import type { ComfortStatus } from './comfort-display';
 import {
   buildTrendBarHeights,
   creditsCostRateToUsd,
@@ -54,6 +56,7 @@ type Usage = {
   budgetRemainingCostUsd: number;
   estimatedRemainingBudgetCostUsd: number;
   projectedCostAtResetUsd?: number;
+  comfortStatus?: ComfortStatus;
 };
 
 type HistorySummary = {
@@ -340,6 +343,21 @@ function App() {
             <div className="bar" aria-label={`${usage.percentUsed}% used`}>
               <div style={{ width: `${Math.min(100, usage.percentUsed)}%` }} />
             </div>
+
+            {usage.comfortStatus && (
+              <div className="comfortStatus">
+                <span className={`badge comfortBadge ${classForComfortLevel(usage.comfortStatus.level)}`}>
+                  {labelForComfortLevel(usage.comfortStatus.level)}
+                </span>
+                <span className="comfortSummary">{usage.comfortStatus.summary}</span>
+                {usage.comfortStatus.detail && (
+                  <p className="subtle comfortDetail">{usage.comfortStatus.detail}</p>
+                )}
+                {usage.comfortStatus.recommendedAction && (
+                  <p className="subtle comfortAction">{usage.comfortStatus.recommendedAction}</p>
+                )}
+              </div>
+            )}
 
             <div className="stats">
               <div>
