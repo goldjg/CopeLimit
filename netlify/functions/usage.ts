@@ -67,11 +67,9 @@ import {
   nextMonthReset,
   normaliseUsage,
   readNumber,
-  readNumberAtPath,
   readString,
   getUnsupportedUsage,
-  detectMode,
-  readOverageFields
+  normalizeCopilotInternalPayload
 } from './lib/copilot';
 import { maybeCapture } from './lib/capture-store';
 import { readCaptureConfig } from './lib/capture-config';
@@ -283,19 +281,14 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
     };
   }
 
-  const quota =
-    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'entitlement']) ??
-    readNumberAtPath(body, ['premium_requests', 'entitlement']) ??
-    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'entitlement']) ??
-    readNumber(body, 'entitlement', 'quota', 'limit', 'total');
+  const { usage: normalizedUsage } = normalizeCopilotInternalPayload(
+    body,
+    login,
+    'github-copilot-internal',
+    ['Live data via GitHub Copilot internal API.']
+  );
 
-  const remaining =
-    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'remaining']) ??
-    readNumberAtPath(body, ['premium_requests', 'remaining']) ??
-    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'remaining']) ??
-    readNumber(body, 'remaining');
-
-  if (quota === undefined && remaining === undefined) {
+  if (normalizedUsage === null) {
     console.warn('[usage] copilot_internal user payload missing quota fields', Object.keys(body));
     return {
       usage: await getUnsupportedUsage(login, [
@@ -306,31 +299,8 @@ async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult
     };
   }
 
-  const safeQuota = Math.max(0, quota ?? 0);
-  // Preserve the pre-clamp value; a negative rawRemaining indicates settlement lag
-  // (credits consumed beyond quota before overage_count has been settled by billing).
-  const rawRemaining = remaining ?? 0;
-  // Effective used: when rawRemaining < 0 this exceeds quota (e.g. 7000 - (-473) = 7473).
-  // Math.max(0, ...) guards only the rawRemaining > quota edge case (invalid API data);
-  // it does NOT suppress the negative-remaining signal because safeQuota - rawRemaining
-  // is already positive (and > safeQuota) when rawRemaining < 0.
-  const used = Math.max(0, safeQuota - rawRemaining);
-  const resetAt =
-    readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
-    nextMonthReset();
-
   return {
-    usage: normaliseUsage({
-      mode: detectMode(body),
-      used,
-      quota: safeQuota,
-      rawRemaining,
-      resetAt,
-      billingEntity: login,
-      source: 'github-copilot-internal',
-      notes: ['Live data via GitHub Copilot internal API.'],
-      ...readOverageFields(body)
-    }),
+    usage: normalizedUsage,
     rawPayload: body,
     userId: id
   };

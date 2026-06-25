@@ -103,6 +103,12 @@ export type Usage = {
   estimatedRemainingBudgetCostUsd: number;
   /** Optional projected estimated total cost at reset. */
   projectedCostAtResetUsd?: number;
+  /**
+   * Whether overage/budget spending is permitted for this billing entity.
+   * Present when the API payload provides an `overage_permitted` flag.
+   * Represents the "budget/overage enabled state" in the canonical model.
+   */
+  overagePermitted?: boolean;
 };
 
 /** A plain JSON object whose values are unknown at compile time. */
@@ -337,8 +343,9 @@ export function normaliseUsage(input: {
   const estimatedRemainingBudgetCostUsd = creditsToUsd(estimatedRemainingBudgetCredits);
 
   // Fields are listed explicitly (rather than spreading ...input) so that
-  // overagePermitted, unlimited, and hasQuota — which are computation inputs,
-  // not Usage output fields — are not accidentally included in the response.
+  // unlimited and hasQuota — which are computation inputs only — are not
+  // accidentally included in the response. overagePermitted is now carried
+  // through to the Usage output as the "budget/overage enabled state" field.
   return {
     mode: input.mode,
     used: input.used,
@@ -360,7 +367,8 @@ export function normaliseUsage(input: {
     estimatedRemainingBudgetCostUsd,
     ...(input.overageCount !== undefined ? { overageCount: input.overageCount } : {}),
     ...(input.overageEntitlement !== undefined ? { overageEntitlement: input.overageEntitlement } : {}),
-    ...(derivedOverageCredits !== undefined ? { derivedOverageCredits } : {})
+    ...(derivedOverageCredits !== undefined ? { derivedOverageCredits } : {}),
+    ...(input.overagePermitted !== undefined ? { overagePermitted: input.overagePermitted } : {})
   };
 }
 
@@ -399,6 +407,107 @@ export function readOverageFields(body: JsonObject): {
       pi && typeof pi['has_quota'] === 'boolean'
         ? pi['has_quota']
         : typeof body['has_quota'] === 'boolean' ? body['has_quota'] : undefined
+  };
+}
+
+/**
+ * The canonical result of parsing a raw `copilot_internal/user` API response.
+ *
+ * `usage` is populated when quota fields are present in `body`.
+ * `usage` is `null` when neither `entitlement` nor `remaining` could be resolved
+ * from any known path — callers should fall back to {@link getUnsupportedUsage}.
+ */
+export type NormalizedCopilotPayload = {
+  usage: Usage | null;
+};
+
+/**
+ * Canonical normalizer for raw `copilot_internal/user` API payloads.
+ *
+ * This is the single function that both `usage.ts` and `widget-usage.ts`
+ * use to convert a raw GitHub Copilot API response into the canonical
+ * {@link Usage} model. It eliminates duplicated extraction logic across
+ * endpoints and is the authoritative implementation of the billing-payload-to-model
+ * mapping.
+ *
+ * Detection priority for billing mode, overage flags, and billing phase is
+ * delegated to {@link detectMode}, {@link readOverageFields}, and
+ * {@link detectBillingPhase} respectively.
+ *
+ * When neither `entitlement` nor `remaining` can be resolved from the payload,
+ * `usage` is `null`; callers should return an unsupported/fallback response.
+ *
+ * ### Field resolution order for quota / entitlement
+ * 1. `limited_user_quotas.premium_requests.entitlement`
+ * 2. `premium_requests.entitlement`
+ * 3. `quota_snapshots.premium_interactions.entitlement`
+ * 4. Top-level `entitlement`, `quota`, `limit`, `total`
+ *
+ * ### Field resolution order for remaining
+ * 1. `limited_user_quotas.premium_requests.remaining`
+ * 2. `premium_requests.remaining`
+ * 3. `quota_snapshots.premium_interactions.remaining`
+ * 4. Top-level `remaining`
+ *
+ * @param body   - The raw JSON object from `copilot_internal/user`.
+ * @param login  - The authenticated GitHub login to use as `billingEntity`.
+ * @param source - Provider identifier string (e.g. `'github-copilot-internal'`).
+ * @param notes  - Optional provider-specific notes appended to the `Usage.notes` array.
+ * @returns `{ usage }` where `usage` is the normalised record or `null` when quota fields are absent.
+ *   The wrapper intentionally exposes only `{ usage }` — no resolution metadata such as which quota
+ *   path matched. No caller currently requires that detail; if diagnostic tracing is needed in future,
+ *   extend `NormalizedCopilotPayload` with an optional `resolution` field at that point.
+ */
+export function normalizeCopilotInternalPayload(
+  body: JsonObject,
+  login: string,
+  source: string,
+  notes: string[] = []
+): NormalizedCopilotPayload {
+  const quota =
+    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'entitlement']) ??
+    readNumberAtPath(body, ['premium_requests', 'entitlement']) ??
+    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'entitlement']) ??
+    readNumber(body, 'entitlement', 'quota', 'limit', 'total');
+
+  const remaining =
+    readNumberAtPath(body, ['limited_user_quotas', 'premium_requests', 'remaining']) ??
+    readNumberAtPath(body, ['premium_requests', 'remaining']) ??
+    readNumberAtPath(body, ['quota_snapshots', 'premium_interactions', 'remaining']) ??
+    readNumber(body, 'remaining');
+
+  // Signal to the caller that the payload is unrecognised and a fallback is required.
+  if (quota === undefined && remaining === undefined) {
+    return { usage: null };
+  }
+
+  const safeQuota = Math.max(0, quota ?? 0);
+  // Preserve the pre-clamp value; a negative rawRemaining indicates settlement lag
+  // (credits consumed beyond quota before overage_count has been settled by billing).
+  const rawRemaining = remaining ?? 0;
+  // Effective used: when rawRemaining < 0 this exceeds quota (e.g. 7000 - (-473) = 7473).
+  // Math.max(0, ...) guards the rawRemaining > quota edge case (invalid API data) without
+  // suppressing the negative-remaining signal (safeQuota - rawRemaining is positive when
+  // rawRemaining < 0).
+  const used = Math.max(0, safeQuota - rawRemaining);
+  const resetAt =
+    readString(body, 'quota_reset_at', 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ??
+    nextMonthReset();
+  const mode = detectMode(body);
+  const overageFields = readOverageFields(body);
+
+  return {
+    usage: normaliseUsage({
+      mode,
+      used,
+      quota: safeQuota,
+      rawRemaining,
+      resetAt,
+      billingEntity: login,
+      source,
+      notes,
+      ...overageFields
+    })
   };
 }
 
