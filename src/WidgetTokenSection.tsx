@@ -255,6 +255,9 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const [shortcutErrorDetails, setShortcutErrorDetails] = useState<string | null>(null);
   const [showSlowHint, setShowSlowHint] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
+  const [desiredRefreshMinutes, setDesiredRefreshMinutes] = useState<number | null>(null);
+  const [savingCadence, setSavingCadence] = useState(false);
+  const [cadenceSaveError, setCadenceSaveError] = useState<string | null>(null);
   const hasActiveToken = Boolean(status?.hasActiveToken);
   const onboardingPhase = deriveOnboardingPhase(onboardingStep, hasActiveToken, verifyingSetup);
   const isSetupComplete = onboardingPhase === 'SETUP_COMPLETE';
@@ -586,6 +589,24 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
     window.setTimeout(() => fastSetupActionRef.current?.focus(), 0);
   }, [onboardingStep]);
 
+  // Load the user's saved widget refresh cadence preference on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/widget-settings', { cache: 'no-store' });
+        if (!cancelled && response.ok) {
+          const body = await response.json() as { desiredRefreshMinutes: number | null };
+          setDesiredRefreshMinutes(body.desiredRefreshMinutes ?? null);
+        }
+      } catch (err) {
+        // Non-fatal: settings default to null (manual) when unavailable.
+        console.error('[widget-settings] Failed to load refresh cadence preference:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const requestOnboardingSession = useCallback(async (): Promise<OnboardingSessionResult> => {
     const response = await fetch('/api/onboarding/session', { method: 'POST', cache: 'no-store' });
     if (!response.ok) {
@@ -598,6 +619,33 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const createShortcutPayload = useCallback(() => buildShortcutPayload({
     origin: window.location.origin
   }), []);
+
+  async function handleCadenceChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const raw = e.target.value;
+    // The select only emits known values ('manual' or one of the valid cadences).
+    // Server-side parseWidgetRefreshCadence validates on PATCH; no need to
+    // duplicate that logic here.
+    const newCadence = raw === 'manual' ? null : Number(raw);
+    setDesiredRefreshMinutes(newCadence as number | null);
+    setSavingCadence(true);
+    setCadenceSaveError(null);
+    try {
+      const response = await fetch('/api/widget-settings', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ desiredRefreshMinutes: newCadence }),
+        cache: 'no-store'
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`);
+      }
+    } catch (err) {
+      setCadenceSaveError(err instanceof Error ? err.message : 'Failed to save preference');
+    } finally {
+      setSavingCadence(false);
+    }
+  }
 
   async function generate() {
     setGenerating(true);
@@ -1067,6 +1115,35 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
           )}
         </div>
       )}
+
+      <div className="widgetRefreshSettings">
+        <h3>Desired widget refresh</h3>
+        <p>
+          Set how often you'd like the widget to try refreshing. iOS controls actual
+          refresh timing and may delay, coalesce, or throttle updates — this is a
+          hint, not a guaranteed interval.
+        </p>
+        <div className="widgetRefreshRow">
+          <label htmlFor="widgetRefreshCadence">Refresh cadence</label>
+          <select
+            id="widgetRefreshCadence"
+            value={desiredRefreshMinutes === null ? 'manual' : String(desiredRefreshMinutes)}
+            onChange={handleCadenceChange}
+            disabled={savingCadence}
+          >
+            <option value="manual">Manual / let iOS decide</option>
+            <option value="15">Every 15 minutes</option>
+            <option value="30">Every 30 minutes</option>
+            <option value="60">Every hour</option>
+            <option value="120">Every 2 hours</option>
+            <option value="240">Every 4 hours</option>
+          </select>
+          {savingCadence && <span aria-live="polite">Saving…</span>}
+          {cadenceSaveError && (
+            <span className="errorText" aria-live="polite">{cadenceSaveError}</span>
+          )}
+        </div>
+      </div>
 
       {scriptableDialog && (
         <div className="modalOverlay">

@@ -53,7 +53,8 @@ import {
   getUnsupportedUsage,
   normalizeCopilotInternalPayload
 } from './lib/copilot';
-import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken } from './lib/widget-store';
+import { isWidgetStoreNotConfiguredError, isWidgetStoreUnavailableError, resolveWidgetToken, getWidgetUserSettings } from './lib/widget-store';
+import type { WidgetRefreshCadence } from './lib/widget-store';
 import { getHistory } from './lib/usage-history-store';
 import { computeHistorySummary } from './lib/history-metrics';
 import type { UsageHistorySnapshot } from './lib/usage-history-types';
@@ -246,11 +247,22 @@ export const handler: Handler = async (event) => {
       }
     }
 
+    // User's desired widget refresh cadence from saved settings.
+    // Non-fatal: falls back to null (manual / let iOS decide) on any error.
+    let desiredRefreshMinutes: WidgetRefreshCadence = null;
+    try {
+      const settings = await getWidgetUserSettings(record.userId);
+      desiredRefreshMinutes = settings?.desiredRefreshMinutes ?? null;
+    } catch {
+      // Non-fatal: widget falls back to manual refresh if settings are unavailable.
+    }
+
     const responseBody = {
       ...usage,
       comfortStatus,
       ...(alertDecision !== undefined ? { alertDecision } : {}),
       ...(widgetExtras !== undefined ? { widgetExtras } : {}),
+      desiredRefreshMinutes,
     };
 
     return {

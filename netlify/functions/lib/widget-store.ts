@@ -68,6 +68,20 @@ type IssueResult = {
   replacedExisting: boolean;
 };
 
+/** All recognized desired widget refresh cadence values, in minutes. */
+export const VALID_REFRESH_CADENCES = [15, 30, 60, 120, 240] as const;
+
+/** Desired widget refresh cadence in minutes, or `null` for manual (let iOS decide). */
+export type WidgetRefreshCadence = typeof VALID_REFRESH_CADENCES[number] | null;
+
+/** Per-user widget preferences stored in the widget-tokens blob store. */
+export type WidgetUserSettings = {
+  /** Desired refresh cadence in minutes, or null for manual. */
+  desiredRefreshMinutes: WidgetRefreshCadence;
+  /** ISO 8601 timestamp of the last update. */
+  updatedAt: string;
+};
+
 const STORE_NAME = 'widget-tokens';
 const STORE_UNAVAILABLE_ERROR = 'Widget token store unavailable';
 const STORE_NOT_CONFIGURED_ERROR = 'Widget token store not configured';
@@ -78,6 +92,10 @@ function tokenKey(tokenHash: string): string {
 
 function userKey(userId: number): string {
   return `user/${userId}`;
+}
+
+function settingsKey(userId: number): string {
+  return `settings/${userId}`;
 }
 
 function getWidgetStore() {
@@ -316,4 +334,54 @@ export async function resolveWidgetToken(token: string): Promise<WidgetTokenReco
   }
 
   return record;
+}
+
+// ---------------------------------------------------------------------------
+// Widget user settings
+// ---------------------------------------------------------------------------
+
+const VALID_CADENCES_SET: ReadonlySet<number> = new Set(VALID_REFRESH_CADENCES);
+
+/**
+ * Parses and validates a raw cadence value from an API request or stored
+ * record. Returns a recognized cadence in minutes, or `null` (manual/default)
+ * for absent, unknown, or out-of-range values.
+ *
+ * Only the values in {@link VALID_REFRESH_CADENCES} are accepted; all other
+ * inputs are clamped to `null` rather than passed through.
+ *
+ * @param value - The raw cadence value from user input or a JSON payload.
+ * @returns A valid cadence in minutes, or `null` for manual/default.
+ */
+export function parseWidgetRefreshCadence(value: unknown): WidgetRefreshCadence {
+  // Explicit early returns for the most common "no preference" sentinels.
+  // Note: '' would also be rejected further down (Number('') → 0, not a valid
+  // cadence), but the early check makes the intent explicit.
+  if (value === null || value === undefined || value === '' || value === 'manual') return null;
+  // Reject non-primitive types (objects, arrays) — only strings and numbers are accepted.
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const asInt = Math.round(n);
+  return VALID_CADENCES_SET.has(asInt) ? (asInt as WidgetRefreshCadence) : null;
+}
+
+/**
+ * Returns the stored widget user settings for the given user, or `null` if
+ * none have been saved yet.
+ *
+ * @param userId - Numeric GitHub user ID.
+ */
+export async function getWidgetUserSettings(userId: number): Promise<WidgetUserSettings | null> {
+  return readStoredRecord<WidgetUserSettings>(settingsKey(userId));
+}
+
+/**
+ * Persists widget user settings for the given user.
+ *
+ * @param userId - Numeric GitHub user ID.
+ * @param settings - The settings to store.
+ */
+export async function setWidgetUserSettings(userId: number, settings: WidgetUserSettings): Promise<void> {
+  await writeStoredRecord(settingsKey(userId), settings);
 }

@@ -46,6 +46,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/widget-settings"
+  to = "/.netlify/functions/widget-settings"
+  status = 200
+
+[[redirects]]
   from = "/api/onboarding/session"
   to = "/.netlify/functions/onboarding-session"
   status = 200
