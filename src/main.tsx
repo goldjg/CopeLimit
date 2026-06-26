@@ -25,6 +25,7 @@ import { buildChartSeries } from '../netlify/functions/lib/chart-data';
 import type { ProjectionStatus } from '../netlify/functions/lib/burn-rate-projection';
 import {
   creditsCostRateToUsd,
+  creditsToUsd,
   computeEtaHours,
   formatBurnRate,
   formatEta,
@@ -415,7 +416,6 @@ function App() {
               <div>
                 <span>Quota</span>
                 <strong>{usage.quota}</strong>
-                <p className="subtle">≈ {formatUsd(usage.includedQuotaCostUsd)} est.</p>
               </div>
               <div>
                 <span>Usage share</span>
@@ -482,7 +482,7 @@ function App() {
                   <div>
                     <span>Derived overage (est.)</span>
                     <strong>{usage.derivedOverageCredits}</strong>
-                    <p className="subtle">≈ {formatUsd(usage.estimatedRemainingBudgetCostUsd)} budget rem est.</p>
+                    <p className="subtle">≈ {formatUsd(creditsToUsd(usage.derivedOverageCredits))} est.</p>
                   </div>
                 )}
               </div>

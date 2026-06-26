@@ -51,7 +51,7 @@ Validate data from:
 - generated model output
 - webhook payloads
 
-For small validation needs, write native validation. For complex schemas, use the project’s existing validation library if one is already present. If none exists, propose adding one per the Dependencies rules before implementing.
+For small validation needs, write native validation. For complex schemas, use the project's existing validation library if one is already present. If none exists, propose adding one per the Dependencies rules before implementing.
 
 Do not add a validation dependency for small, simple validation tasks unless justified.
 

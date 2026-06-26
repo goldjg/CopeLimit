@@ -6,6 +6,8 @@ import {
   formatUsd as formatUsdValue,
 } from '../netlify/functions/lib/cost-metrics';
 
+export { creditsToUsd };
+
 type UsageMetricsUsage = {
   used: number;
   remaining: number;

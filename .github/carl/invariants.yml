@@ -1,0 +1,176 @@
+# version: 1.1.0
+invariants:
+  - id: no-hardcoded-secrets
+    name: No hardcoded secrets
+    rule: Secrets, tokens, and credentials must not be committed to repository files.
+    severity: critical
+
+  - id: no-broad-rewrites
+    name: No broad rewrites
+    rule: Changes must remain scoped to requested outcomes and avoid unrelated rewrites.
+    severity: high
+
+  - id: security-baseline-preserved
+    name: Security baseline preserved
+    rule: Changes must preserve authentication, authorization, validation, and secret handling guarantees.
+    severity: critical
+
+  - id: plan-before-execute
+    name: Plan before execute
+    rule: Significant work requires an explicit plan before implementation.
+    severity: high
+
+  - id: no-unapproved-dependencies
+    name: No unapproved dependencies
+    rule: New dependencies require explicit justification and approval.
+    severity: high
+
+  - id: pr-contract-respected
+    name: PR contract respected
+    rule: Execution must stay inside the current PR contract unless scope is explicitly amended.
+    severity: high
+
+  - id: minimum-sufficient-reasoning-depth
+    name: Minimum sufficient reasoning depth
+    rule: Reasoning depth must be escalated only when risk, uncertainty, or novelty justifies the cost.
+    severity: high
+
+  - id: invariant-amendment-governance
+    name: Invariant amendment governance
+    rule: Agents must preserve invariants unless the user explicitly amends the invariant or opens a separate governance change.
+    severity: high
+
+  - id: durable-artefact-update-on-implementation
+    name: Durable artefact update on implementation
+    rule: Every implementation PR must update durable artefacts (.github/carl/invariants.yml, memory.md, ROADMAP.md, trust-boundaries.md) when behaviour, assumptions, commands, scope, roadmap, or operating model changes.
+    severity: high
+
+  - id: carl-canonical-governance
+    name: cARL canonical governance
+    rule: .github/carl artefacts are the canonical source of durable governance truth; harness-specific files must not be treated as independent authorities.
+    severity: high
+
+  - id: harness-adapters-not-authorities
+    name: Harness adapters are not authorities
+    rule: Harness-specific files such as .github/copilot-instructions.md, CLAUDE.md, AGENTS.md, .cursorrules, and ANTIGRAVITY.md are adapters/loaders that must route agents to canonical cARL artefacts.
+    severity: high
+
+  - id: explicit-carl-lifecycle
+    name: Explicit cARL lifecycle
+    rule: Harness loaders must make hydration, execution, validation, reconciliation, and final cARL/docs update decisions explicit.
+    severity: high
+
+  - id: repository-truth-over-session-memory
+    name: Repository truth over session memory
+    rule: Current repository state and canonical cARL artefacts must outrank stale prompt or session memory when they conflict.
+    severity: high
+
+  - id: aadlc-cross-context-contamination-guard-when-resolving-a
+    name: "**Cross-context contamination guard:** when resolving a widget token to"
+    rule: "**Cross-context contamination guard:** when resolving a widget token to"
+    severity: high
+
+  - id: aadlc-aadlcv2-artefacts-should-reduce-semantic-rediscove
+    name: "AADLCv2 artefacts should reduce semantic rediscovery without becoming"
+    rule: "AADLCv2 artefacts should reduce semantic rediscovery without becoming"
+    severity: high
+
+  - id: aadlc-adding-a-second-context-via-oauth-must-not-overwri
+    name: "Adding a second context via OAuth must not overwrite the primary session"
+    rule: "Adding a second context via OAuth must not overwrite the primary session"
+    severity: high
+
+  - id: aadlc-chart-output-must-never-contain-nan-or-infinity-ne
+    name: "Chart output must never contain `NaN` or `Infinity`; negatives are"
+    rule: "Chart output must never contain `NaN` or `Infinity`; negatives are"
+    severity: high
+
+  - id: aadlc-copelimit-must-not-assume-that-additional-or-pay-a
+    name: "CopeLimit must not assume that additional or pay-as-you-go Copilot usage"
+    rule: "CopeLimit must not assume that additional or pay-as-you-go Copilot usage is enabled. Included credits must be clearly distinguished from additional usage where the data supports it; no additional usage should be surfaced without data evidence."
+    severity: high
+
+  - id: aadlc-credential-material-githubaccesstoken-must-be-stor
+    name: "Credential material (`githubAccessToken`) must be stored separately"
+    rule: "Credential material (`githubAccessToken`) must be stored separately"
+    severity: high
+
+  - id: aadlc-do-not-assume-enterprise-org-business-usage-uses-t
+    name: "Do not assume enterprise/org/business usage uses the same API shape as"
+    rule: "Do not assume enterprise/org/business usage uses the same API shape as"
+    severity: high
+
+  - id: aadlc-do-not-build-finops-report-ingestion-github-ai-usa
+    name: "Do not build FinOps/report ingestion, GitHub AI usage report import, or"
+    rule: "Do not build FinOps/report ingestion, GitHub AI usage report import, or"
+    severity: high
+
+  - id: aadlc-evidence-capture-for-unsupported-contexts-is-opt-i
+    name: "Evidence capture for unsupported contexts is opt-in and sanitized via"
+    rule: "Evidence capture for unsupported contexts is opt-in and sanitized via"
+    severity: high
+
+  - id: aadlc-existing-language-platform-cloud-and-core-packs-sh
+    name: "Existing language, platform, cloud, and core packs should not be"
+    rule: "Existing language, platform, cloud, and core packs should not be"
+    severity: high
+
+  - id: aadlc-instruction-packs-should-remain-modular-and-focuse
+    name: "Instruction packs should remain modular and focused on a single"
+    rule: "Instruction packs should remain modular and focused on a single"
+    severity: high
+
+  - id: aadlc-pwa-and-widget-reset-detection-must-share-the-same
+    name: "PWA and widget reset detection must share the same `RESET_DROP_RATIO`"
+    rule: "PWA and widget reset detection must share the same `RESET_DROP_RATIO`"
+    severity: high
+
+  - id: aadlc-prompt-as-code-should-be-used-for-substantial-long
+    name: "Prompt-as-code should be used for substantial, long, or"
+    rule: "Prompt-as-code should be used for substantial, long, or"
+    severity: high
+
+  - id: aadlc-raw-github-oauth-access-tokens-must-never-be-retur
+    name: "Raw GitHub OAuth access tokens must never be returned to the browser or"
+    rule: "Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records."
+    severity: high
+
+  - id: aadlc-the-normalisation-layer-must-retain-compatibility
+    name: "The normalisation layer must retain compatibility with legacy premium_re"
+    rule: "The normalisation layer must retain compatibility with legacy premium_requests fields (entitlement, remaining, reset date) while supporting ai_credits mode detection via token_based_billing markers. Neither mode must be silently dropped or assumed exclusively."
+    severity: high
+
+  - id: aadlc-the-root-copilot-instructions-act-as-the-repositor
+    name: "The root Copilot instructions act as the repository constitution"
+    rule: "The root Copilot instructions act as the repository constitution."
+    severity: high
+
+  - id: aadlc-unsupported-unknown-context-states-auth-unsupporte
+    name: "Unsupported/unknown context states (`auth_unsupported`) must be visible"
+    rule: "Unsupported/unknown context states (`auth_unsupported`) must be visible"
+    severity: high
+
+  - id: aadlc-architecture-md-and-memory-md-changes-must-follow
+    name: "`ARCHITECTURE"
+    rule: "`ARCHITECTURE.md` and `memory.md` changes must follow the existing"
+    severity: high
+
+  - id: aadlc-usagecontext-is-the-primary-stored-object-copelimi
+    name: "`UsageContext` is the primary stored object"
+    rule: "`UsageContext` is the primary stored object. CopeLimit stores **usage"
+    severity: high
+
+  - id: aadlc-widgettokenrecord-may-carry-an-optional-contextid
+    name: "`WidgetTokenRecord` may carry an optional `contextId` to bind the"
+    rule: "`WidgetTokenRecord` may carry an optional `contextId` to bind the"
+    severity: high
+
+  - id: aadlc-chart-data-ts-must-remain-a-pure-function-with-no
+    name: "`chart-data"
+    rule: "`chart-data.ts` must remain a pure function with no I/O."
+    severity: high
+
+  - id: aadlc-item
+    name: "|"
+    rule: "|"
+    severity: high

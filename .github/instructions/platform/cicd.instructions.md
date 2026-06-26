@@ -101,7 +101,7 @@ For Azure DevOps:
 - review approvals and checks
 - avoid granting pipelines unnecessary access to all repositories
 
-Do not treat “secret variable” as a complete security boundary.
+Do not treat "secret variable" as a complete security boundary.
 
 ## OIDC and workload identity federation
 
