@@ -53,6 +53,11 @@ cARL artefacts in `.github/carl/` are the canonical source of governance truth f
   applies to Tier 1 records only.
 - Blob stores: `widget-tokens` (Tier 1), `onboarding-sessions` (Tier 1),
   `provider-captures` (Tier 2/3), `usage-history` (Tier 2/3).
+  `widget-tokens` key layout: `token/<hash>` (WidgetTokenRecord),
+  `user/<userId>` (WidgetUserIndex), `settings/<userId>` (WidgetUserSettings — refresh cadence preference, added in widget-refresh-cadence PR).
+- `GET/PATCH /api/widget-settings` (session-cookie auth, `widget-settings.ts`) manages per-user widget preferences. Currently: `desiredRefreshMinutes: WidgetRefreshCadence` (15|30|60|120|240|null).
+- `GET /api/widget-usage` response now includes `desiredRefreshMinutes: number | null` so the Scriptable widget can set `widget.refreshAfterDate`. Fetched from settings blob; non-fatal — falls back to null on any error.
+- `parseWidgetRefreshCadence(value)` in `widget-store.ts` is the pure validation function. Accepts only the VALID_REFRESH_CADENCES values (as number or string); rejects non-primitives, NaN, Infinity, arbitrary numbers. Returns null for manual/default.
 - External: `api.github.com/copilot_internal/user` (live quota),
   GitHub OAuth for authentication.
 - iOS: `public/scriptable/CopeLimitWidget.js` (home-screen widget) and
@@ -188,7 +193,7 @@ CopeLimit-specific boundaries:
 ## Canonical validation commands
 
 - `npm run build` — TypeScript compilation + Vite bundle. Last known validation state: passes.
-- `npm test` — Vitest unit tests covering `netlify/functions/lib/` backend and `src/` frontend utilities. Last known validation state: passes (568 tests).
+- `npm test` — Vitest unit tests covering `netlify/functions/lib/` backend and `src/` frontend utilities. Last known validation state: passes (596 tests as of widget-refresh-cadence PR).
 - `npm run lint` — TypeScript `--noEmit` check. Last known validation state: fails on TS5107 (deprecated `moduleResolution: Node` in `tsconfig.json`). Not a blocking gate until tsconfig is updated.
 
 ## Current operating assumptions

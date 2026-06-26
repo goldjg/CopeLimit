@@ -573,5 +573,24 @@ if (isLarge) {
   widget = createSmallWidget(usage);
 }
 
+// Desired refresh cadence — honour the user's preference when Scriptable
+// supports it. iOS may still delay, coalesce, or throttle actual refreshes;
+// this is a hint, not a guarantee.
+try {
+  const cadenceMinutes = usage && typeof usage.desiredRefreshMinutes === 'number'
+    && Number.isFinite(usage.desiredRefreshMinutes)
+    && usage.desiredRefreshMinutes > 0
+    ? usage.desiredRefreshMinutes
+    : null;
+
+  if (cadenceMinutes !== null) {
+    const refreshDate = new Date(Date.now() + cadenceMinutes * 60 * 1000);
+    widget.refreshAfterDate = refreshDate;
+  }
+  // null → no refreshAfterDate set; Scriptable / iOS decides the schedule.
+} catch (_e) {
+  // Non-fatal: refreshAfterDate is unsupported or unavailable in this context.
+}
+
 Script.setWidget(widget);
 Script.complete();

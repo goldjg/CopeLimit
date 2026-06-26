@@ -869,3 +869,53 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.1);
   color: #f9fafb;
 }
+
+/* ── Widget refresh cadence settings ─────────────────────────────────────── */
+
+.widgetRefreshSettings {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.widgetRefreshSettings h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: #f9fafb;
+}
+
+.widgetRefreshSettings p {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.widgetRefreshRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.widgetRefreshRow label {
+  font-size: 0.875rem;
+  color: #d1d5db;
+  white-space: nowrap;
+}
+
+.widgetRefreshRow select {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #f9fafb;
+  font-size: 0.875rem;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.widgetRefreshRow select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

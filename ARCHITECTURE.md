@@ -279,9 +279,12 @@ The history endpoint:
 ```
 token/<sha256-hex>            ← Encrypted WidgetTokenRecord
 user/<userId>                 ← Encrypted WidgetUserIndex
+settings/<userId>             ← Encrypted WidgetUserSettings (desired refresh cadence)
 ```
 
 The user index allows `GET /api/widget-token` (token status) and `DELETE /api/widget-token` (revoke) to operate without knowing the hash — they look up the user index first.
+
+The `settings/<userId>` key stores per-user widget preferences (currently only `desiredRefreshMinutes`). It is read by `GET /api/widget-usage` and included in the response as `desiredRefreshMinutes` so the Scriptable widget can set `widget.refreshAfterDate`. Settings are created and updated via `GET/PATCH /api/widget-settings` (session-cookie auth).
 
 ### Blob store: `onboarding-sessions`
 
