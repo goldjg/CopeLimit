@@ -26,7 +26,7 @@ const BUDGET_FILL_TOP_OPACITY = 0.68
 const BUDGET_FILL_BOTTOM_OPACITY = 0.16
 
 function sanitizePositiveFinite(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && (value as number) > 0 ? (value as number) : fallback
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 /** Accent colour for the burn trail, keyed to the warning level. */
@@ -89,9 +89,9 @@ function deriveGaugeSeries(
   let maxRemaining = 0
   const points = series.points.map((point) => {
     const pointQuota = sanitizePositiveFinite(point.quota, series.quotaCeiling)
-    const overage = Math.max(0, point.used - Math.max(0, pointQuota))
+    const usageOverPointQuota = Math.max(0, point.used - Math.max(0, pointQuota))
     const remaining = mode === 'budget'
-      ? Math.max(0, ceiling - overage)
+      ? Math.max(0, ceiling - usageOverPointQuota)
       : Math.max(0, point.remaining)
     if (remaining > maxRemaining) maxRemaining = remaining
     return {
@@ -218,7 +218,12 @@ export function BurnTrailChart({
           {caption}
         </p>
       )}
-      <p className="burnTrailCaption" role="status" aria-live="polite">
+      <p
+        className="burnTrailCaption"
+        role="status"
+        aria-live="polite"
+        aria-label={`Tank mode is ${gauge.mode === 'budget' ? 'Budget' : 'Quota'} based on current billing phase`}
+      >
         Tank mode: {gauge.mode === 'budget' ? 'Budget' : 'Quota'}
       </p>
     </div>

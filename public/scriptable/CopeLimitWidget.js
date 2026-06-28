@@ -576,7 +576,7 @@ function createLargeWidget(usage) {
 
   widget.addSpacer(6);
 
-  if (sparkline && sparkline.length >= 1) {
+  if (sparkline && sparkline.length >= 2) {
     const trendLabel = widget.addText(`Fuel tank (${gaugeMode}) · ${sparkline.length} snapshots`);
     trendLabel.font = Font.mediumSystemFont(10);
     trendLabel.textColor = Color.gray();
