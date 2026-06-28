@@ -57,6 +57,18 @@ function formatShortDate(value) {
   return new Date(value).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+function formatLastUpdated(value) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 function formatNumber(n) {
   if (n === undefined || n === null || n === "?") return "?";
   return Number(n).toLocaleString("en");
@@ -130,6 +142,14 @@ function addMetricRow(container, label, value, opts) {
   r.textColor = o.valueColor || (o.muted ? Color.gray() : Color.white());
   r.minimumScaleFactor = 0.65;
   r.lineLimit = 1;
+}
+
+function addLastUpdatedLabel(container, value, fontSize) {
+  const label = container.addText(`Last Updated: ${formatLastUpdated(value)}`);
+  label.font = Font.mediumSystemFont(fontSize || 9);
+  label.textColor = Color.gray();
+  label.minimumScaleFactor = 0.65;
+  label.lineLimit = 1;
 }
 
 /**
@@ -345,6 +365,8 @@ function createSmallWidget(usage) {
   }
 
   addMetricRow(widget, "Resets", formatShortDate(usage.resetAt), { fontSize: 10, muted: true });
+  widget.addSpacer(3);
+  addLastUpdatedLabel(widget, usage.updatedAt, 9);
 
   return widget;
 }
@@ -434,6 +456,9 @@ function createMediumWidget(usage) {
     phaseTxt.lineLimit = 1;
   }
 
+  widget.addSpacer(5);
+  addLastUpdatedLabel(widget, usage.updatedAt, 9);
+
   return widget;
 }
 
@@ -510,6 +535,8 @@ function createLargeWidget(usage) {
 
   addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Phase",
     billingPhaseLabel(usage.billingPhase), { rightColor: accent });
+  widget.addSpacer(5);
+  addLastUpdatedLabel(widget, usage.updatedAt, 10);
 
   // Burn trail
   widget.addSpacer(8);
