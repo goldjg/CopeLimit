@@ -540,9 +540,16 @@ function App() {
               {chartSeries.hasData && chartSeries.points.length >= 2 && (
                 <>
                   <p className="historyTrendLabel">
-                    Burn trail · {chartSeries.points.length} snapshots
+                    Fuel tank · {chartSeries.points.length} snapshots
                   </p>
-                  <BurnTrailChart series={chartSeries} warningLevel={usage?.warningLevel} />
+                  <BurnTrailChart
+                    series={chartSeries}
+                    warningLevel={usage?.warningLevel}
+                    usageContext={usage ? {
+                      billingPhase: usage.billingPhase,
+                      overageEntitlement: usage.overageEntitlement,
+                    } : undefined}
+                  />
                 </>
               )}
               {historySummary.oldestAt && historySummary.newestAt && (

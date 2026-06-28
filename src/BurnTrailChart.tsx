@@ -40,6 +40,11 @@ export type BurnTrailChartProps = {
   series: ChartSeries
   /** Drives the trail accent colour. Defaults to `normal`. */
   warningLevel?: ChartWarningLevel
+  /** Optional billing context used to select quota-vs-budget gauge mode. */
+  usageContext?: {
+    billingPhase?: 'credits_available' | 'credits_exhausted' | 'budget_available' | 'budget_active' | 'unlimited' | 'hard_stop'
+    overageEntitlement?: number
+  }
 }
 
 /**
@@ -61,10 +66,53 @@ function projectionCaption(series: ChartSeries): string | null {
   }
 }
 
-export function BurnTrailChart({ series, warningLevel = 'normal' }: BurnTrailChartProps): React.ReactElement | null {
+function deriveGaugeSeries(
+  series: ChartSeries,
+  usageContext?: BurnTrailChartProps['usageContext'],
+): { mode: 'quota' | 'budget'; series: ChartSeries } {
+  const budgetCap = usageContext?.overageEntitlement
+  const isBudgetPhase = usageContext?.billingPhase === 'budget_active' || usageContext?.billingPhase === 'budget_available'
+  const useBudgetMode = isBudgetPhase && typeof budgetCap === 'number' && Number.isFinite(budgetCap) && budgetCap > 0
+  const mode: 'quota' | 'budget' = useBudgetMode ? 'budget' : 'quota'
+  const ceiling = mode === 'budget'
+    ? (budgetCap as number)
+    : Math.max(series.quotaCeiling, 1)
+
+  let maxUsed = 0
+  const points = series.points.map((point) => {
+    const remaining = mode === 'budget'
+      ? Math.max(0, ceiling - Math.max(0, point.used - point.quota))
+      : Math.max(0, point.remaining)
+    if (remaining > maxUsed) maxUsed = remaining
+    return {
+      ...point,
+      used: remaining,
+      quota: ceiling,
+      remaining,
+      percentUsed: ceiling > 0 ? Math.round((remaining / ceiling) * 100) : 0,
+    }
+  })
+
+  return {
+    mode,
+    series: {
+      ...series,
+      points,
+      quotaCeiling: ceiling,
+      maxUsed,
+    },
+  }
+}
+
+export function BurnTrailChart({
+  series,
+  warningLevel = 'normal',
+  usageContext,
+}: BurnTrailChartProps): React.ReactElement | null {
   if (!series.hasData) return null
 
-  const geo = buildBurnTrailGeometry(series, { width: VIEW_WIDTH, height: VIEW_HEIGHT })
+  const gauge = deriveGaugeSeries(series, usageContext)
+  const geo = buildBurnTrailGeometry(gauge.series, { width: VIEW_WIDTH, height: VIEW_HEIGHT, valueMode: 'remaining' })
   if (!geo.hasData) return null
 
   const status = series.projection?.projectionStatus
@@ -73,6 +121,8 @@ export function BurnTrailChart({ series, warningLevel = 'normal' }: BurnTrailCha
   const isRisk = status === 'exhaustion_before_reset' || status === 'exhausted'
   const isSafe = status === 'reset_before_exhaustion'
   const accent = isRisk ? '#ef4444' : trailColor(warningLevel)
+  const areaOpacityTop = gauge.mode === 'budget' ? 0.68 : 0.55
+  const areaOpacityBottom = gauge.mode === 'budget' ? 0.16 : 0.05
   const projectionColor = isRisk ? '#ef4444' : isSafe ? '#22c55e' : '#a1a1aa'
   const gradientId = 'burnTrailFill'
   const caption = projectionCaption(series)
@@ -88,8 +138,8 @@ export function BurnTrailChart({ series, warningLevel = 'normal' }: BurnTrailCha
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={accent} stopOpacity="0.55" />
-            <stop offset="100%" stopColor={accent} stopOpacity="0.05" />
+            <stop offset="0%" stopColor={accent} stopOpacity={areaOpacityTop} />
+            <stop offset="100%" stopColor={accent} stopOpacity={areaOpacityBottom} />
           </linearGradient>
         </defs>
 
@@ -112,6 +162,16 @@ export function BurnTrailChart({ series, warningLevel = 'normal' }: BurnTrailCha
           <g key={i}>
             <path d={seg.area} fill={`url(#${gradientId})`} stroke="none" />
             <path d={seg.line} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            {gauge.mode === 'budget' && (
+              <path
+                d={seg.line}
+                fill="none"
+                stroke={accent}
+                strokeWidth={1}
+                strokeDasharray="2 3"
+                strokeOpacity={0.45}
+              />
+            )}
           </g>
         ))}
 
@@ -148,6 +208,9 @@ export function BurnTrailChart({ series, warningLevel = 'normal' }: BurnTrailCha
           {caption}
         </p>
       )}
+      <p className="burnTrailCaption">
+        Tank mode: {gauge.mode === 'budget' ? 'Budget' : 'Quota'}
+      </p>
     </div>
   )
 }
