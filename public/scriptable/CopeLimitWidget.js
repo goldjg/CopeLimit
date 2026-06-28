@@ -191,6 +191,7 @@ function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
 // the previous `used` value is treated as a quota reset (new billing period)
 // rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
 const RESET_DROP_RATIO = 0.5;
+const RESET_JUMP_RATIO = 1 / RESET_DROP_RATIO;
 const QUOTA_FILL_ALPHA = 0.22;
 const BUDGET_FILL_ALPHA = 0.34;
 
@@ -256,7 +257,7 @@ function createBurnTrailImage(points, options, width, height, colorHex) {
   const segments = [];
   let current = [];
   for (let i = 0; i < n; i++) {
-    if (i > 0 && safe[i] > safe[i - 1] / RESET_DROP_RATIO) {
+    if (i > 0 && safe[i] > safe[i - 1] * RESET_JUMP_RATIO) {
       if (current.length) segments.push(current);
       current = [];
     }
@@ -576,7 +577,7 @@ function createLargeWidget(usage) {
   widget.addSpacer(6);
 
   if (sparkline && sparkline.length >= 1) {
-    const trendLabel = widget.addText(`Fuel tank (${gaugeMode})  ·  ${sparkline.length} snapshots`);
+    const trendLabel = widget.addText(`Fuel tank (${gaugeMode}) · ${sparkline.length} snapshots`);
     trendLabel.font = Font.mediumSystemFont(10);
     trendLabel.textColor = Color.gray();
 
