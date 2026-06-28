@@ -191,6 +191,8 @@ function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
 // the previous `used` value is treated as a quota reset (new billing period)
 // rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
 const RESET_DROP_RATIO = 0.5;
+const QUOTA_FILL_ALPHA = 0.22;
+const BUDGET_FILL_ALPHA = 0.34;
 
 /**
  * Draws a fuel-gauge trail using DrawContext.
@@ -218,7 +220,7 @@ function createBurnTrailImage(points, options, width, height, colorHex) {
   const hex = typeof colorHex === "string" && colorHex ? colorHex : "#60a5fa";
   const mode = options && options.mode === "budget" ? "budget" : "quota";
   const trailColor = new Color(hex, mode === "budget" ? 1 : 0.95);
-  const fillAlpha = mode === "budget" ? 0.34 : 0.22;
+  const fillAlpha = mode === "budget" ? BUDGET_FILL_ALPHA : QUOTA_FILL_ALPHA;
 
   const n = points.length;
   if (n === 0) return ctx.getImage();
@@ -254,7 +256,7 @@ function createBurnTrailImage(points, options, width, height, colorHex) {
   const segments = [];
   let current = [];
   for (let i = 0; i < n; i++) {
-    if (i > 0 && safeUsed[i] < safeUsed[i - 1] * RESET_DROP_RATIO) {
+    if (i > 0 && safe[i] > safe[i - 1] / RESET_DROP_RATIO) {
       if (current.length) segments.push(current);
       current = [];
     }
@@ -302,23 +304,6 @@ function createBurnTrailImage(points, options, width, height, colorHex) {
       ctx.setLineWidth(2);
       ctx.addPath(line);
       ctx.strokePath();
-
-      // Budget mode: add a subtle dashed overlay to visually distinguish the tank.
-      if (mode === "budget") {
-        ctx.setStrokeColor(new Color(hex, 0.45));
-        ctx.setLineWidth(1);
-        const dashed = new Path();
-        for (let i = 1; i < seg.length; i++) {
-          const from = seg[i - 1];
-          const to = seg[i];
-          if ((i % 2) === 0) {
-            dashed.move(new Point(from.x, from.y));
-            dashed.addLine(new Point(to.x, to.y));
-          }
-        }
-        ctx.addPath(dashed);
-        ctx.strokePath();
-      }
     }
   }
 

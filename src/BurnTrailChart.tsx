@@ -20,6 +20,10 @@ import { buildBurnTrailGeometry } from './chart-geometry'
 
 const VIEW_WIDTH = 320
 const VIEW_HEIGHT = 96
+const QUOTA_FILL_TOP_OPACITY = 0.55
+const QUOTA_FILL_BOTTOM_OPACITY = 0.05
+const BUDGET_FILL_TOP_OPACITY = 0.68
+const BUDGET_FILL_BOTTOM_OPACITY = 0.16
 
 /** Accent colour for the burn trail, keyed to the warning level. */
 function trailColor(level: ChartWarningLevel): string {
@@ -78,12 +82,13 @@ function deriveGaugeSeries(
     ? (budgetCap as number)
     : Math.max(series.quotaCeiling, 1)
 
-  let maxUsed = 0
+  let maxRemaining = 0
   const points = series.points.map((point) => {
+    const pointQuota = Number.isFinite(point.quota) && point.quota > 0 ? point.quota : series.quotaCeiling
     const remaining = mode === 'budget'
-      ? Math.max(0, ceiling - Math.max(0, point.used - point.quota))
+      ? Math.max(0, ceiling - Math.max(0, point.used - Math.max(0, pointQuota)))
       : Math.max(0, point.remaining)
-    if (remaining > maxUsed) maxUsed = remaining
+    if (remaining > maxRemaining) maxRemaining = remaining
     return {
       ...point,
       used: remaining,
@@ -99,7 +104,7 @@ function deriveGaugeSeries(
       ...series,
       points,
       quotaCeiling: ceiling,
-      maxUsed,
+      maxUsed: maxRemaining,
     },
   }
 }
@@ -121,8 +126,8 @@ export function BurnTrailChart({
   const isRisk = status === 'exhaustion_before_reset' || status === 'exhausted'
   const isSafe = status === 'reset_before_exhaustion'
   const accent = isRisk ? '#ef4444' : trailColor(warningLevel)
-  const areaOpacityTop = gauge.mode === 'budget' ? 0.68 : 0.55
-  const areaOpacityBottom = gauge.mode === 'budget' ? 0.16 : 0.05
+  const areaOpacityTop = gauge.mode === 'budget' ? BUDGET_FILL_TOP_OPACITY : QUOTA_FILL_TOP_OPACITY
+  const areaOpacityBottom = gauge.mode === 'budget' ? BUDGET_FILL_BOTTOM_OPACITY : QUOTA_FILL_BOTTOM_OPACITY
   const projectionColor = isRisk ? '#ef4444' : isSafe ? '#22c55e' : '#a1a1aa'
   const gradientId = 'burnTrailFill'
   const caption = projectionCaption(series)
