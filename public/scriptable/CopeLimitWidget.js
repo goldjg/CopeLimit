@@ -191,40 +191,61 @@ function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
 // the previous `used` value is treated as a quota reset (new billing period)
 // rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
 const RESET_DROP_RATIO = 0.5;
+const RESET_JUMP_RATIO = 1 / RESET_DROP_RATIO;
+const QUOTA_FILL_ALPHA = 0.22;
+const BUDGET_FILL_ALPHA = 0.34;
 
 /**
- * Draws a fuel-gauge "burn trail" using DrawContext.
+ * Draws a fuel-gauge trail using DrawContext.
  *
- * Renders the `used` series as a filled area trail rising from the baseline,
- * with a dashed quota ceiling line so the trail reads against the size of the
- * tank. Quota resets (a sharp drop in `used`) break the trail into separate
- * fills instead of drawing a misleading vertical cliff. No axes, no labels.
+ * Renders remaining capacity toward zero:
+ * - top of the tank = gauge ceiling (quota or budget cap)
+ * - bottom of the tank = 0
+ * - trail trends downward toward 0 as capacity is consumed
  *
- * @param points  Oldest-first array of `used` values.
- * @param quota   Quota ceiling (tank size). `0`/undefined hides the ceiling.
+ * Quota resets (a sharp drop in `used`) break the trail into separate fills
+ * instead of drawing a misleading vertical cliff. No axes, no labels.
+ *
+ * @param points  Oldest-first array of cumulative `used` values.
+ * @param options { mode, quotaCeiling, gaugeCeiling }
  * @param width   Image width in points.
  * @param height  Image height in points.
  * @param colorHex Hex string (e.g. "#60a5fa") for the trail.
  */
-function createBurnTrailImage(points, quota, width, height, colorHex) {
+function createBurnTrailImage(points, options, width, height, colorHex) {
   const ctx = new DrawContext();
   ctx.size = new Size(width, height);
   ctx.respectScreenScale = true;
   ctx.opaque = false;
 
   const hex = typeof colorHex === "string" && colorHex ? colorHex : "#60a5fa";
-  const trailColor = new Color(hex, 0.95);
+  const mode = options && options.mode === "budget" ? "budget" : "quota";
+  const trailColor = new Color(hex, mode === "budget" ? 1 : 0.95);
+  const fillAlpha = mode === "budget" ? BUDGET_FILL_ALPHA : QUOTA_FILL_ALPHA;
 
   const n = points.length;
   if (n === 0) return ctx.getImage();
 
-  // Sanitise: clamp to finite, non-negative values.
-  const safe = points.map(v => (typeof v === "number" && isFinite(v) && v > 0 ? v : 0));
-  const quotaSafe = typeof quota === "number" && isFinite(quota) && quota > 0 ? quota : 0;
+  // Sanitise used series.
+  const safeUsed = points.map(v => (typeof v === "number" && isFinite(v) && v > 0 ? v : 0));
+  const quotaCeiling = options && typeof options.quotaCeiling === "number" && isFinite(options.quotaCeiling) && options.quotaCeiling > 0
+    ? options.quotaCeiling
+    : 0;
+  const gaugeCeiling = options && typeof options.gaugeCeiling === "number" && isFinite(options.gaugeCeiling) && options.gaugeCeiling > 0
+    ? options.gaugeCeiling
+    : quotaCeiling;
+
+  const safe = safeUsed.map((usedValue) => {
+    if (mode === "budget") {
+      const overageUsed = Math.max(0, usedValue - quotaCeiling);
+      return Math.max(0, gaugeCeiling - overageUsed);
+    }
+    return Math.max(0, gaugeCeiling - usedValue);
+  });
 
   const padY = 6;
   const usable = Math.max(1, height - padY * 2);
-  const maxVal = Math.max(...safe, quotaSafe, 1);
+  const maxVal = Math.max(...safe, gaugeCeiling, 1);
 
   const xFor = i => (n === 1 ? width / 2 : (i / (n - 1)) * width);
   const yFor = v => {
@@ -236,7 +257,7 @@ function createBurnTrailImage(points, quota, width, height, colorHex) {
   const segments = [];
   let current = [];
   for (let i = 0; i < n; i++) {
-    if (i > 0 && safe[i] < safe[i - 1] * RESET_DROP_RATIO) {
+    if (i > 0 && safe[i] > safe[i - 1] * RESET_JUMP_RATIO) {
       if (current.length) segments.push(current);
       current = [];
     }
@@ -245,8 +266,8 @@ function createBurnTrailImage(points, quota, width, height, colorHex) {
   if (current.length) segments.push(current);
 
   // Quota ceiling reference line (dashed, faint).
-  if (quotaSafe > 0) {
-    const cy = yFor(quotaSafe);
+  if (gaugeCeiling > 0) {
+    const cy = yFor(gaugeCeiling);
     ctx.setStrokeColor(new Color("#ffffff", 0.32));
     ctx.setLineWidth(1);
     const dash = new Path();
@@ -271,7 +292,7 @@ function createBurnTrailImage(points, quota, width, height, colorHex) {
     for (const p of seg) area.addLine(new Point(p.x, p.y));
     area.addLine(new Point(seg[seg.length - 1].x, baseY));
     area.closeSubpath();
-    ctx.setFillColor(new Color(hex, 0.22));
+    ctx.setFillColor(new Color(hex, fillAlpha));
     ctx.addPath(area);
     ctx.fillPath();
 
@@ -485,6 +506,14 @@ function createLargeWidget(usage) {
   const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
   const sparkline = extras ? extras.sparkline : null;
   const quotaCeiling = extras && typeof extras.quotaCeiling === "number" ? extras.quotaCeiling : usage.quota;
+  const isBudgetMode = (usage.billingPhase === "budget_active" || usage.billingPhase === "budget_available")
+    && typeof usage.overageEntitlement === "number"
+    && isFinite(usage.overageEntitlement)
+    && usage.overageEntitlement > 0;
+  const gaugeMode = isBudgetMode ? "budget" : "quota";
+  const gaugeCeiling = gaugeMode === "budget"
+    ? usage.overageEntitlement
+    : quotaCeiling;
 
   // Header
   const headerRow = widget.addStack();
@@ -548,13 +577,23 @@ function createLargeWidget(usage) {
   widget.addSpacer(6);
 
   if (sparkline && sparkline.length >= 2) {
-    const trendLabel = widget.addText(`Burn trail  ·  ${sparkline.length} snapshots`);
+    const trendLabel = widget.addText(`Fuel tank (${gaugeMode}) · ${sparkline.length} snapshots`);
     trendLabel.font = Font.mediumSystemFont(10);
     trendLabel.textColor = Color.gray();
 
     widget.addSpacer(5);
 
-    const trailImg = createBurnTrailImage(sparkline, quotaCeiling, 294, 48, colourHexFor(usage));
+    const trailImg = createBurnTrailImage(
+      sparkline,
+      {
+        mode: gaugeMode,
+        quotaCeiling,
+        gaugeCeiling,
+      },
+      294,
+      48,
+      colourHexFor(usage)
+    );
     const imgWidget = widget.addImage(trailImg);
     imgWidget.imageSize = new Size(294, 48);
     imgWidget.cornerRadius = 3;

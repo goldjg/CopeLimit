@@ -132,4 +132,18 @@ describe('buildBurnTrailGeometry — projection marker', () => {
     const geo = buildBurnTrailGeometry(series, SIZE)
     expect(geo.projection).toBeNull()
   })
+
+  it('targets projection to baseline in remaining mode', () => {
+    const series = buildChartSeries(
+      [
+        snap('2026-06-15T08:00:00.000Z', 1000),
+        snap('2026-06-15T12:00:00.000Z', 4000),
+      ],
+      { projectedExhaustionAt: '2026-06-15T20:00:00.000Z', projectionStatus: 'exhaustion_before_reset' },
+    )
+    const geo = buildBurnTrailGeometry(series, { ...SIZE, valueMode: 'remaining' })
+    expect(geo.projection).not.toBeNull()
+    expect(geo.projection!.marker).toBeDefined()
+    expect(geo.projection!.marker!.y).toBeCloseTo(geo.baselineY, 4)
+  })
 })

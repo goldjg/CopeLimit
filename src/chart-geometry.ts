@@ -26,6 +26,12 @@ export type ChartGeometryOptions = {
   width: number
   height: number
   padding?: ChartPadding
+  /**
+   * Value orientation for projection semantics:
+   * - `consumed` (default): projected exhaustion marker points at the ceiling.
+   * - `remaining`: projected exhaustion marker points at baseline (0 remaining).
+   */
+  valueMode?: 'consumed' | 'remaining'
 }
 
 export type ChartGeometry = {
@@ -81,6 +87,7 @@ export function buildBurnTrailGeometry(
   const plotHeight = Math.max(0, plotBottom - plotTop)
 
   const baselineY = r(plotBottom)
+  const valueMode = options.valueMode ?? 'consumed'
 
   const empty: ChartGeometry = {
     width,
@@ -157,13 +164,16 @@ export function buildBurnTrailGeometry(
   const ceilingY = series.quotaCeiling > 0 ? scaleY(series.quotaCeiling) : null
 
   // Projection continuation: from the current point toward the projected
-  // exhaustion (which sits at the quota ceiling) or, lacking a timestamp, a
-  // short trend hint to the right edge.
+  // exhaustion. In consumed mode exhaustion sits at the quota ceiling; in
+  // remaining mode exhaustion is 0 remaining (baseline).
   let projection: ChartGeometry['projection'] = null
   if (series.projection) {
     const status = series.projection.projectionStatus
     if (typeof projT === 'number' && projT >= lastT) {
-      const marker = { x: scaleX(projT), y: ceilingY ?? scaleY(yMax) }
+      const markerY = valueMode === 'remaining'
+        ? baselineY
+        : (ceilingY ?? scaleY(yMax))
+      const marker = { x: scaleX(projT), y: markerY }
       projection = {
         status,
         line: `M${current.x} ${current.y} L${marker.x} ${marker.y}`,
