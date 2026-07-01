@@ -1,14 +1,14 @@
 /**
  * @file Push Notification Settings React component.
  *
- * Renders a small "Browser Notifications" card visible to authenticated users.
- * Allows users to subscribe or unsubscribe from browser push notifications for
- * future AI credit usage alerts.
+ * Renders the "Browser Notifications" card for authenticated users.
+ * - Subscribe / unsubscribe
+ * - Send test notification
+ * - Configure per-user alert preferences with sensible defaults
  *
- * ## Constraints
- * - Does NOT auto-prompt for notification permission on mount or import.
+ * Constraints:
+ * - Does NOT auto-prompt for notification permission on mount.
  * - Requests permission only from an explicit button click.
- * - Shows clear states: unsupported, config_missing, subscribed, unsubscribed.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -19,6 +19,10 @@ import {
   subscribeToPush,
   unsubscribeFromPush,
 } from './push-notifications';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type SubscriptionStatus = {
   vapidPublicKey: string | null;
@@ -39,6 +43,35 @@ type PushSectionState =
   | { phase: 'subscribed'; subscriptionCount: number }
   | { phase: 'unsubscribed'; vapidPublicKey: string }
   | { phase: 'error'; message: string };
+
+/** Per-user notification preferences stored by `/api/push/preferences`. */
+type PushUserPreferences = {
+  notifyOnStatusLevelChange: boolean;
+  notifyWhenStatusBecomesHot: boolean;
+  notifyWhenStatusBecomesOverage: boolean;
+  notifyWhenStatusBecomesBlocked: boolean;
+  notifyWhenProjectedExhaustionWithinHours: boolean;
+  projectedExhaustionThresholdHours: number;
+  notifyOnBurnRateIncrease: boolean;
+  burnRateIncreasePercentThreshold: number;
+  updatedAt: string;
+};
+
+const DEFAULT_PREFS: PushUserPreferences = {
+  notifyOnStatusLevelChange: true,
+  notifyWhenStatusBecomesHot: true,
+  notifyWhenStatusBecomesOverage: true,
+  notifyWhenStatusBecomesBlocked: true,
+  notifyWhenProjectedExhaustionWithinHours: true,
+  projectedExhaustionThresholdHours: 24,
+  notifyOnBurnRateIncrease: true,
+  burnRateIncreasePercentThreshold: 25,
+  updatedAt: '',
+};
+
+// ---------------------------------------------------------------------------
+// API helpers
+// ---------------------------------------------------------------------------
 
 async function fetchStatus(): Promise<SubscriptionStatus> {
   const res = await fetch('/api/push/subscribe');
@@ -65,12 +98,37 @@ async function deregisterSubscription(sub: PushSubscription): Promise<void> {
   if (!res.ok) throw new Error(`Unregister failed: ${res.status}`);
 }
 
+async function fetchPreferences(): Promise<PushUserPreferences> {
+  const res = await fetch('/api/push/preferences', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Preferences ${res.status}`);
+  return res.json() as Promise<PushUserPreferences>;
+}
+
+async function patchPreferences(
+  patch: Partial<PushUserPreferences>,
+): Promise<PushUserPreferences> {
+  const res = await fetch('/api/push/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Preferences save failed: ${res.status}`);
+  return res.json() as Promise<PushUserPreferences>;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function PushNotificationSection(): React.ReactElement | null {
   const [state, setState] = useState<PushSectionState>({ phase: 'loading' });
   const [busyOp, setBusyOp] = useState<null | 'subscribe' | 'test' | 'unsubscribe'>(null);
   const [testFeedback, setTestFeedback] = useState<TestNotifFeedback>(null);
+  const [prefs, setPrefs] = useState<PushUserPreferences>(DEFAULT_PREFS);
+  const [prefsSaveState, setPrefsSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const busy = busyOp !== null;
 
+  // Load subscription status on mount.
   const loadStatus = useCallback(async () => {
     try {
       const status = await fetchStatus();
@@ -85,15 +143,12 @@ export default function PushNotificationSection(): React.ReactElement | null {
         return;
       }
 
-      // Browser is supported and config is present
       const permission = getCurrentPermission();
       if (permission === 'denied') {
-        // Check if there's an active service worker subscription before concluding
         const existing = await getActiveSubscription();
         if (existing) {
           setState({ phase: 'subscribed', subscriptionCount: status.subscriptionCount });
         } else {
-          // Permission denied — can't subscribe
           setState({ phase: 'permission_denied' });
         }
         return;
@@ -102,14 +157,12 @@ export default function PushNotificationSection(): React.ReactElement | null {
       if (status.hasSubscriptions) {
         setState({ phase: 'subscribed', subscriptionCount: status.subscriptionCount });
       } else {
-        // vapidPublicKey is guaranteed non-null here: detectPushSupport returned
-        // 'supported' above, which requires a non-empty key.
         setState({ phase: 'unsubscribed', vapidPublicKey: status.vapidPublicKey ?? '' });
       }
     } catch (err) {
-      // Log in development to aid diagnosis; fall back to 'unsupported' so the
-      // card is hidden rather than showing a confusing error on page load.
-      if (typeof console !== 'undefined') console.warn('[PushNotificationSection] failed to load status:', err);
+      if (typeof console !== 'undefined') {
+        console.warn('[PushNotificationSection] failed to load status:', err);
+      }
       setState({ phase: 'unsupported' });
     }
   }, []);
@@ -118,20 +171,48 @@ export default function PushNotificationSection(): React.ReactElement | null {
     void loadStatus();
   }, [loadStatus]);
 
+  // Load preferences once the user can interact with the section.
+  useEffect(() => {
+    const canShowPrefs = state.phase === 'subscribed' || state.phase === 'unsubscribed';
+    if (!canShowPrefs) return;
+
+    let cancelled = false;
+    void fetchPreferences()
+      .then((value) => { if (!cancelled) setPrefs(value); })
+      .catch(() => { if (!cancelled) setPrefs(DEFAULT_PREFS); });
+    return () => { cancelled = true; };
+  }, [state.phase]);
+
+  // Persist a partial preferences change.
+  const savePatch = useCallback(async (patch: Partial<PushUserPreferences>) => {
+    setPrefsSaveState('saving');
+    try {
+      const updated = await patchPreferences(patch);
+      setPrefs(updated);
+      setPrefsSaveState('saved');
+      setTimeout(() => setPrefsSaveState('idle'), 1400);
+    } catch {
+      setPrefsSaveState('error');
+    }
+  }, []);
+
+  const handleToggle = useCallback(
+    (key: keyof PushUserPreferences, value: boolean | number) => {
+      setPrefs((prev) => ({ ...prev, [key]: value }));
+      void savePatch({ [key]: value } as Partial<PushUserPreferences>);
+    },
+    [savePatch],
+  );
+
+  // Subscribe / unsubscribe / test handlers.
   const handleSubscribe = useCallback(async () => {
     if (state.phase !== 'unsubscribed') return;
     setBusyOp('subscribe');
     try {
       const permission = await requestNotificationPermission();
-      if (permission !== 'granted') {
-        setState({ phase: 'permission_denied' });
-        return;
-      }
+      if (permission !== 'granted') { setState({ phase: 'permission_denied' }); return; }
       const sub = await subscribeToPush(state.vapidPublicKey);
-      if (!sub) {
-        setState({ phase: 'error', message: 'Could not subscribe. Try again.' });
-        return;
-      }
+      if (!sub) { setState({ phase: 'error', message: 'Could not subscribe. Try again.' }); return; }
       await registerSubscription(sub);
       await loadStatus();
     } catch (err) {
@@ -151,16 +232,10 @@ export default function PushNotificationSection(): React.ReactElement | null {
         setTestFeedback({ result: 'success' });
       } else {
         const body = await res.json() as { error?: string };
-        setTestFeedback({
-          result: 'error',
-          message: body.error ?? `Request failed (${res.status}).`,
-        });
+        setTestFeedback({ result: 'error', message: body.error ?? `Request failed (${res.status}).` });
       }
     } catch (err) {
-      setTestFeedback({
-        result: 'error',
-        message: err instanceof Error ? err.message : 'Could not reach the server.',
-      });
+      setTestFeedback({ result: 'error', message: err instanceof Error ? err.message : 'Could not reach the server.' });
     } finally {
       setBusyOp(null);
     }
@@ -172,10 +247,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
     setTestFeedback(null);
     try {
       const sub = await getActiveSubscription();
-      if (sub) {
-        await deregisterSubscription(sub);
-        await unsubscribeFromPush();
-      }
+      if (sub) { await deregisterSubscription(sub); await unsubscribeFromPush(); }
       await loadStatus();
     } catch (err) {
       setState({ phase: 'error', message: err instanceof Error ? err.message : 'Unsubscribe failed.' });
@@ -184,10 +256,9 @@ export default function PushNotificationSection(): React.ReactElement | null {
     }
   }, [state, loadStatus]);
 
-  // Do not render anything while loading or if unsupported
-  if (state.phase === 'loading' || state.phase === 'unsupported') {
-    return null;
-  }
+  if (state.phase === 'loading' || state.phase === 'unsupported') return null;
+
+  const showPrefs = state.phase === 'subscribed' || state.phase === 'unsubscribed';
 
   return (
     <section className="card pushNotificationCard" aria-label="Browser notification settings">
@@ -218,11 +289,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
             <p className="pushNotificationError">{testFeedback.message}</p>
           )}
           <div className="pushNotificationActions">
-            <button
-              onClick={() => void handleSendTest()}
-              disabled={busy}
-              className="pushNotificationBtn"
-            >
+            <button onClick={() => void handleSendTest()} disabled={busy} className="pushNotificationBtn">
               {busyOp === 'test' ? 'Sending…' : 'Send test notification'}
             </button>
             <button
@@ -242,11 +309,7 @@ export default function PushNotificationSection(): React.ReactElement | null {
             Get notified in this browser when your AI credit usage hits alert thresholds.
           </p>
           <div className="pushNotificationActions">
-            <button
-              onClick={() => void handleSubscribe()}
-              disabled={busy}
-              className="pushNotificationBtn"
-            >
+            <button onClick={() => void handleSubscribe()} disabled={busy} className="pushNotificationBtn">
               {busyOp === 'subscribe' ? 'Enabling…' : 'Enable notifications'}
             </button>
           </div>
@@ -257,14 +320,123 @@ export default function PushNotificationSection(): React.ReactElement | null {
         <>
           <p className="pushNotificationError">{state.message}</p>
           <div className="pushNotificationActions">
-            <button
-              onClick={() => void loadStatus()}
-              className="pushNotificationBtn pushNotificationBtnSecondary"
-            >
+            <button onClick={() => void loadStatus()} className="pushNotificationBtn pushNotificationBtnSecondary">
               Retry
             </button>
           </div>
         </>
+      )}
+
+      {showPrefs && (
+        <section className="pushNotificationPreferences" aria-label="Alert thresholds">
+          <h3 className="pushNotificationSubheading">Alert thresholds</h3>
+          <p className="pushNotificationNote pushNotificationNoteSmall">
+            Defaults alert on critical events only — adjust below.
+          </p>
+
+          <fieldset className="pushPrefFieldset">
+            <legend className="pushPrefLegend">Status transitions</legend>
+
+            <label className="pushPrefRow">
+              <input
+                type="checkbox"
+                checked={prefs.notifyWhenStatusBecomesHot}
+                onChange={(e) => handleToggle('notifyWhenStatusBecomesHot', e.target.checked)}
+              />
+              <span>Hot — credits running low or imminent exhaustion</span>
+            </label>
+
+            <label className="pushPrefRow">
+              <input
+                type="checkbox"
+                checked={prefs.notifyWhenStatusBecomesOverage}
+                onChange={(e) => handleToggle('notifyWhenStatusBecomesOverage', e.target.checked)}
+              />
+              <span>Overage — spending from configured budget</span>
+            </label>
+
+            <label className="pushPrefRow">
+              <input
+                type="checkbox"
+                checked={prefs.notifyWhenStatusBecomesBlocked}
+                onChange={(e) => handleToggle('notifyWhenStatusBecomesBlocked', e.target.checked)}
+              />
+              <span>Blocked — credits exhausted or hard stop</span>
+            </label>
+          </fieldset>
+
+          <fieldset className="pushPrefFieldset">
+            <legend className="pushPrefLegend">Projected exhaustion</legend>
+
+            <label className="pushPrefRow">
+              <input
+                type="checkbox"
+                checked={prefs.notifyWhenProjectedExhaustionWithinHours}
+                onChange={(e) =>
+                  handleToggle('notifyWhenProjectedExhaustionWithinHours', e.target.checked)
+                }
+              />
+              <span>Notify when projected exhaustion enters threshold window</span>
+            </label>
+
+            <label className="pushPrefField">
+              <span>Threshold (hours)</span>
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={prefs.projectedExhaustionThresholdHours}
+                disabled={!prefs.notifyWhenProjectedExhaustionWithinHours}
+                onChange={(e) =>
+                  handleToggle(
+                    'projectedExhaustionThresholdHours',
+                    Math.min(168, Math.max(1, Number(e.target.value) || 24)),
+                  )
+                }
+              />
+            </label>
+          </fieldset>
+
+          <fieldset className="pushPrefFieldset">
+            <legend className="pushPrefLegend">Burn rate</legend>
+
+            <label className="pushPrefRow">
+              <input
+                type="checkbox"
+                checked={prefs.notifyOnBurnRateIncrease}
+                onChange={(e) => handleToggle('notifyOnBurnRateIncrease', e.target.checked)}
+              />
+              <span>Notify when burn rate increases significantly</span>
+            </label>
+
+            <label className="pushPrefField">
+              <span>Threshold (%)</span>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={prefs.burnRateIncreasePercentThreshold}
+                disabled={!prefs.notifyOnBurnRateIncrease}
+                onChange={(e) =>
+                  handleToggle(
+                    'burnRateIncreasePercentThreshold',
+                    Math.min(500, Math.max(1, Number(e.target.value) || 25)),
+                  )
+                }
+              />
+            </label>
+          </fieldset>
+
+          {prefsSaveState === 'saving' && (
+            <p className="pushNotificationNote pushNotificationNoteSmall">Saving…</p>
+          )}
+          {prefsSaveState === 'saved' && (
+            <p className="pushNotificationSuccess pushNotificationNoteSmall">Preferences saved.</p>
+          )}
+          {prefsSaveState === 'error' && (
+            <p className="pushNotificationError">Could not save preferences. Try again.</p>
+          )}
+        </section>
       )}
     </section>
   );
