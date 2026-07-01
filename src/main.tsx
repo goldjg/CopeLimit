@@ -24,6 +24,15 @@ import { BurnTrailChart } from './BurnTrailChart';
 import { buildChartSeries } from '../netlify/functions/lib/chart-data';
 import type { ProjectionStatus } from '../netlify/functions/lib/burn-rate-projection';
 import {
+  type HistorySummary,
+  type MonthPeriodSummary,
+  type QuarterPeriodSummary,
+  type YearPeriodSummary,
+  computeMonthlyPeriodSummaries,
+  computeQuarterlyPeriodSummaries,
+  computeYearlyPeriodSummaries,
+} from '../netlify/functions/lib/history-metrics';
+import {
   creditsCostRateToUsd,
   creditsToUsd,
   computeEtaHours,
@@ -69,19 +78,6 @@ type Usage = {
 type BurnRateProjection = {
   projectedExhaustionAt?: string;
   projectionStatus?: ProjectionStatus;
-};
-
-type HistorySummary = {
-  deltaUsed: number;
-  creditsPerHour: number | null;
-  creditsPerDay: number | null;
-  averageBurnRate: number | null;
-  burnRateCostPerHourUsd: number | null;
-  averageBurnRateCostPerHourUsd: number | null;
-  burnCostPerDayUsd: number | null;
-  oldestAt: string | null;
-  newestAt: string | null;
-  snapshotCount: number;
 };
 
 type HistorySnapshot = {
@@ -137,6 +133,10 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
   const [historySnapshots, setHistorySnapshots] = useState<HistorySnapshot[]>([]);
+  const [allSnapshots, setAllSnapshots] = useState<HistorySnapshot[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historyViewMode, setHistoryViewMode] = useState<'months' | 'quarters' | 'years'>('months');
+  const [allSnapshotsLoading, setAllSnapshotsLoading] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -158,6 +158,21 @@ function App() {
       }
     } catch {
       // History is optional — silently ignore failures
+    }
+  }
+
+  async function fetchAllSnapshots() {
+    setAllSnapshotsLoading(true);
+    try {
+      const response = await fetch('/api/history?limit=2000', { cache: 'no-store' });
+      if (response.ok) {
+        const data = await response.json() as { snapshots?: HistorySnapshot[] };
+        setAllSnapshots(data.snapshots ?? []);
+      }
+    } catch {
+      // History is optional — silently ignore failures
+    } finally {
+      setAllSnapshotsLoading(false);
     }
   }
 
@@ -285,6 +300,40 @@ function App() {
       usage?.burnRateProjection?.projectionStatus,
     ],
   );
+
+  // True when the history summary's newest snapshot is in the current calendar month.
+  // If false, the summary is stale (all snapshots are from a prior month) and burn
+  // metrics must be hidden to avoid showing previous-period rates as current.
+  const summaryIsCurrentPeriod = useMemo(() => {
+    if (!historySummary?.newestAt) return false;
+    const summaryMonth = historySummary.newestAt.slice(0, 7);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return summaryMonth === currentMonth;
+  }, [historySummary?.newestAt]);
+
+  // Period aggregations derived from the full snapshot history (loaded on demand).
+  const monthlyPeriods = useMemo<MonthPeriodSummary[]>(
+    () => computeMonthlyPeriodSummaries(allSnapshots),
+    [allSnapshots],
+  );
+  const quarterlyPeriods = useMemo<QuarterPeriodSummary[]>(
+    () => computeQuarterlyPeriodSummaries(monthlyPeriods),
+    [monthlyPeriods],
+  );
+  const yearlyPeriods = useMemo<YearPeriodSummary[]>(
+    () => computeYearlyPeriodSummaries(monthlyPeriods),
+    [monthlyPeriods],
+  );
+
+  // Derive the current calendar month "YYYY-MM" to identify and skip it in
+  // the previous-periods list (it is already shown in the main history card).
+  const currentYearMonth = new Date().toISOString().slice(0, 7);
+
+  function formatMonth(ym: string): string {
+    const [year, month] = ym.split('-');
+    return new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1)
+      .toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+  }
 
   return (
     <main className="shell">
@@ -498,45 +547,51 @@ function App() {
             </section>
           )}
 
-          {historySummary && historySummary.snapshotCount >= 2 && (
+          {historySummary && (
             <section className="card historySummary">
-              <span className="label">Usage history</span>
-              <div className="historyGrid">
-                <div>
-                  <span>Consumed (window)</span>
-                  <strong>{historySummary.deltaUsed}</strong>
-                  <p className="subtle">≈ {formatUsd(historySummary.deltaUsed * 0.01)} est.</p>
+              <span className="label">This billing period</span>
+              {!summaryIsCurrentPeriod ? (
+                <p className="subtle">No data for the current billing period yet.</p>
+              ) : historySummary.snapshotCount < 2 ? (
+                <p className="subtle">Tracking started — more data needed to compute burn rate.</p>
+              ) : (
+                <div className="historyGrid">
+                  <div>
+                    <span>Consumed (this period)</span>
+                    <strong>{historySummary.deltaUsed}</strong>
+                    <p className="subtle">≈ {formatUsd(historySummary.deltaUsed * 0.01)} est.</p>
+                  </div>
+                  {burnRateLabel && (
+                    <div>
+                      <span>Burn rate</span>
+                      <strong>{burnRateLabel}</strong>
+                      <p className="subtle">
+                        ≈ {formatUsd(historySummary.burnRateCostPerHourUsd ?? creditsCostRateToUsd(historySummary.creditsPerHour))}/hr est.
+                      </p>
+                    </div>
+                  )}
+                  {dailyBurnLabel && (
+                    <div>
+                      <span>Burn / day</span>
+                      <strong>{dailyBurnLabel}</strong>
+                      <p className="subtle">≈ {dailyBurnCostLabel} est.</p>
+                    </div>
+                  )}
+                  {etaLabel && (
+                    <div>
+                      <span>ETA (this period)</span>
+                      <strong>{etaLabel}</strong>
+                    </div>
+                  )}
+                  {historySummary.averageBurnRate !== null && (
+                    <div>
+                      <span>Avg burn rate</span>
+                      <strong>{historySummary.averageBurnRate.toFixed(1)}/hr</strong>
+                      <p className="subtle">≈ {formatUsd(historySummary.averageBurnRateCostPerHourUsd)}/hr est.</p>
+                    </div>
+                  )}
                 </div>
-                {burnRateLabel && (
-                  <div>
-                    <span>Burn rate</span>
-                    <strong>{burnRateLabel}</strong>
-                    <p className="subtle">
-                      ≈ {formatUsd(historySummary.burnRateCostPerHourUsd ?? creditsCostRateToUsd(historySummary.creditsPerHour))}/hr est.
-                    </p>
-                  </div>
-                )}
-                {dailyBurnLabel && (
-                  <div>
-                    <span>Burn / day</span>
-                    <strong>{dailyBurnLabel}</strong>
-                    <p className="subtle">≈ {dailyBurnCostLabel} est.</p>
-                  </div>
-                )}
-                {etaLabel && (
-                  <div>
-                    <span>ETA</span>
-                    <strong>{etaLabel}</strong>
-                  </div>
-                )}
-                {historySummary.averageBurnRate !== null && (
-                  <div>
-                    <span>Avg burn rate</span>
-                    <strong>{historySummary.averageBurnRate.toFixed(1)}/hr</strong>
-                    <p className="subtle">≈ {formatUsd(historySummary.averageBurnRateCostPerHourUsd)}/hr est.</p>
-                  </div>
-                )}
-              </div>
+              )}
               {chartSeries.hasData && chartSeries.points.length >= 2 && (
                 <>
                   <p className="historyTrendLabel">
@@ -552,7 +607,7 @@ function App() {
                   />
                 </>
               )}
-              {historySummary.oldestAt && historySummary.newestAt && (
+              {historySummary.oldestAt && historySummary.newestAt && summaryIsCurrentPeriod && (
                 <p className="historyWindow">
                   {new Date(historySummary.oldestAt).toLocaleString()} –{' '}
                   {new Date(historySummary.newestAt).toLocaleString()}
@@ -561,6 +616,130 @@ function App() {
               )}
             </section>
           )}
+
+          <section className="card periodHistory">
+            <details
+              onToggle={(e) => {
+                const open = (e.target as HTMLDetailsElement).open;
+                setHistoryExpanded(open);
+                if (open && allSnapshots.length === 0 && !allSnapshotsLoading) {
+                  void fetchAllSnapshots();
+                }
+              }}
+            >
+              <summary className="label periodHistorySummary">Previous periods</summary>
+              {allSnapshotsLoading && <p className="subtle">Loading history…</p>}
+              {!allSnapshotsLoading && historyExpanded && allSnapshots.length === 0 && (
+                <p className="subtle">No historical data available yet.</p>
+              )}
+              {!allSnapshotsLoading && allSnapshots.length > 0 && (
+                <>
+                  <div className="periodViewTabs">
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'months' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('months')}
+                    >Months</button>
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'quarters' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('quarters')}
+                    >Quarters</button>
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'years' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('years')}
+                    >Years</button>
+                  </div>
+
+                  {historyViewMode === 'months' && (
+                    monthlyPeriods.filter(mp => mp.month !== currentYearMonth).length === 0
+                      ? <p className="subtle">No previous months on record.</p>
+                      : monthlyPeriods
+                          .filter(mp => mp.month !== currentYearMonth)
+                          .map(mp => (
+                            <div key={mp.month} className="periodCard">
+                              <span className="periodCardLabel">{formatMonth(mp.month)}</span>
+                              <div className="periodGrid">
+                                <div>
+                                  <span>Consumed</span>
+                                  <strong>{mp.summary.deltaUsed}</strong>
+                                  <p className="subtle">≈ {formatUsd(mp.summary.deltaUsed * 0.01)} est.</p>
+                                </div>
+                                {mp.summary.creditsPerDay !== null && (
+                                  <div>
+                                    <span>Avg / day</span>
+                                    <strong>{mp.summary.creditsPerDay.toFixed(1)}</strong>
+                                  </div>
+                                )}
+                                <div>
+                                  <span>Snapshots</span>
+                                  <strong>{mp.summary.snapshotCount}</strong>
+                                </div>
+                              </div>
+                              {mp.summary.oldestAt && mp.summary.newestAt && (
+                                <p className="historyWindow">
+                                  {new Date(mp.summary.oldestAt).toLocaleDateString()} –{' '}
+                                  {new Date(mp.summary.newestAt).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                  )}
+
+                  {historyViewMode === 'quarters' && (
+                    quarterlyPeriods.length === 0
+                      ? <p className="subtle">No quarterly data on record.</p>
+                      : quarterlyPeriods.map(qp => (
+                          <div key={qp.quarter} className="periodCard">
+                            <span className="periodCardLabel">{qp.quarter}</span>
+                            <div className="periodGrid">
+                              <div>
+                                <span>Total consumed</span>
+                                <strong>{qp.totalConsumed}</strong>
+                                <p className="subtle">≈ {formatUsd(qp.totalConsumed * 0.01)} est.</p>
+                              </div>
+                              <div>
+                                <span>Months tracked</span>
+                                <strong>{qp.months.length}</strong>
+                              </div>
+                              <div>
+                                <span>Snapshots</span>
+                                <strong>{qp.snapshotCount}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                  )}
+
+                  {historyViewMode === 'years' && (
+                    yearlyPeriods.length === 0
+                      ? <p className="subtle">No yearly data on record.</p>
+                      : yearlyPeriods.map(yp => (
+                          <div key={yp.year} className="periodCard">
+                            <span className="periodCardLabel">{yp.year}</span>
+                            <div className="periodGrid">
+                              <div>
+                                <span>Total consumed</span>
+                                <strong>{yp.totalConsumed}</strong>
+                                <p className="subtle">≈ {formatUsd(yp.totalConsumed * 0.01)} est.</p>
+                              </div>
+                              <div>
+                                <span>Months tracked</span>
+                                <strong>{yp.months.length}</strong>
+                              </div>
+                              <div>
+                                <span>Snapshots</span>
+                                <strong>{yp.snapshotCount}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                  )}
+                </>
+              )}
+            </details>
+          </section>
         </>
       )}
 
