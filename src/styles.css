@@ -968,6 +968,84 @@ a:focus-visible {
   color: #f9fafb;
 }
 
+.pushNotificationPreferences {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+}
+
+.pushNotificationSubheading {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  color: #f3f4f6;
+}
+
+.pushPrefRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: #d1d5db;
+  font-size: 0.88rem;
+}
+
+.pushPrefRowNested {
+  margin-left: 20px;
+  color: #9ca3af;
+}
+
+.pushPrefField {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  color: #d1d5db;
+  font-size: 0.84rem;
+}
+
+.pushPrefField input[type='number'] {
+  width: 120px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 23, 42, 0.5);
+  color: #f9fafb;
+  padding: 8px 10px;
+}
+
+.pushAdvancedPrefs {
+  margin-top: 10px;
+}
+
+.pushAdvancedPrefs summary {
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 0.84rem;
+}
+
+.pushPrefGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 4px 12px;
+  margin-top: 8px;
+}
+
+.pushPrefFieldset {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 10px 12px 6px;
+}
+
+.pushPrefLegend {
+  font-size: 0.82rem;
+  color: #93c5fd;
+  padding: 0 4px;
+}
+
+.pushNotificationNoteSmall {
+  font-size: 0.8rem;
+  margin: 4px 0;
+}
+
 /* ── Widget refresh cadence settings ─────────────────────────────────────── */
 
 .widgetRefreshSettings {

@@ -1,4 +1,4 @@
-<!-- version: 1.1.0 -->
+<!-- version: 1.2.0 -->
 # Current PR Contract
 
 This contract constrains implementation scope for the active PR. Update
@@ -7,13 +7,12 @@ approved scope, stop and escalate before proceeding.
 
 ## Goal
 
-Implement the fuel-tank visual fix and behavior update:
-- **Bugfix (widget-only):** ensure the fuel tank renders on the large Scriptable widget.
-- **Behavior change (widget + PWA):** render the tank as a real gauge where top is
-  capacity (quota or budget, depending on billing phase), bottom is `0`, and the
-  current value trends downward toward `0`.
-- Distinguish quota vs budget tank mode visually when API billing fields provide
-  enough context.
+Implement user-configurable live browser push alerts:
+- make alert delivery run **per authenticated user** against that user's subscriptions;
+- add per-user push notification preferences in the PWA with sensible defaults;
+- trigger alerts on meaningful state changes (comfort/status transitions) and
+  burn-rate change thresholds;
+- preserve existing test-push and subscription behavior.
 
 ## Contract status
 
@@ -21,76 +20,57 @@ active
 
 ## Non-goals
 
-- Changing usage normalisation or API response shape
-- Changing widget refresh cadence behaviour
-- Changing onboarding, token storage, or settings persistence
-- Adding dependencies, storage, or new backend endpoints
-
-## Carry-forward rules
-
-- Billing-phase and overage fields from normalized usage remain the source of
-  truth for selecting quota-vs-budget tank mode.
-- Missing or incomplete budget fields must degrade safely to quota-mode
-  rendering (non-fatal).
-- Tank rendering remains presentational-only and must not change fetch/auth/
-  token logic.
+- Changing usage normalization (`copilot.ts`, `normaliseUsage`) semantics
+- Changing auth/session cookie primitives
+- Changing widget token or onboarding flows
+- Introducing new dependencies
+- Introducing external cron/scheduler infrastructure
 
 ## Approved scope
 
-1. `public/scriptable/CopeLimitWidget.js`
-   - fix large-widget tank rendering bug
-   - implement real-gauge semantics (top=capacity, bottom=0, downward toward 0)
-   - apply visual distinction for quota vs budget mode
-2. `src/BurnTrailChart.tsx`
-   - apply matching gauge semantics for PWA chart rendering
-   - apply quota-vs-budget visual distinction
-3. `src/chart-geometry.ts`
-   - add minimal geometry support needed for downward-to-zero gauge projection semantics
-4. `src/main.tsx`
-   - pass required billing context into PWA chart mode selection
-5. `src/__tests__/chart-geometry.test.ts`
-   - add/update focused assertions for new gauge semantics
-6. `.github/carl/current-pr-contract.md`
-   - update this contract for the expanded split scope
-
-## Intentional amendments
-
-- Supersedes the previously active "Last Updated label" presentation contract.
-- Scope is expanded to include both widget and PWA tank behavior alignment,
-  while keeping the rendering bugfix itself widget-only.
+1. Push notification backend flow (Netlify Functions + lib):
+   - add per-user preference persistence for push alerts;
+   - add live per-user send logic in `/api/usage` (non-blocking, fail-safe);
+   - keep sends bounded to the authenticated user's own subscriptions.
+2. PWA notification settings UI:
+   - expose preference controls for status-change alerts and burn-rate-change thresholds;
+   - apply sensible defaults and persist via API.
+3. Routing/docs/tests updates required to support the above.
+4. `.github/carl/current-pr-contract.md` (this file).
 
 ## Forbidden scope
 
-- Modifying usage normalisation (`copilot.ts`, `normaliseUsage`)
-- Modifying `widget-usage.ts` response semantics
-- Modifying onboarding, token storage, or widget settings persistence
-- Modifying backend auth/session/blob-store behavior
-- Adding dependencies or backend storage
+- Any weakening of auth/session verification
+- Any storage of secrets/tokens in client-visible payloads
+- Any broad unrelated refactors
+- Any dependency/tooling changes unrelated to push preference/live-alert behavior
 
 ## Architectural constraints
 
-- Gauge capacity must use **quota** in credit phases and **budget entitlement**
-  in budget phases when available.
-- Gauge value must represent remaining capacity toward zero (downward
-  trajectory), not consumed-upward-only rendering.
-- Quota vs budget mode must be visually distinguishable by fill/gradient/shading.
-- Changes remain presentation-only; no API shape, auth, or storage changes.
-- Missing budget metadata must safely fall back to quota mode.
+- Existing `push-subscriptions` records remain user-scoped by `userId`.
+- Live send logic must be non-blocking for `/api/usage` responses.
+- Preference persistence must be per-user and default-safe.
+- Alert triggers must build from existing `comfortStatus`, `alertDecision`, and burn-rate projection signals (no duplicate business logic forks).
 
 ## Security constraints
 
-- No token, credential, or provider payload handling may change.
-- No new external I/O introduced for rendering.
-- Trust-boundary handling and normalized usage fields remain unchanged.
+- No secret exposure in push payloads or logs.
+- No cross-user subscription access or send fan-out.
+- No new privileged trust boundary expansion.
 
 ## Files expected to change
 
-- `public/scriptable/CopeLimitWidget.js` ✅
-- `src/BurnTrailChart.tsx` ✅
-- `src/chart-geometry.ts` ✅
-- `src/main.tsx` ✅
-- `src/__tests__/chart-geometry.test.ts` ✅
-- `.github/carl/current-pr-contract.md` ✅ (this file)
+- `netlify/functions/usage.ts`
+- `netlify/functions/push-subscribe.ts` (if response shape is extended)
+- `netlify/functions/push-preferences.ts` (new)
+- `netlify/functions/lib/push-subscription-store.ts` and/or new push preference/state helper(s)
+- `netlify/functions/lib/push-subscription-types.ts` (if needed)
+- `src/PushNotificationSection.tsx`
+- `src/styles.css`
+- `netlify.toml`
+- `README.md`
+- tests under `netlify/functions/lib/__tests__/` and/or `src/__tests__/`
+- `.github/carl/current-pr-contract.md`
 
 ## Tests / validation
 
@@ -99,32 +79,25 @@ active
 - `npm run lint` — expected pre-existing TS5107 (non-blocking baseline)
 
 Acceptance checks:
-- Large widget fuel tank renders when trend data is present
-- Widget gauge uses top=quota or top=budget based on billing phase context
-- Widget gauge reads downward toward 0 remaining capacity
-- PWA chart follows the same downward-to-zero gauge semantics
-- Quota vs budget modes are visually distinguishable
-- Missing budget fields safely fall back to quota mode rendering
+- Preferences are saved and loaded per authenticated user.
+- Status-change alerts can be enabled/disabled and follow configured behavior.
+- Burn-rate change alerts trigger when configured threshold is exceeded.
+- Live send path uses only the current authenticated user's subscriptions.
+- `/api/usage` remains successful even if push send/storage operations fail.
 
 ## Stop conditions
 
-- Any change that would alter usage normalisation or billing-phase derivation
-- Any change that requires backend API shape changes
-- Any change that affects token/credential handling
-- Any scope expansion outside listed widget/PWA rendering files
+- Any requirement to change session/auth primitives
+- Any requirement for global background scheduling outside current app pattern
+- Any need to persist or expose sensitive credentials in new structures
 
 ## Escalation triggers
 
-- If budget-mode semantics require backend historical fields not currently exposed
-  for accurate rendering.
-- If large widget layout cannot maintain readability with mode-distinguishing
-  visuals.
-- If PWA projection semantics conflict with the downward-to-zero gauge behavior.
+- If "live" is interpreted as mandatory out-of-band background delivery while user is offline.
+- If preference model needs multi-device/per-subscription overrides beyond per-user scope.
 
 ## Context reset notes
 
 When this PR is merged:
 - Close this contract (set status: closed).
-- Promote any durable cross-surface gauge-mode conventions to memory/docs only
-  if they are stable and intentional.
-- Do not delete this file until a new contract is created.
+- Promote stable push-alert preference and live-delivery assumptions to durable docs/memory.

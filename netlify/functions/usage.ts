@@ -82,6 +82,7 @@ import { computeComfortStatus } from './lib/comfort-status';
 import type { ComfortStatus } from './lib/comfort-status';
 import { evaluateAlertDecision } from './lib/alert-decision';
 import type { AlertDecision } from './lib/alert-decision';
+import { maybeSendLivePushNotification } from './lib/push-live-notifications';
 
 type UsageResult = {
   usage: Usage;
@@ -392,6 +393,19 @@ export const handler: Handler = async (event) => {
       alertDecision = evaluateAlertDecision({ usage, projection: burnRateProjection, comfortStatus });
     } catch {
       // Non-blocking: alert-decision failures must not affect the usage response.
+    }
+
+    // Live per-user push notifications (best-effort, non-blocking):
+    // - only for authenticated users with userId
+    // - sends to that user's registered subscriptions only
+    // - respects per-user push preferences and dedupe state
+    if (result.userId !== undefined) {
+      void maybeSendLivePushNotification({
+        userId: result.userId,
+        comfortStatus,
+        burnRateProjection,
+        alertDecision,
+      });
     }
 
     const responseBody = {
