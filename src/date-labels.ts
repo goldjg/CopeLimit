@@ -60,13 +60,15 @@ export function formatProjectionLabel(value: string | Date | null | undefined): 
  * Returns a compact UK-style chart-window summary, e.g.
  * `Window: 1 Jul 03:53 → 2 Jul 21:05 · 12 snapshots`
  *
- * Returns `null` when either date is invalid or missing.
+ * Returns `null` when either date is invalid or missing, or when
+ * `snapshotCount` is less than 1.
  */
 export function formatWindowText(
   startValue: string | Date | null | undefined,
   endValue: string | Date | null | undefined,
   snapshotCount: number,
 ): string | null {
+  if (snapshotCount < 1) return null
   const startLabel = formatDateTime(startValue)
   const endLabel = formatDateTime(endValue)
   if (!startLabel || !endLabel) return null

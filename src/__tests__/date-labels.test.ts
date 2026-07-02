@@ -40,10 +40,8 @@ describe('date labels', () => {
 describe('formatWindowText', () => {
   it('produces compact Window: label with arrow separator and snapshot count', () => {
     const result = formatWindowText('2026-07-01T03:53:00.000Z', '2026-07-02T21:05:00.000Z', 12)
-    // Should contain "Window:", "→", "·", "12 snapshots" and no seconds
-    expect(result).toMatch(/^Window:/)
-    expect(result).toContain('→')
-    expect(result).toContain('·')
+    // Positive assertion: matches the documented example format
+    expect(result).toMatch(/^Window: \d{1,2} \w{3} \d{2}:\d{2} → \d{1,2} \w{3} \d{2}:\d{2} · \d+ snapshots?$/)
     expect(result).toContain('12 snapshots')
     expect(result).not.toMatch(/:\d{2}:\d{2}/) // no seconds
   })
@@ -58,6 +56,10 @@ describe('formatWindowText', () => {
     expect(formatWindowText('bad', '2026-07-02T21:05:00.000Z', 5)).toBeNull()
     expect(formatWindowText('2026-07-01T03:53:00.000Z', 'bad', 5)).toBeNull()
     expect(formatWindowText(null, null, 5)).toBeNull()
+  })
+
+  it('returns null when snapshotCount is less than 1', () => {
+    expect(formatWindowText('2026-07-01T03:53:00.000Z', '2026-07-02T21:05:00.000Z', 0)).toBeNull()
   })
 })
 

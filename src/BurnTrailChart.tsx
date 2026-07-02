@@ -164,9 +164,12 @@ export function BurnTrailChart({
   const projectionLabel = series.projection?.projectedExhaustionAt ? formatProjectionLabel(series.projection.projectedExhaustionAt) : null
 
   // Guard zones that protect the corner range labels from reset-label crowding.
-  // The start label sits at x≈4 (up to ~44px wide) and the end label is
-  // right-anchored near x=316; keep a clear channel on each edge so the reset
-  // label text doesn't overlap them or run off-screen.
+  // The start label sits at x≈4 and "1 Jul" (9 px font) spans roughly 28 px,
+  // so anything starting before x≈44 would overlap it.
+  // A reset label like "Reset 1 Aug" (11 chars, ~8 px font) is ~56 px wide;
+  // placed at marker.x + 4, it reaches marker.x + 60. The end label is
+  // right-anchored near x=316, so we suppress the label when marker.x > 258
+  // (VIEW_WIDTH − 62) to avoid collision or overflow.
   const RESET_LABEL_LEFT_CLEAR = 44
   const RESET_LABEL_RIGHT_CLEAR = 62
   const lastResetX = geo.resetMarkers.length > 0 ? geo.resetMarkers[geo.resetMarkers.length - 1].x : null
