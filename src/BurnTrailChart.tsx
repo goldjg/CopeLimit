@@ -137,14 +137,36 @@ export function BurnTrailChart({
   const projectionColor = isRisk ? '#ef4444' : isSafe ? '#22c55e' : '#a1a1aa'
   const gradientId = 'burnTrailFill'
   const caption = projectionCaption(series)
+  const projectionLabelEdgeThreshold = 44
+  const projectionLabelTopThreshold = 18
+  const projectionLabelOffsetBelow = 12
+  const projectionLabelOffsetAbove = 6
+  const projectionLabelAnchor = geo.projection?.marker && geo.projection.marker.x > VIEW_WIDTH - projectionLabelEdgeThreshold ? 'end' : 'start'
+  const projectionLabelX = geo.projection?.marker
+    ? (geo.projection.marker.x > VIEW_WIDTH - projectionLabelEdgeThreshold ? geo.projection.marker.x - 4 : geo.projection.marker.x + 4)
+    : 0
+  const projectionLabelY = geo.projection?.marker
+    ? (geo.projection.marker.y < projectionLabelTopThreshold ? geo.projection.marker.y + projectionLabelOffsetBelow : geo.projection.marker.y - projectionLabelOffsetAbove)
+    : 0
   const rangeLabels = formatRangeLabels(
     series.points[0]?.capturedAt,
     series.points[series.points.length - 1]?.capturedAt,
   )
-  const resetPoint = [...series.points].reverse().find((point) => point.isPeriodStart)
+  let resetPoint: typeof series.points[number] | undefined
+  for (let index = series.points.length - 1; index >= 0; index -= 1) {
+    const point = series.points[index]
+    if (point.isPeriodStart) {
+      resetPoint = point
+      break
+    }
+  }
   const resetLabel = resetPoint?.capturedAt ? formatResetLabel(resetPoint.capturedAt) : null
   const projectionLabel = series.projection?.projectedExhaustionAt ? formatProjectionLabel(series.projection.projectedExhaustionAt) : null
-  const titleText = `Usage burn trail from ${rangeLabels.startLabel} to ${rangeLabels.endLabel} across ${series.points.length} snapshots${resetLabel ? `. ${resetLabel}.` : ''}${projectionLabel ? ` ${projectionLabel}.` : ''}${caption ? ` ${caption}.` : ''}`
+  const rangeDescription = [
+    rangeLabels.startLabel ? `from ${rangeLabels.startLabel}` : null,
+    rangeLabels.endLabel ? `to ${rangeLabels.endLabel}` : null,
+  ].filter(Boolean).join(' ')
+  const titleText = `Usage burn trail${rangeDescription ? ` ${rangeDescription}` : ''} across ${series.points.length} snapshots${resetLabel ? `. ${resetLabel}.` : ''}${projectionLabel ? ` ${projectionLabel}.` : ''}${caption ? ` ${caption}.` : ''}`
 
   return (
     <div className="burnTrail">
@@ -178,8 +200,12 @@ export function BurnTrailChart({
           />
         )}
 
-        <text x={4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500}>{rangeLabels.startLabel}</text>
-        <text x={VIEW_WIDTH - 4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500} textAnchor="end">{rangeLabels.endLabel}</text>
+        {rangeLabels.startLabel && (
+          <text x={4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500}>{rangeLabels.startLabel}</text>
+        )}
+        {rangeLabels.endLabel && (
+          <text x={VIEW_WIDTH - 4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500} textAnchor="end">{rangeLabels.endLabel}</text>
+        )}
 
         {/* Burn-trail area + line, one path per billing period. */}
         {geo.segments.map((seg, i) => (
@@ -231,7 +257,15 @@ export function BurnTrailChart({
               strokeWidth={1}
             />
             {projectionLabel && (
-              <text x={geo.projection.marker.x + 4} y={geo.projection.marker.y - 6} fill={projectionColor} fontSize={8}>{projectionLabel}</text>
+              <text
+                x={projectionLabelX}
+                y={projectionLabelY}
+                fill={projectionColor}
+                fontSize={8}
+                textAnchor={projectionLabelAnchor}
+              >
+                {projectionLabel}
+              </text>
             )}
           </g>
         )}

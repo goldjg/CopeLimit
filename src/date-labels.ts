@@ -8,13 +8,13 @@ function parseDate(value: string | Date | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-export function formatShortDate(value: string | Date | null | undefined, fallback = 'unknown'): string {
+export function formatShortDate(value: string | Date | null | undefined, fallback: string | null = null): string | null {
   const date = parseDate(value)
   if (!date) return fallback
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-export function formatDateTime(value: string | Date | null | undefined, fallback = 'unknown'): string {
+export function formatDateTime(value: string | Date | null | undefined, fallback: string | null = null): string | null {
   const date = parseDate(value)
   if (!date) return fallback
   const dayMonth = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
@@ -25,27 +25,33 @@ export function formatDateTime(value: string | Date | null | undefined, fallback
 export function formatRangeLabels(
   startValue: string | Date | null | undefined,
   endValue: string | Date | null | undefined,
-  fallback = 'unknown',
-): { startLabel: string; endLabel: string } {
+): { startLabel: string | null; endLabel: string | null } {
   const start = parseDate(startValue)
   const end = parseDate(endValue)
-  if (!start || !end) {
-    return { startLabel: fallback, endLabel: fallback }
+
+  if (!start && !end) {
+    return { startLabel: null, endLabel: null }
+  }
+  if (!start) {
+    return { startLabel: null, endLabel: end ? formatShortDate(end) : null }
+  }
+  if (!end) {
+    return { startLabel: formatShortDate(start), endLabel: null }
   }
 
   const sameDay = start.toDateString() === end.toDateString()
   return {
-    startLabel: formatShortDate(start, fallback),
-    endLabel: sameDay ? formatDateTime(end, fallback) : formatShortDate(end, fallback),
+    startLabel: formatShortDate(start),
+    endLabel: sameDay ? formatDateTime(end) : formatShortDate(end),
   }
 }
 
 export function formatResetLabel(value: string | Date | null | undefined): string | null {
   const date = formatShortDate(value)
-  return date === 'unknown' ? null : `Reset ${date}`
+  return date ? `Reset ${date}` : null
 }
 
 export function formatProjectionLabel(value: string | Date | null | undefined): string | null {
   const date = formatShortDate(value)
-  return date === 'unknown' ? null : `Runs out ${date}`
+  return date ? `Runs out ${date}` : null
 }

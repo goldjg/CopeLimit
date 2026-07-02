@@ -115,16 +115,16 @@ function deriveStatusLabel(usage) {
 }
 
 function formatShortDate(value) {
-  if (!value) return "unknown";
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unknown";
+  if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 function formatDateTime(value) {
-  if (!value) return "unknown";
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unknown";
+  if (Number.isNaN(date.getTime())) return null;
   return date.toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
@@ -136,25 +136,22 @@ function formatDateTime(value) {
 function formatRangeLabels(startValue, endValue) {
   const start = startValue ? new Date(startValue) : null;
   const end = endValue ? new Date(endValue) : null;
-  if (!start || Number.isNaN(start.getTime()) || !end || Number.isNaN(end.getTime())) {
-    return { startLabel: "unknown", endLabel: "unknown" };
-  }
-
-  const sameDay = start.toDateString() === end.toDateString();
-  return {
-    startLabel: formatShortDate(start),
-    endLabel: sameDay ? formatDateTime(end) : formatShortDate(end)
-  };
+  const startIsValid = !!start && !Number.isNaN(start.getTime());
+  const endIsValid = !!end && !Number.isNaN(end.getTime());
+  const sameDay = startIsValid && endIsValid && start.toDateString() === end.toDateString();
+  const startLabel = startIsValid ? formatShortDate(start) : null;
+  const endLabel = endIsValid ? (sameDay ? formatDateTime(end) : formatShortDate(end)) : null;
+  return { startLabel, endLabel };
 }
 
 function formatResetLabel(value) {
   const label = formatShortDate(value);
-  return label === "unknown" ? null : `Reset ${label}`;
+  return label ? `Reset ${label}` : null;
 }
 
 function formatProjectionLabel(value) {
   const label = formatShortDate(value);
-  return label === "unknown" ? null : `Runs out ${label}`;
+  return label ? `Runs out ${label}` : null;
 }
 
 function formatLastUpdated(value) {
@@ -606,9 +603,9 @@ function createLargeWidget(usage) {
   const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
   const sparkline = extras ? extras.sparkline : null;
   const quotaCeiling = extras && typeof extras.quotaCeiling === "number" ? extras.quotaCeiling : usage.quota;
-  const chartRangeLabels = extras ? formatRangeLabels(extras.chartStartAt, extras.chartEndAt) : { startLabel: "unknown", endLabel: "unknown" };
-  const chartStartLabel = chartRangeLabels.startLabel !== "unknown" ? `Start ${chartRangeLabels.startLabel}` : null;
-  const chartEndLabel = chartRangeLabels.endLabel !== "unknown" ? `Updated ${chartRangeLabels.endLabel}` : null;
+  const chartRangeLabels = extras ? formatRangeLabels(extras.chartStartAt, extras.chartEndAt) : { startLabel: null, endLabel: null };
+  const chartStartLabel = chartRangeLabels.startLabel ? `Start ${chartRangeLabels.startLabel}` : null;
+  const chartEndLabel = chartRangeLabels.endLabel ? `Updated ${chartRangeLabels.endLabel}` : null;
   const resetLabel = usage.resetAt ? formatResetLabel(usage.resetAt) : null;
   const projectionLabel = usage.burnRateProjection && usage.burnRateProjection.projectedExhaustionAt
     ? formatProjectionLabel(usage.burnRateProjection.projectedExhaustionAt)

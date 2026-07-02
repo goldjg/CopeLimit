@@ -25,10 +25,10 @@ describe('date labels', () => {
     expect(formatProjectionLabel('2026-07-19T00:00:00.000Z')).toBe('Runs out 19 Jul')
   })
 
-  it('does not render Invalid Date for malformed values', () => {
+  it('returns null instead of visible unknown labels for malformed values', () => {
     expect(formatRangeLabels('not-a-date', 'also-not-a-date')).toEqual({
-      startLabel: 'unknown',
-      endLabel: 'unknown',
+      startLabel: null,
+      endLabel: null,
     })
     expect(formatResetLabel('not-a-date')).toBeNull()
     expect(formatProjectionLabel('not-a-date')).toBeNull()

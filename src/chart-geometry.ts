@@ -159,7 +159,7 @@ export function buildBurnTrailGeometry(
     const p = points[i]
     if (i > 0 && p.isPeriodStart) flush()
     const point = { x: scaleX(p.t), y: scaleY(p.used) }
-    if (p.isPeriodStart) resetMarkers.push(point)
+    if (i > 0 && p.isPeriodStart) resetMarkers.push(point)
     group.push(point)
   }
   flush()
