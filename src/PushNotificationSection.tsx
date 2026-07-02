@@ -10,7 +10,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   NotificationCapability,
-  NotificationCapabilityReason,
   detectPushSupport,
   getActiveSubscription,
   getCurrentPermission,
@@ -58,18 +57,6 @@ const DEFAULT_PREFS: PushUserPreferences = {
   notifyOnBurnRateIncrease: true,
   burnRateIncreasePercentThreshold: 25,
   updatedAt: '',
-}
-
-const CAPABILITY_REASON_LABELS: Record<NotificationCapabilityReason, string> = {
-  supported: 'ready_to_subscribe',
-  subscription_active: 'subscription_active',
-  not_installed_on_ios: 'not_installed_on_ios',
-  notification_unavailable: 'notification_unavailable',
-  service_worker_unavailable: 'service_worker_unavailable',
-  push_manager_unavailable: 'push_manager_unavailable',
-  notification_permission_denied: 'notification_permission_denied',
-  vapid_public_key_missing: 'vapid_public_key_missing',
-  service_worker_registration_unavailable: 'service_worker_registration_unavailable',
 }
 
 async function fetchStatus(): Promise<SubscriptionStatus> {
@@ -316,7 +303,7 @@ export default function PushNotificationSection(): React.ReactElement {
     [capability],
   )
   const reasonTags = capability
-    ? capability.reasons.map((reason) => CAPABILITY_REASON_LABELS[reason])
+    ? capability.reasons.length > 0 ? capability.reasons : ['ready_to_subscribe']
     : []
   const showPrefs = Boolean(capability && (capability.hasActiveSubscription || capability.canSubscribe))
 
@@ -342,12 +329,6 @@ export default function PushNotificationSection(): React.ReactElement {
       {readyState && (
         <>
           <p className="pushNotificationNote">{describePrimaryState(capability)}</p>
-
-          {capability.isIos && !capability.isStandalone && (
-            <p className="pushNotificationInstallHint">
-              Install CopeLimit to your Home Screen to enable notifications on iOS.
-            </p>
-          )}
 
           {capability.hasActiveSubscription && (
             <>

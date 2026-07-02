@@ -299,7 +299,6 @@ describe('inspectNotificationCapability', () => {
     const capability = await inspectNotificationCapability('valid-key')
 
     expect(capability.hasServiceWorkerRegistration).toBe(false)
-    expect(capability.reasons).toContain('service_worker_registration_unavailable')
     expect(capability.canSubscribe).toBe(true)
   })
 })

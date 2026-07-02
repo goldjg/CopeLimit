@@ -952,12 +952,6 @@ a:focus-visible {
   margin: 0 0 12px;
 }
 
-.pushNotificationInstallHint {
-  color: #93c5fd;
-  font-size: 0.86rem;
-  margin: -4px 0 14px;
-}
-
 .pushNotificationActions {
   display: flex;
   gap: 10px;

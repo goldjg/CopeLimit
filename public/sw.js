@@ -102,9 +102,17 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   debugLog('notification click');
 
-  const targetUrl = typeof event.notification.data?.url === 'string'
-    ? new URL(event.notification.data.url, self.location.origin).href
-    : new URL('/', self.location.origin).href;
+  let targetUrl = new URL('/', self.location.origin).href;
+  if (typeof event.notification.data?.url === 'string') {
+    try {
+      const candidate = new URL(event.notification.data.url, self.location.origin);
+      if (candidate.origin === self.location.origin) {
+        targetUrl = candidate.href;
+      }
+    } catch {
+      targetUrl = new URL('/', self.location.origin).href;
+    }
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {

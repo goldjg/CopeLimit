@@ -18,7 +18,6 @@ export type NotificationCapabilityReason =
   | 'push_manager_unavailable'
   | 'notification_permission_denied'
   | 'vapid_public_key_missing'
-  | 'service_worker_registration_unavailable'
 
 export type NotificationCapabilitySnapshot = {
   isIos: boolean
@@ -92,10 +91,6 @@ export function buildNotificationCapability(
     reasons.push('vapid_public_key_missing')
   }
 
-  if (snapshot.hasServiceWorker && !snapshot.hasServiceWorkerRegistration) {
-    reasons.push('service_worker_registration_unavailable')
-  }
-
   const canSubscribe = !snapshot.hasActiveSubscription
     && (!snapshot.isIos || snapshot.isStandalone)
     && snapshot.hasNotificationApi
@@ -167,9 +162,24 @@ async function getExistingServiceWorkerRegistration(): Promise<ServiceWorkerRegi
   }
 
   try {
-    const registration = await navigator.serviceWorker.getRegistration?.('/')
-    if (registration) return registration
-    return await navigator.serviceWorker.getRegistration?.() ?? null
+    return await navigator.serviceWorker.getRegistration?.('/') ?? null
+  } catch {
+    return null
+  }
+}
+
+async function waitForReadyServiceWorker(timeoutMs = 4000): Promise<ServiceWorkerRegistration | null> {
+  if (!hasNavigator() || !('serviceWorker' in navigator)) {
+    return null
+  }
+
+  try {
+    return await Promise.race<ServiceWorkerRegistration | null>([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), timeoutMs)
+      }),
+    ])
   } catch {
     return null
   }
@@ -185,7 +195,7 @@ async function getReadyServiceWorkerRegistration(): Promise<ServiceWorkerRegistr
 
   try {
     await navigator.serviceWorker.register('/sw.js', { scope: '/' })
-    return await navigator.serviceWorker.ready
+    return await waitForReadyServiceWorker()
   } catch {
     return null
   }
