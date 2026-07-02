@@ -161,6 +161,14 @@ Generate a VAPID key pair with the `web-push` CLI:
 npx web-push generate-vapid-keys
 ```
 
+#### iOS notifications
+
+- iOS Web Push only works for **installed Home Screen web apps**. Safari browser tabs do not provide the same notification flow.
+- Install CopeLimit with **Share → Add to Home Screen**, then open the installed app before enabling notifications.
+- Notification permission remains behind an explicit user action inside the PWA.
+- After a successful subscription on iOS, CopeLimit should appear in **Settings → Notifications**.
+- iOS may throttle or delay delivery even when subscription succeeds.
+
 ---
 
 ## API reference

@@ -18,9 +18,9 @@
  * - All other same-origin GET requests: cache-first; caches the response on
  *   first miss for future offline use.
  *
- * @version 2026-05-06
+ * @version 2026-07-02
  */
-const CACHE_NAME = 'copelimit-2026-05-06';
+const CACHE_NAME = 'copelimit-2026-07-02';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -30,6 +30,14 @@ const APP_SHELL = [
   '/icons/icon-192.png',
   '/offline.html'
 ];
+
+const DEBUG = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+
+function debugLog(...args) {
+  if (DEBUG) {
+    console.debug('[sw]', ...args);
+  }
+}
 
 async function shellResources() {
   try {
@@ -43,6 +51,7 @@ async function shellResources() {
 }
 
 self.addEventListener('install', (event) => {
+  debugLog('install');
   event.waitUntil(
     shellResources().then((resources) =>
       caches.open(CACHE_NAME).then((cache) => cache.addAll(resources))
@@ -52,6 +61,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  debugLog('activate');
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
@@ -67,26 +77,43 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : '' };
   }
+
+  debugLog('push received');
+
   const title = typeof data.title === 'string' ? data.title : 'CopeLimit';
   const body = typeof data.body === 'string' ? data.body : '';
+  const url = typeof data.url === 'string'
+    ? data.url
+    : typeof data.data?.url === 'string'
+      ? data.data.url
+      : '/';
+
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-32.png',
+      data: { url },
     })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  debugLog('notification click');
+
+  const targetUrl = typeof event.notification.data?.url === 'string'
+    ? new URL(event.notification.data.url, self.location.origin).href
+    : new URL('/', self.location.origin).href;
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      const existing = windowClients.find((c) => c.url.startsWith(self.location.origin));
+      const existing = windowClients.find((client) => client.url === targetUrl)
+        || windowClients.find((client) => client.url.startsWith(self.location.origin));
       if (existing) {
         return existing.focus();
       }
-      return clients.openWindow('/');
+      return clients.openWindow(targetUrl);
     })
   );
 });
