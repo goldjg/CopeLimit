@@ -82,6 +82,8 @@ describe('computeWidgetExtras — zero consumption', () => {
     // deltaUsed = 0, totalHours = 2 → creditsPerHour = 0/2 = 0
     expect(result!.burnRate).toBe(0);
     expect(result!.burnRateCostPerHourUsd).toBe(0);
+    expect(result!.chartStartAt).toBe('2026-06-15T10:00:00.000Z');
+    expect(result!.chartEndAt).toBe('2026-06-15T12:00:00.000Z');
   });
 
   it('returns null burnRate only when timestamps are identical (zero-duration window)', () => {

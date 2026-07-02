@@ -46,6 +46,20 @@ describe('buildBurnTrailGeometry — empty/malformed', () => {
     const geo = buildBurnTrailGeometry(series, { width: 0, height: 0 })
     expect(geo.hasData).toBe(false)
   })
+
+  it('does not create a reset marker for a first-point period start', () => {
+    const baseline = buildChartSeries([
+      snap('2026-06-15T08:00:00.000Z', 1000),
+      snap('2026-06-16T08:00:00.000Z', 1200),
+    ])
+    const firstPointMarkedAsPeriodStart = baseline.points[0]
+    const series = {
+      ...baseline,
+      points: baseline.points.map((point) => point === firstPointMarkedAsPeriodStart ? { ...point, isPeriodStart: true } : point),
+    }
+    const geo = buildBurnTrailGeometry(series, SIZE)
+    expect(geo.resetMarkers).toEqual([])
+  })
 })
 
 describe('buildBurnTrailGeometry — single point', () => {
@@ -145,5 +159,22 @@ describe('buildBurnTrailGeometry — projection marker', () => {
     expect(geo.projection).not.toBeNull()
     expect(geo.projection!.marker).toBeDefined()
     expect(geo.projection!.marker!.y).toBeCloseTo(geo.baselineY, 4)
+  })
+
+  it('keeps projection markers inside the plot bounds when they reach the right/top edge', () => {
+    const series = buildChartSeries(
+      [
+        snap('2026-06-15T08:00:00.000Z', 1000),
+        snap('2026-06-15T12:00:00.000Z', 4000),
+      ],
+      { projectedExhaustionAt: '2026-06-15T23:00:00.000Z', projectionStatus: 'exhaustion_before_reset' },
+    )
+    const geo = buildBurnTrailGeometry(series, { width: 20, height: 20, padding: { top: 1, right: 1, bottom: 1, left: 1 } })
+    expect(geo.projection).not.toBeNull()
+    expect(geo.projection!.marker).toBeDefined()
+    expect(geo.projection!.marker!.x).toBeGreaterThanOrEqual(1)
+    expect(geo.projection!.marker!.x).toBeLessThanOrEqual(20 - 1)
+    expect(geo.projection!.marker!.y).toBeGreaterThanOrEqual(1)
+    expect(geo.projection!.marker!.y).toBeLessThanOrEqual(20 - 1)
   })
 })

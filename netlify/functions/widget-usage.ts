@@ -93,6 +93,10 @@ export type WidgetExtras = {
    * burn trail reads against the size of the tank. `0` when unknown.
    */
   quotaCeiling: number;
+  /** ISO timestamp for the chart window start (oldest point in the sparkline window). */
+  chartStartAt: string | null;
+  /** ISO timestamp for the chart window end (newest point in the sparkline window). */
+  chartEndAt: string | null;
 };
 
 /**
@@ -127,7 +131,9 @@ export function computeWidgetExtras(
     burnRate: summary.creditsPerHour,
     burnRateCostPerHourUsd,
     sparkline,
-    quotaCeiling
+    quotaCeiling,
+    chartStartAt: sparklineSnapshots[0]?.capturedAt ?? null,
+    chartEndAt: sparklineSnapshots[sparklineSnapshots.length - 1]?.capturedAt ?? null,
   };
 }
 

@@ -115,8 +115,43 @@ function deriveStatusLabel(usage) {
 }
 
 function formatShortDate(value) {
-  if (!value) return "unknown";
-  return new Date(value).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function formatDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatRangeLabels(startValue, endValue) {
+  const start = startValue ? new Date(startValue) : null;
+  const end = endValue ? new Date(endValue) : null;
+  const startIsValid = !!start && !Number.isNaN(start.getTime());
+  const endIsValid = !!end && !Number.isNaN(end.getTime());
+  const sameDay = startIsValid && endIsValid && start.toDateString() === end.toDateString();
+  const startLabel = startIsValid ? formatShortDate(start) : null;
+  const endLabel = endIsValid ? (sameDay ? formatDateTime(end) : formatShortDate(end)) : null;
+  return { startLabel, endLabel };
+}
+
+function formatResetLabel(value) {
+  const label = formatShortDate(value);
+  return label ? `Reset ${label}` : null;
+}
+
+function formatProjectionLabel(value) {
+  const label = formatShortDate(value);
+  return label ? `Runs out ${label}` : null;
 }
 
 function formatLastUpdated(value) {
@@ -568,6 +603,13 @@ function createLargeWidget(usage) {
   const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
   const sparkline = extras ? extras.sparkline : null;
   const quotaCeiling = extras && typeof extras.quotaCeiling === "number" ? extras.quotaCeiling : usage.quota;
+  const chartRangeLabels = extras ? formatRangeLabels(extras.chartStartAt, extras.chartEndAt) : { startLabel: null, endLabel: null };
+  const chartStartLabel = chartRangeLabels.startLabel ? `Start ${chartRangeLabels.startLabel}` : null;
+  const chartEndLabel = chartRangeLabels.endLabel ? `Updated ${chartRangeLabels.endLabel}` : null;
+  const resetLabel = usage.resetAt ? formatResetLabel(usage.resetAt) : null;
+  const projectionLabel = usage.burnRateProjection && usage.burnRateProjection.projectedExhaustionAt
+    ? formatProjectionLabel(usage.burnRateProjection.projectedExhaustionAt)
+    : null;
   const isBudgetMode = (usage.billingPhase === "budget_active" || usage.billingPhase === "budget_available")
     && typeof usage.overageEntitlement === "number"
     && isFinite(usage.overageEntitlement)
@@ -643,7 +685,27 @@ function createLargeWidget(usage) {
     trendLabel.font = Font.mediumSystemFont(10);
     trendLabel.textColor = Color.gray();
 
-    widget.addSpacer(5);
+    const metaLineParts = [];
+    if (chartStartLabel) metaLineParts.push(chartStartLabel);
+    if (chartEndLabel) metaLineParts.push(chartEndLabel);
+    if (metaLineParts.length) {
+      const metaLine = widget.addText(metaLineParts.join(" · "));
+      metaLine.font = Font.mediumSystemFont(8);
+      metaLine.textColor = new Color("#9ca3af");
+      widget.addSpacer(3);
+    }
+
+    const secondLineParts = [];
+    if (resetLabel) secondLineParts.push(resetLabel);
+    if (projectionLabel) secondLineParts.push(projectionLabel);
+    if (secondLineParts.length) {
+      const secondLine = widget.addText(secondLineParts.join(" · "));
+      secondLine.font = Font.mediumSystemFont(8);
+      secondLine.textColor = new Color("#9ca3af");
+      widget.addSpacer(3);
+    }
+
+    widget.addSpacer(2);
 
     const trailImg = createBurnTrailImage(
       sparkline,
