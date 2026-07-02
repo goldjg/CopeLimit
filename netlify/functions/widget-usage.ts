@@ -22,14 +22,19 @@
  * 4. Returns a normalised {@link Usage} JSON response.
  *
  * ## Response shape
- * Same as `/api/usage` — a {@link Usage} JSON object — with an optional
- * `widgetExtras` field when `?extras=1` is passed and history data exists:
+ * Same as `/api/usage` — a {@link Usage} JSON object — with:
+ * - `comfortStatus` and `burnRateProjection` always computed from history for
+ *   all widget sizes, so small/medium and large widgets receive the same
+ *   canonical status colour regardless of `?extras=1`.
+ * - `widgetExtras` (sparkline, quotaCeiling, burn-rate figures) only when
+ *   `?extras=1` is passed and history data is available.
  *
  * ```json
  * {
  *   "used": 5550,
  *   "quota": 7000,
  *   ...
+ *   "comfortStatus": { "level": "warm", ... },
  *   "widgetExtras": {
  *     "burnRate": 45.2,
  *     "burnRateCostPerHourUsd": 0.45,
@@ -40,7 +45,8 @@
  * ```
  *
  * The large Scriptable widget passes `?extras=1` to receive `widgetExtras`.
- * Small and medium widgets omit the parameter to keep the response lean.
+ * Small and medium widgets omit the parameter; they still receive
+ * `comfortStatus` derived from the same projection as the large widget.
  *
  * ## Required environment variables
  * - `SESSION_SECRET` or `WIDGET_TOKEN_HASH_SECRET` – For HMAC token hashing
@@ -214,29 +220,26 @@ export const handler: Handler = async (event) => {
 
     const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
-    // When the caller requests extras (e.g. the large widget), attempt to
-    // enrich the response with burn-rate and sparkline data from history.
-    // History failures are non-fatal: the widget falls back gracefully.
+    // Whether the caller wants heavy sparkline/quotaCeiling extras (large widget).
     const includeExtras =
       event.queryStringParameters?.['extras'] === '1' ||
       event.queryStringParameters?.['extras'] === 'true';
 
+    // Always fetch history so that burnRateProjection and comfortStatus are
+    // derived from the same projection signal for all widget sizes. The large
+    // widget adds sparkline and quotaCeiling on top via widgetExtras (gated by
+    // includeExtras). Matches the 50-snapshot limit used by usage.ts.
     let snapshots: UsageHistorySnapshot[] = [];
-    if (includeExtras) {
-      try {
-        // Fetch slightly more than the 14-point sparkline cap to give
-        // computeWidgetExtras headroom for burn-rate calculation intervals.
-        const HISTORY_FETCH_LIMIT = 20;
-        snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
-      } catch {
-        // Non-fatal: extras are omitted when history is unavailable.
-      }
+    try {
+      const HISTORY_FETCH_LIMIT = 50;
+      snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
+    } catch {
+      // Non-fatal: projection falls back gracefully when history is unavailable.
     }
 
-    // Burn-rate projection: computed from history when extras were requested
-    // and sufficient snapshot data is available (≥2 snapshots). This mirrors
-    // the logic in usage.ts so the widget endpoint produces the same canonical
-    // comfort status as the PWA — preventing a colour/status mismatch.
+    // Burn-rate projection: always computed when ≥2 history snapshots are
+    // available, regardless of widget size. Mirrors usage.ts so the canonical
+    // comfortStatus is consistent for small, medium, and large widgets.
     let burnRateProjection: BurnRateProjection | undefined;
     if (snapshots.length >= 2) {
       try {
@@ -265,7 +268,7 @@ export const handler: Handler = async (event) => {
     }
 
     let widgetExtras: WidgetExtras | undefined;
-    if (snapshots.length >= 2) {
+    if (includeExtras && snapshots.length >= 2) {
       widgetExtras = computeWidgetExtras(snapshots);
     }
 
