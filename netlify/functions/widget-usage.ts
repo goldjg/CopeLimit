@@ -22,14 +22,19 @@
  * 4. Returns a normalised {@link Usage} JSON response.
  *
  * ## Response shape
- * Same as `/api/usage` — a {@link Usage} JSON object — with an optional
- * `widgetExtras` field when `?extras=1` is passed and history data exists:
+ * Same as `/api/usage` — a {@link Usage} JSON object — with:
+ * - `comfortStatus` and `burnRateProjection` always computed from history for
+ *   all widget sizes, so small/medium and large widgets receive the same
+ *   canonical status colour regardless of `?extras=1`.
+ * - `widgetExtras` (sparkline, quotaCeiling, burn-rate figures) only when
+ *   `?extras=1` is passed and history data is available.
  *
  * ```json
  * {
  *   "used": 5550,
  *   "quota": 7000,
  *   ...
+ *   "comfortStatus": { "level": "warm", ... },
  *   "widgetExtras": {
  *     "burnRate": 45.2,
  *     "burnRateCostPerHourUsd": 0.45,
@@ -40,7 +45,8 @@
  * ```
  *
  * The large Scriptable widget passes `?extras=1` to receive `widgetExtras`.
- * Small and medium widgets omit the parameter to keep the response lean.
+ * Small and medium widgets omit the parameter; they still receive
+ * `comfortStatus` derived from the same projection as the large widget.
  *
  * ## Required environment variables
  * - `SESSION_SECRET` or `WIDGET_TOKEN_HASH_SECRET` – For HMAC token hashing
@@ -63,6 +69,8 @@ import { computeComfortStatus } from './lib/comfort-status';
 import type { ComfortStatus } from './lib/comfort-status';
 import { evaluateAlertDecision } from './lib/alert-decision';
 import type { AlertDecision } from './lib/alert-decision';
+import { projectBurnRate } from './lib/burn-rate-projection';
+import type { BurnRateProjection } from './lib/burn-rate-projection';
 
 /**
  * Extra telemetry derived from usage history, included in the widget-usage
@@ -212,39 +220,56 @@ export const handler: Handler = async (event) => {
 
     const usage = await getWidgetCopilotInternalUsage(record.githubAccessToken, record.login);
 
-    // Comfort status is always included. Computed from usage only — the widget
-    // endpoint does not load history, so no burn-rate projection is supplied.
-    // computeComfortStatus falls back to warningLevel/percentUsed gracefully.
-    const comfortStatus: ComfortStatus = computeComfortStatus(usage);
-
-    // Alert decision: additive, optional field. Evaluates whether the user
-    // should be alerted based on the comfort status. The widget endpoint does
-    // not supply a burn-rate projection. Never throws.
-    let alertDecision: AlertDecision | undefined;
-    try {
-      alertDecision = evaluateAlertDecision({ usage, comfortStatus });
-    } catch {
-      // Non-blocking: alert-decision failures must not affect the widget response.
-    }
-
-    // When the caller requests extras (e.g. the large widget), attempt to
-    // enrich the response with burn-rate and sparkline data from history.
-    // History failures are non-fatal: the widget falls back gracefully.
+    // Whether the caller wants heavy sparkline/quotaCeiling extras (large widget).
     const includeExtras =
       event.queryStringParameters?.['extras'] === '1' ||
       event.queryStringParameters?.['extras'] === 'true';
 
-    let widgetExtras: WidgetExtras | undefined;
-    if (includeExtras) {
+    // Always fetch history so that burnRateProjection and comfortStatus are
+    // derived from the same projection signal for all widget sizes. The large
+    // widget adds sparkline and quotaCeiling on top via widgetExtras (gated by
+    // includeExtras). Matches the 50-snapshot limit used by usage.ts.
+    let snapshots: UsageHistorySnapshot[] = [];
+    try {
+      const HISTORY_FETCH_LIMIT = 50;
+      snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
+    } catch {
+      // Non-fatal: projection falls back gracefully when history is unavailable.
+    }
+
+    // Burn-rate projection: always computed when ≥2 history snapshots are
+    // available, regardless of widget size. Mirrors usage.ts so the canonical
+    // comfortStatus is consistent for small, medium, and large widgets.
+    let burnRateProjection: BurnRateProjection | undefined;
+    if (snapshots.length >= 2) {
       try {
-        // Fetch slightly more than the 14-point sparkline cap to give
-        // computeWidgetExtras headroom for burn-rate calculation intervals.
-        const HISTORY_FETCH_LIMIT = 20;
-        const snapshots = await getHistory(record.userId, { limit: HISTORY_FETCH_LIMIT });
-        widgetExtras = computeWidgetExtras(snapshots);
-      } catch {
-        // Non-fatal: extras are omitted when history is unavailable.
+        burnRateProjection = projectBurnRate(usage, snapshots);
+      } catch (err) {
+        // Non-fatal: projection failures must not affect the widget response.
+        const errType = err instanceof Error ? err.name : typeof err;
+        console.warn('[widget-usage] burn-rate projection failed', errType);
       }
+    }
+
+    // Comfort status: always included. Derived from the current usage AND the
+    // burn-rate projection when available. Using the projection prevents the
+    // widget from showing green/safe when credits are on track to exhaust
+    // before the billing reset (the core status/colour mismatch bug).
+    const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection);
+
+    // Alert decision: additive, optional field. Evaluates whether the user
+    // should be alerted based on the comfort status. Passes the projection
+    // through for threshold checks (e.g. "within 24 h"). Never throws.
+    let alertDecision: AlertDecision | undefined;
+    try {
+      alertDecision = evaluateAlertDecision({ usage, projection: burnRateProjection, comfortStatus });
+    } catch {
+      // Non-blocking: alert-decision failures must not affect the widget response.
+    }
+
+    let widgetExtras: WidgetExtras | undefined;
+    if (includeExtras && snapshots.length >= 2) {
+      widgetExtras = computeWidgetExtras(snapshots);
     }
 
     // User's desired widget refresh cadence from saved settings.
@@ -261,6 +286,7 @@ export const handler: Handler = async (event) => {
       ...usage,
       comfortStatus,
       ...(alertDecision !== undefined ? { alertDecision } : {}),
+      ...(burnRateProjection !== undefined ? { burnRateProjection } : {}),
       ...(widgetExtras !== undefined ? { widgetExtras } : {}),
       desiredRefreshMinutes,
     };
