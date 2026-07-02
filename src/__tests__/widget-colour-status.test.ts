@@ -6,8 +6,12 @@
  * (not an ES module), the pure helper functions are defined inline here so
  * they can be tested independently of the Scriptable runtime globals.
  *
- * These tests act as a living specification: if the contract changes,
- * both this file and the widget file must be updated together.
+ * ## Intentional duplication
+ * The function bodies below are intentional copies of the pure helpers in
+ * `CopeLimitWidget.js`. This is necessary because Scriptable widget files
+ * cannot be imported as ES modules. When the widget logic is updated, these
+ * copies must be updated in sync. The tests act as a living specification:
+ * a failing test signals that the widget and its contract have diverged.
  *
  * ## Scenarios covered:
  *  1.  credits_available + comfortStatus safe → green (Comfortable)
@@ -26,13 +30,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { ComfortLevel } from '../../netlify/functions/lib/comfort-status';
+import type { ProjectionStatus } from '../../netlify/functions/lib/burn-rate-projection';
 
 // ---------------------------------------------------------------------------
-// Inline definitions — mirror the pure helpers in CopeLimitWidget.js
+// Inline definitions — intentional copies of the pure helpers in
+// CopeLimitWidget.js. See the file-level comment above for rationale.
 // ---------------------------------------------------------------------------
-
-type ComfortLevel = 'safe' | 'watch' | 'warm' | 'hot' | 'overage' | 'blocked' | 'unknown';
-type ProjectionStatus = 'unavailable' | 'exhaustion_before_reset' | 'exhausted' | 'reset_before_exhaustion';
 
 interface WidgetUsage {
   source?: string;

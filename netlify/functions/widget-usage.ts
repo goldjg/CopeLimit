@@ -241,8 +241,10 @@ export const handler: Handler = async (event) => {
     if (snapshots.length >= 2) {
       try {
         burnRateProjection = projectBurnRate(usage, snapshots);
-      } catch {
+      } catch (err) {
         // Non-fatal: projection failures must not affect the widget response.
+        const errType = err instanceof Error ? err.name : typeof err;
+        console.warn('[widget-usage] burn-rate projection failed', errType);
       }
     }
 
