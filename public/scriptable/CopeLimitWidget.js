@@ -23,9 +23,39 @@ async function getUsage(includeExtras) {
 
 // --- Pure helpers (no Scriptable globals) ----------------------------------
 
+/**
+ * Maps usage state to an accent colour hex string.
+ *
+ * Priority order (first matching rule wins):
+ * 1. Unsupported source → amber (special case, no further data).
+ * 2. Canonical comfort level from `comfortStatus.level` (most authoritative).
+ * 3. Burn-rate projection status from `burnRateProjection.projectionStatus`
+ *    (defensive fallback for cases where comfortStatus is absent/unknown).
+ * 4. Raw billing phase / warning level (legacy fallback).
+ *
+ * This ensures the widget and PWA use the same canonical risk signal.
+ */
 function colourHexFor(usage) {
   if (usage.source === "unsupported") return "#f59e0b";
-  if (usage.billingPhase === "budget_active") return "#ef4444";
+
+  // Priority 1: canonical comfort level
+  const level = usage.comfortStatus && usage.comfortStatus.level;
+  if (level && level !== "unknown") {
+    if (level === "blocked") return "#ef4444";
+    if (level === "overage") return "#f97316";
+    if (level === "hot") return "#ef4444";
+    if (level === "warm") return "#f59e0b";
+    if (level === "watch") return "#60a5fa";
+    if (level === "safe") return "#22c55e";
+  }
+
+  // Priority 2: burn-rate projection status (when comfortStatus is absent or unknown)
+  const projStatus = usage.burnRateProjection && usage.burnRateProjection.projectionStatus;
+  if (projStatus === "exhaustion_before_reset") return "#f59e0b";
+  if (projStatus === "exhausted") return "#ef4444";
+
+  // Priority 3: raw billing phase / warning level fallback
+  if (usage.billingPhase === "budget_active") return "#f97316";
   if (usage.warningLevel === "over" || usage.warningLevel === "hot") return "#ef4444";
   if (usage.warningLevel === "warm") return "#f59e0b";
   if (usage.source === "github-copilot-internal") return "#22c55e";
@@ -50,6 +80,38 @@ function billingPhaseLabel(phase) {
     hard_stop: "Hard stop"
   };
   return labels[phase] || phase || "—";
+}
+
+/**
+ * Returns a human-readable label for a canonical comfort level.
+ * Returns null when the level is unrecognised or absent.
+ */
+function comfortLevelLabel(level) {
+  const labels = {
+    safe: "Comfortable",
+    watch: "Watch",
+    warm: "Warm",
+    hot: "Hot",
+    overage: "Overage",
+    blocked: "Blocked",
+    unknown: "Unknown"
+  };
+  return labels[level] || null;
+}
+
+/**
+ * Derives the primary status label shown in each widget layout.
+ *
+ * Prefers the canonical comfort level label when available and meaningful
+ * (i.e. not "unknown"). Falls back to the raw billing phase label so that
+ * widgets always display something useful even when the backend has not yet
+ * computed a comfort status.
+ */
+function deriveStatusLabel(usage) {
+  const level = usage.comfortStatus && usage.comfortStatus.level;
+  const label = comfortLevelLabel(level);
+  if (label && level !== "unknown") return label;
+  return billingPhaseLabel(usage.billingPhase);
 }
 
 function formatShortDate(value) {
@@ -375,7 +437,7 @@ function createSmallWidget(usage) {
 
   // Most important state label
   if (!usage.error) {
-    const phase = widget.addText(billingPhaseLabel(usage.billingPhase));
+    const phase = widget.addText(deriveStatusLabel(usage));
     phase.font = Font.semiboldSystemFont(10);
     phase.textColor = accent;
     phase.lineLimit = 1;
@@ -471,7 +533,7 @@ function createMediumWidget(usage) {
 
     addMetricRow(rightCol, "Reset", formatShortDate(usage.resetAt), { fontSize: 11, muted: true });
 
-    const phaseTxt = rightCol.addText(billingPhaseLabel(usage.billingPhase));
+    const phaseTxt = rightCol.addText(deriveStatusLabel(usage));
     phaseTxt.font = Font.semiboldSystemFont(10);
     phaseTxt.textColor = accent;
     phaseTxt.lineLimit = 1;
@@ -562,8 +624,8 @@ function createLargeWidget(usage) {
   addTwoColRow(widget, "Burn $/hr", burnCostLabel, "Used $", formatUsd(usage.totalUsedCostUsd));
   widget.addSpacer(4);
 
-  addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Phase",
-    billingPhaseLabel(usage.billingPhase), { rightColor: accent });
+  addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Status",
+    deriveStatusLabel(usage), { rightColor: accent });
   widget.addSpacer(5);
   addLastUpdatedLabel(widget, usage.updatedAt, 10);
 
