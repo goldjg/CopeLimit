@@ -17,6 +17,7 @@
 import React from 'react'
 import type { ChartSeries } from '../netlify/functions/lib/chart-data'
 import { buildBurnTrailGeometry } from './chart-geometry'
+import { formatProjectionLabel, formatRangeLabels, formatResetLabel } from './date-labels'
 
 const VIEW_WIDTH = 320
 const VIEW_HEIGHT = 96
@@ -136,6 +137,14 @@ export function BurnTrailChart({
   const projectionColor = isRisk ? '#ef4444' : isSafe ? '#22c55e' : '#a1a1aa'
   const gradientId = 'burnTrailFill'
   const caption = projectionCaption(series)
+  const rangeLabels = formatRangeLabels(
+    series.points[0]?.capturedAt,
+    series.points[series.points.length - 1]?.capturedAt,
+  )
+  const resetPoint = [...series.points].reverse().find((point) => point.isPeriodStart)
+  const resetLabel = resetPoint?.capturedAt ? formatResetLabel(resetPoint.capturedAt) : null
+  const projectionLabel = series.projection?.projectedExhaustionAt ? formatProjectionLabel(series.projection.projectedExhaustionAt) : null
+  const titleText = `Usage burn trail from ${rangeLabels.startLabel} to ${rangeLabels.endLabel} across ${series.points.length} snapshots${resetLabel ? `. ${resetLabel}.` : ''}${projectionLabel ? ` ${projectionLabel}.` : ''}${caption ? ` ${caption}.` : ''}`
 
   return (
     <div className="burnTrail">
@@ -143,9 +152,11 @@ export function BurnTrailChart({
         className="burnTrailSvg"
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         role="img"
-        aria-label={`Usage burn trail across ${series.points.length} snapshots${caption ? `. ${caption}.` : ''}`}
+        aria-label={titleText}
         preserveAspectRatio="none"
       >
+        <title>{titleText}</title>
+        <desc>{titleText}</desc>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={accent} stopOpacity={areaOpacityTop} />
@@ -167,6 +178,9 @@ export function BurnTrailChart({
           />
         )}
 
+        <text x={4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500}>{rangeLabels.startLabel}</text>
+        <text x={VIEW_WIDTH - 4} y={12} fill="#a1a1aa" fontSize={9} fontWeight={500} textAnchor="end">{rangeLabels.endLabel}</text>
+
         {/* Burn-trail area + line, one path per billing period. */}
         {geo.segments.map((seg, i) => (
           <g key={i}>
@@ -185,6 +199,16 @@ export function BurnTrailChart({
           </g>
         ))}
 
+        {geo.resetMarkers.map((marker, index) => (
+          <g key={`reset-${index}`}>
+            <line x1={marker.x} y1={18} x2={marker.x} y2={VIEW_HEIGHT - 8} stroke="rgba(255,255,255,0.16)" strokeWidth={1} strokeDasharray="3 3" />
+            <circle cx={marker.x} cy={marker.y} r={2} fill="#f9fafb" opacity={0.9} />
+          </g>
+        ))}
+        {resetLabel && geo.resetMarkers.length > 0 && (
+          <text x={geo.resetMarkers[geo.resetMarkers.length - 1].x + 4} y={20} fill="#a1a1aa" fontSize={8}>{resetLabel}</text>
+        )}
+
         {/* Projection continuation toward exhaustion. */}
         {geo.projection?.line && (
           <path
@@ -197,14 +221,19 @@ export function BurnTrailChart({
           />
         )}
         {geo.projection?.marker && (
-          <circle
-            cx={geo.projection.marker.x}
-            cy={geo.projection.marker.y}
-            r={3.5}
-            fill={projectionColor}
-            stroke="#111827"
-            strokeWidth={1}
-          />
+          <g>
+            <circle
+              cx={geo.projection.marker.x}
+              cy={geo.projection.marker.y}
+              r={3.5}
+              fill={projectionColor}
+              stroke="#111827"
+              strokeWidth={1}
+            />
+            {projectionLabel && (
+              <text x={geo.projection.marker.x + 4} y={geo.projection.marker.y - 6} fill={projectionColor} fontSize={8}>{projectionLabel}</text>
+            )}
+          </g>
         )}
 
         {/* Current position. */}

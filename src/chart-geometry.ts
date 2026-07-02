@@ -45,6 +45,8 @@ export type ChartGeometry = {
   ceilingY: number | null
   /** Burn-trail segments (split at quota resets), each with a line + area path. */
   segments: { line: string; area: string }[]
+  /** Reset boundary markers for each detected billing-period start. */
+  resetMarkers: { x: number; y: number }[]
   /** Current position marker (the most recent point). */
   current: { x: number; y: number } | null
   /** Projection continuation + marker, when projection context is present. */
@@ -96,6 +98,7 @@ export function buildBurnTrailGeometry(
     baselineY,
     ceilingY: null,
     segments: [],
+    resetMarkers: [],
     current: null,
     projection: null,
   }
@@ -132,6 +135,7 @@ export function buildBurnTrailGeometry(
 
   // Split into segments at reset boundaries (isPeriodStart, except the first).
   const segments: { line: string; area: string }[] = []
+  const resetMarkers: { x: number; y: number }[] = []
   let group: { x: number; y: number }[] = []
   const flush = (): void => {
     if (group.length === 0) return
@@ -154,7 +158,9 @@ export function buildBurnTrailGeometry(
   for (let i = 0; i < points.length; i++) {
     const p = points[i]
     if (i > 0 && p.isPeriodStart) flush()
-    group.push({ x: scaleX(p.t), y: scaleY(p.used) })
+    const point = { x: scaleX(p.t), y: scaleY(p.used) }
+    if (p.isPeriodStart) resetMarkers.push(point)
+    group.push(point)
   }
   flush()
 
@@ -191,6 +197,7 @@ export function buildBurnTrailGeometry(
     baselineY,
     ceilingY,
     segments,
+    resetMarkers,
     current,
     projection,
   }

@@ -7,11 +7,7 @@ approved scope, stop and escalate before proceeding.
 
 ## Goal
 
-Implement missing iOS PWA notification capability for CopeLimit:
-- ensure the installed iOS Home Screen PWA is recognised as notification-capable where iOS supports Web Push;
-- keep manifest, service worker, and standalone app configuration aligned with iOS PWA requirements;
-- improve client-side capability detection and guidance so iOS Safari tab contexts do not present a broken subscribe flow;
-- preserve existing server-side subscription storage, test-push behavior, and alert preference behavior unless client compatibility requires a narrow adjustment.
+Add clear date/time context to the CopeLimit PWA and Scriptable widget burn-trail/fuel-tank charts so users can understand when usage happened, where reset boundaries occur, and when projected exhaustion is expected.
 
 ## Contract status
 
@@ -19,63 +15,53 @@ active
 
 ## Non-goals
 
-- Changing usage normalization (`copilot.ts`, `normaliseUsage`) semantics
-- Changing auth/session cookie primitives
-- Changing server-side alert-decision, scheduling, or background cron behavior
-- Changing VAPID keys or exposing secret material
-- Broad UI redesign outside the notification capability/settings area
+- Changing burn-rate projection logic
+- Changing widget status colour logic
+- Changing comfort-status logic
 - Introducing new dependencies
+- Broad visual redesign outside the chart/date-context surfaces
+- Changing auth/session cookie primitives
 
 ## Approved scope
 
-1. PWA shell and manifest surfaces required for iOS Web Push compatibility:
-   - `public/manifest.webmanifest`
-   - `index.html`
-   - `public/sw.js`
-   - related static icon references already in the repository
-2. Notification client capability detection and subscribe UX:
-   - `src/push-notifications.ts`
-   - `src/PushNotificationSection.tsx`
-   - `src/styles.css`
-   - `src/main.tsx` only if a narrow notification-capability integration is required
-3. Tests and docs required to support the above:
-   - `src/__tests__/push-notifications.test.ts`
-   - `README.md`
+1. PWA chart/date-context improvements:
+   - `src/BurnTrailChart.tsx`
+   - `src/chart-geometry.ts`
+   - related chart/date formatting utilities in `src/`
+2. Scriptable/iOS widget chart/date-context improvements:
+   - `public/scriptable/CopeLimitWidget.js`
+3. Shared chart/date formatting support and tests:
+   - `netlify/functions/lib/chart-data.ts` only if a narrow shared helper is required for chart semantics
+   - `src/__tests__/**/*.test.ts` or existing chart-related test files
+   - `public/scriptable/CopeLimitWidget.js` test coverage only if the repository already has a suitable pattern
 4. `.github/carl/current-pr-contract.md` (this file).
 
 ## Forbidden scope
 
-- Any weakening of auth/session verification
-- Any storage of secrets/tokens in client-visible payloads
-- Any server-side subscription storage redesign unless required for narrow iOS compatibility
+- Any server-side history/storage redesign beyond narrow chart-data semantics
 - Any broad unrelated refactors
-- Any dependency/tooling changes unrelated to iOS PWA notification capability
+- Any dependency/tooling changes unrelated to chart/date-context work
+- Any weakening of chart safety guarantees such as NaN/Infinity output
 
 ## Architectural constraints
 
-- Existing `push-subscriptions` records remain user-scoped by `userId`.
-- Notification permission must remain behind an explicit user action.
-- iOS Safari tab contexts must not be represented as notification-capable when Home Screen installation / standalone mode is required.
-- Capability diagnostics must not expose VAPID private keys or subscription secrets.
-- Service worker changes must preserve existing push delivery and offline navigation behavior.
+- Preserve the existing lightweight SVG/PWA rendering approach.
+- Preserve the existing widget rendering approach and keep the large widget glanceable.
+- Visible labels must remain concise and human-readable; no raw ISO timestamps in UI.
+- Chart output must not produce `NaN` or `Infinity` geometry values.
+- Existing month/quarter/year summary behavior must remain intact where previously shown.
 
 ## Security constraints
 
-- No secret exposure in push payloads, diagnostics, or logs.
-- No cross-user subscription access or send fan-out.
-- No new privileged trust boundary expansion.
-- Development-only diagnostics in the service worker must be safe and must not leak subscription payload contents or secrets.
+- No secret exposure in tooltip or label content.
+- No new trusted data sources or credential handling paths.
 
 ## Files expected to change
 
-- `public/manifest.webmanifest`
-- `index.html`
-- `public/sw.js`
-- `src/push-notifications.ts`
-- `src/PushNotificationSection.tsx`
-- `src/styles.css`
-- `src/__tests__/push-notifications.test.ts`
-- `README.md`
+- `src/BurnTrailChart.tsx`
+- `src/chart-geometry.ts`
+- `public/scriptable/CopeLimitWidget.js`
+- relevant tests under `src/__tests__` or adjacent chart tests
 - `.github/carl/current-pr-contract.md`
 
 ## Tests / validation
@@ -85,26 +71,25 @@ active
 - `npm run lint` — expected pre-existing TS5107 (non-blocking baseline)
 
 Acceptance checks:
-- iOS non-standalone contexts show install guidance instead of a broken subscribe flow.
-- Standalone/capable contexts can reach the explicit subscribe action.
-- Capability diagnostics explain unsupported states without exposing secrets.
-- Service worker still handles `push` and `notificationclick` correctly.
-- Existing subscription and test-notification behavior remains intact.
+- PWA fuel tank chart shows concise start/end and reset/projection date context without raw ISO timestamps.
+- Large Scriptable widget shows at least chart start/latest-update/reset/projection context when space allows.
+- Dates remain readable and do not introduce chart clutter or invalid geometry.
+- Existing chart semantics and summary behavior remain intact.
 
 ## Stop conditions
 
-- Any requirement to change session/auth primitives
-- Any requirement to change server-side scheduling / background delivery architecture
-- Any need to persist or expose sensitive credentials in new structures
-- Any requirement to broaden scope beyond client/PWA compatibility and documentation
+- Any requirement to change burn-rate projection logic or billing semantics
+- Any requirement to change widget status colour logic or comfort-status logic
+- Any requirement to add heavy charting dependencies or broad visual redesign
+- Any requirement to broaden scope beyond PWA/widget chart date-context work
 
 ## Escalation triggers
 
-- If iOS compatibility appears to require server-side subscription schema changes.
-- If Safari/Home Screen behavior differs in a way that would require separate user-visible flows beyond narrow iOS guidance and diagnostics.
+- If the charting layer would need a major structural rewrite to support the requested labels.
+- If date formatting requirements would require changing the existing lightweight SVG/widget rendering approach in a significant way.
 
 ## Context reset notes
 
 When this PR is merged:
 - Close this contract (set status: closed).
-- Promote any stable iOS PWA notification capability assumptions to durable docs/memory.
+- Promote any stable chart/date-context behaviour to durable docs/memory.
