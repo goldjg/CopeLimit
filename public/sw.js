@@ -39,6 +39,19 @@ function debugLog(...args) {
   }
 }
 
+function safeSameOriginUrl(value) {
+  if (typeof value !== 'string') {
+    return '/';
+  }
+
+  try {
+    const candidate = new URL(value, self.location.origin);
+    return candidate.origin === self.location.origin ? candidate.href : '/';
+  } catch {
+    return '/';
+  }
+}
+
 async function shellResources() {
   try {
     const response = await fetch('/index.html');
@@ -82,11 +95,13 @@ self.addEventListener('push', (event) => {
 
   const title = typeof data.title === 'string' ? data.title : 'CopeLimit';
   const body = typeof data.body === 'string' ? data.body : '';
-  const url = typeof data.url === 'string'
-    ? data.url
-    : typeof data.data?.url === 'string'
-      ? data.data.url
-      : '/';
+  const url = safeSameOriginUrl(
+    typeof data.url === 'string'
+      ? data.url
+      : typeof data.data?.url === 'string'
+        ? data.data.url
+        : '/',
+  );
 
   event.waitUntil(
     self.registration.showNotification(title, {
@@ -102,24 +117,21 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   debugLog('notification click');
 
-  let targetUrl = new URL('/', self.location.origin).href;
-  if (typeof event.notification.data?.url === 'string') {
-    try {
-      const candidate = new URL(event.notification.data.url, self.location.origin);
-      if (candidate.origin === self.location.origin) {
-        targetUrl = candidate.href;
-      }
-    } catch {
-      targetUrl = new URL('/', self.location.origin).href;
-    }
-  }
+  const targetUrl = safeSameOriginUrl(event.notification.data?.url);
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      const existing = windowClients.find((client) => client.url === targetUrl)
-        || windowClients.find((client) => client.url.startsWith(self.location.origin));
-      if (existing) {
-        return existing.focus();
+      let fallbackClient = null;
+      for (const client of windowClients) {
+        if (client.url === targetUrl) {
+          return client.focus();
+        }
+        if (!fallbackClient && client.url.startsWith(self.location.origin)) {
+          fallbackClient = client;
+        }
+      }
+      if (fallbackClient) {
+        return fallbackClient.focus();
       }
       return clients.openWindow(targetUrl);
     })

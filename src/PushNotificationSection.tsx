@@ -59,6 +59,8 @@ const DEFAULT_PREFS: PushUserPreferences = {
   updatedAt: '',
 }
 
+const READY_TO_SUBSCRIBE_REASON = 'ready_to_subscribe'
+
 async function fetchStatus(): Promise<SubscriptionStatus> {
   const res = await fetch('/api/push/subscribe')
   if (!res.ok) throw new Error(`Status ${res.status}`)
@@ -118,8 +120,6 @@ function describePrimaryState(capability: NotificationCapability): string {
       return 'This browser does not expose service workers, so notifications are unavailable.'
     case 'push_manager_unavailable':
       return 'This browser does not expose the Push API needed for Web Push.'
-    case 'service_worker_registration_unavailable':
-      return 'The app has not finished preparing its service worker yet. Try again in a moment.'
     case 'supported':
     default:
       return 'Get notified in this browser when your AI credit usage hits alert thresholds.'
@@ -303,7 +303,7 @@ export default function PushNotificationSection(): React.ReactElement {
     [capability],
   )
   const reasonTags = capability
-    ? capability.reasons.length > 0 ? capability.reasons : ['ready_to_subscribe']
+    ? capability.reasons.length > 0 ? capability.reasons : [READY_TO_SUBSCRIBE_REASON]
     : []
   const showPrefs = Boolean(capability && (capability.hasActiveSubscription || capability.canSubscribe))
 
