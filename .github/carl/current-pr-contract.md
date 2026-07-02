@@ -7,12 +7,11 @@ approved scope, stop and escalate before proceeding.
 
 ## Goal
 
-Implement user-configurable live browser push alerts:
-- make alert delivery run **per authenticated user** against that user's subscriptions;
-- add per-user push notification preferences in the PWA with sensible defaults;
-- trigger alerts on meaningful state changes (comfort/status transitions) and
-  burn-rate change thresholds;
-- preserve existing test-push and subscription behavior.
+Implement missing iOS PWA notification capability for CopeLimit:
+- ensure the installed iOS Home Screen PWA is recognised as notification-capable where iOS supports Web Push;
+- keep manifest, service worker, and standalone app configuration aligned with iOS PWA requirements;
+- improve client-side capability detection and guidance so iOS Safari tab contexts do not present a broken subscribe flow;
+- preserve existing server-side subscription storage, test-push behavior, and alert preference behavior unless client compatibility requires a narrow adjustment.
 
 ## Contract status
 
@@ -22,54 +21,61 @@ active
 
 - Changing usage normalization (`copilot.ts`, `normaliseUsage`) semantics
 - Changing auth/session cookie primitives
-- Changing widget token or onboarding flows
+- Changing server-side alert-decision, scheduling, or background cron behavior
+- Changing VAPID keys or exposing secret material
+- Broad UI redesign outside the notification capability/settings area
 - Introducing new dependencies
-- Introducing external cron/scheduler infrastructure
 
 ## Approved scope
 
-1. Push notification backend flow (Netlify Functions + lib):
-   - add per-user preference persistence for push alerts;
-   - add live per-user send logic in `/api/usage` (non-blocking, fail-safe);
-   - keep sends bounded to the authenticated user's own subscriptions.
-2. PWA notification settings UI:
-   - expose preference controls for status-change alerts and burn-rate-change thresholds;
-   - apply sensible defaults and persist via API.
-3. Routing/docs/tests updates required to support the above.
+1. PWA shell and manifest surfaces required for iOS Web Push compatibility:
+   - `public/manifest.webmanifest`
+   - `index.html`
+   - `public/sw.js`
+   - related static icon references already in the repository
+2. Notification client capability detection and subscribe UX:
+   - `src/push-notifications.ts`
+   - `src/PushNotificationSection.tsx`
+   - `src/styles.css`
+   - `src/main.tsx` only if a narrow notification-capability integration is required
+3. Tests and docs required to support the above:
+   - `src/__tests__/push-notifications.test.ts`
+   - `README.md`
 4. `.github/carl/current-pr-contract.md` (this file).
 
 ## Forbidden scope
 
 - Any weakening of auth/session verification
 - Any storage of secrets/tokens in client-visible payloads
+- Any server-side subscription storage redesign unless required for narrow iOS compatibility
 - Any broad unrelated refactors
-- Any dependency/tooling changes unrelated to push preference/live-alert behavior
+- Any dependency/tooling changes unrelated to iOS PWA notification capability
 
 ## Architectural constraints
 
 - Existing `push-subscriptions` records remain user-scoped by `userId`.
-- Live send logic must be non-blocking for `/api/usage` responses.
-- Preference persistence must be per-user and default-safe.
-- Alert triggers must build from existing `comfortStatus`, `alertDecision`, and burn-rate projection signals (no duplicate business logic forks).
+- Notification permission must remain behind an explicit user action.
+- iOS Safari tab contexts must not be represented as notification-capable when Home Screen installation / standalone mode is required.
+- Capability diagnostics must not expose VAPID private keys or subscription secrets.
+- Service worker changes must preserve existing push delivery and offline navigation behavior.
 
 ## Security constraints
 
-- No secret exposure in push payloads or logs.
+- No secret exposure in push payloads, diagnostics, or logs.
 - No cross-user subscription access or send fan-out.
 - No new privileged trust boundary expansion.
+- Development-only diagnostics in the service worker must be safe and must not leak subscription payload contents or secrets.
 
 ## Files expected to change
 
-- `netlify/functions/usage.ts`
-- `netlify/functions/push-subscribe.ts` (if response shape is extended)
-- `netlify/functions/push-preferences.ts` (new)
-- `netlify/functions/lib/push-subscription-store.ts` and/or new push preference/state helper(s)
-- `netlify/functions/lib/push-subscription-types.ts` (if needed)
+- `public/manifest.webmanifest`
+- `index.html`
+- `public/sw.js`
+- `src/push-notifications.ts`
 - `src/PushNotificationSection.tsx`
 - `src/styles.css`
-- `netlify.toml`
+- `src/__tests__/push-notifications.test.ts`
 - `README.md`
-- tests under `netlify/functions/lib/__tests__/` and/or `src/__tests__/`
 - `.github/carl/current-pr-contract.md`
 
 ## Tests / validation
@@ -79,25 +85,26 @@ active
 - `npm run lint` — expected pre-existing TS5107 (non-blocking baseline)
 
 Acceptance checks:
-- Preferences are saved and loaded per authenticated user.
-- Status-change alerts can be enabled/disabled and follow configured behavior.
-- Burn-rate change alerts trigger when configured threshold is exceeded.
-- Live send path uses only the current authenticated user's subscriptions.
-- `/api/usage` remains successful even if push send/storage operations fail.
+- iOS non-standalone contexts show install guidance instead of a broken subscribe flow.
+- Standalone/capable contexts can reach the explicit subscribe action.
+- Capability diagnostics explain unsupported states without exposing secrets.
+- Service worker still handles `push` and `notificationclick` correctly.
+- Existing subscription and test-notification behavior remains intact.
 
 ## Stop conditions
 
 - Any requirement to change session/auth primitives
-- Any requirement for global background scheduling outside current app pattern
+- Any requirement to change server-side scheduling / background delivery architecture
 - Any need to persist or expose sensitive credentials in new structures
+- Any requirement to broaden scope beyond client/PWA compatibility and documentation
 
 ## Escalation triggers
 
-- If "live" is interpreted as mandatory out-of-band background delivery while user is offline.
-- If preference model needs multi-device/per-subscription overrides beyond per-user scope.
+- If iOS compatibility appears to require server-side subscription schema changes.
+- If Safari/Home Screen behavior differs in a way that would require separate user-visible flows beyond narrow iOS guidance and diagnostics.
 
 ## Context reset notes
 
 When this PR is merged:
 - Close this contract (set status: closed).
-- Promote stable push-alert preference and live-delivery assumptions to durable docs/memory.
+- Promote any stable iOS PWA notification capability assumptions to durable docs/memory.

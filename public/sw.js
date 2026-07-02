@@ -18,9 +18,9 @@
  * - All other same-origin GET requests: cache-first; caches the response on
  *   first miss for future offline use.
  *
- * @version 2026-05-06
+ * @version 2026-07-02
  */
-const CACHE_NAME = 'copelimit-2026-05-06';
+const CACHE_NAME = 'copelimit-2026-07-02';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -30,6 +30,33 @@ const APP_SHELL = [
   '/icons/icon-192.png',
   '/offline.html'
 ];
+
+const DEBUG = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+
+function debugLog(...args) {
+  if (DEBUG) {
+    console.debug('[sw]', ...args);
+  }
+}
+
+/**
+ * Normalises a notification target URL to a same-origin absolute URL.
+ *
+ * Any invalid or cross-origin value falls back to `/` so push payloads cannot
+ * drive the app to an unexpected external origin when the notification is clicked.
+ */
+function safeSameOriginUrl(value) {
+  if (typeof value !== 'string') {
+    return '/';
+  }
+
+  try {
+    const candidate = new URL(value, self.location.origin);
+    return candidate.origin === self.location.origin ? candidate.href : '/';
+  } catch {
+    return '/';
+  }
+}
 
 async function shellResources() {
   try {
@@ -43,6 +70,7 @@ async function shellResources() {
 }
 
 self.addEventListener('install', (event) => {
+  debugLog('install');
   event.waitUntil(
     shellResources().then((resources) =>
       caches.open(CACHE_NAME).then((cache) => cache.addAll(resources))
@@ -52,6 +80,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  debugLog('activate');
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
@@ -67,26 +96,50 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : '' };
   }
+
+  debugLog('push received');
+
   const title = typeof data.title === 'string' ? data.title : 'CopeLimit';
   const body = typeof data.body === 'string' ? data.body : '';
+  const url = safeSameOriginUrl(
+    typeof data.url === 'string'
+      ? data.url
+      : typeof data.data?.url === 'string'
+        ? data.data.url
+        : '/',
+  );
+
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-32.png',
+      data: { url },
     })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  debugLog('notification click');
+
+  const targetUrl = safeSameOriginUrl(event.notification.data?.url);
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      const existing = windowClients.find((c) => c.url.startsWith(self.location.origin));
-      if (existing) {
-        return existing.focus();
+      let fallbackClient = null;
+      for (const client of windowClients) {
+        if (client.url === targetUrl) {
+          return client.focus();
+        }
+        if (!fallbackClient && client.url.startsWith(self.location.origin)) {
+          fallbackClient = client;
+        }
       }
-      return clients.openWindow('/');
+      if (fallbackClient) {
+        return fallbackClient.focus();
+      }
+      return clients.openWindow(targetUrl);
     })
   );
 });

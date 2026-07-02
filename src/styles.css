@@ -974,10 +974,59 @@ a:focus-visible {
   padding-top: 14px;
 }
 
+.pushNotificationDiagnostics {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 14px;
+}
+
 .pushNotificationSubheading {
   margin: 0 0 8px;
   font-size: 0.92rem;
   color: #f3f4f6;
+}
+
+.pushCapabilityGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.pushCapabilityItem {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.pushCapabilityItem span {
+  display: block;
+  color: #9ca3af;
+  font-size: 0.75rem;
+  margin-bottom: 4px;
+}
+
+.pushCapabilityItem strong {
+  display: block;
+  color: #f9fafb;
+  font-size: 0.9rem;
+}
+
+.pushCapabilityReasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pushCapabilityReason {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.12);
+  color: #bfdbfe;
+  font-size: 0.74rem;
 }
 
 .pushPrefRow {

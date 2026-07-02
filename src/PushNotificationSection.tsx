@@ -5,57 +5,47 @@
  * - Subscribe / unsubscribe
  * - Send test notification
  * - Configure per-user alert preferences with sensible defaults
- *
- * Constraints:
- * - Does NOT auto-prompt for notification permission on mount.
- * - Requests permission only from an explicit button click.
+ * - Explain iOS Home Screen requirements and current capability state
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  NotificationCapability,
   detectPushSupport,
-  getCurrentPermission,
   getActiveSubscription,
+  getCurrentPermission,
+  inspectNotificationCapability,
   requestNotificationPermission,
   subscribeToPush,
   unsubscribeFromPush,
-} from './push-notifications';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+} from './push-notifications'
 
 type SubscriptionStatus = {
-  vapidPublicKey: string | null;
-  subscriptionCount: number;
-  hasSubscriptions: boolean;
-};
+  vapidPublicKey: string | null
+  subscriptionCount: number
+  hasSubscriptions: boolean
+}
 
 type TestNotifFeedback =
   | null
   | { result: 'success' }
-  | { result: 'error'; message: string };
+  | { result: 'error'; message: string }
 
 type PushSectionState =
   | { phase: 'loading' }
-  | { phase: 'unsupported' }
-  | { phase: 'config_missing' }
-  | { phase: 'permission_denied' }
-  | { phase: 'subscribed'; subscriptionCount: number }
-  | { phase: 'unsubscribed'; vapidPublicKey: string }
-  | { phase: 'error'; message: string };
+  | { phase: 'ready'; status: SubscriptionStatus; capability: NotificationCapability }
+  | { phase: 'error'; message: string }
 
-/** Per-user notification preferences stored by `/api/push/preferences`. */
 type PushUserPreferences = {
-  notifyOnStatusLevelChange: boolean;
-  notifyWhenStatusBecomesHot: boolean;
-  notifyWhenStatusBecomesOverage: boolean;
-  notifyWhenStatusBecomesBlocked: boolean;
-  notifyWhenProjectedExhaustionWithinHours: boolean;
-  projectedExhaustionThresholdHours: number;
-  notifyOnBurnRateIncrease: boolean;
-  burnRateIncreasePercentThreshold: number;
-  updatedAt: string;
-};
+  notifyOnStatusLevelChange: boolean
+  notifyWhenStatusBecomesHot: boolean
+  notifyWhenStatusBecomesOverage: boolean
+  notifyWhenStatusBecomesBlocked: boolean
+  notifyWhenProjectedExhaustionWithinHours: boolean
+  projectedExhaustionThresholdHours: number
+  notifyOnBurnRateIncrease: boolean
+  burnRateIncreasePercentThreshold: number
+  updatedAt: string
+}
 
 const DEFAULT_PREFS: PushUserPreferences = {
   notifyOnStatusLevelChange: true,
@@ -67,26 +57,22 @@ const DEFAULT_PREFS: PushUserPreferences = {
   notifyOnBurnRateIncrease: true,
   burnRateIncreasePercentThreshold: 25,
   updatedAt: '',
-};
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
+}
 
 async function fetchStatus(): Promise<SubscriptionStatus> {
-  const res = await fetch('/api/push/subscribe');
-  if (!res.ok) throw new Error(`Status ${res.status}`);
-  return res.json() as Promise<SubscriptionStatus>;
+  const res = await fetch('/api/push/subscribe')
+  if (!res.ok) throw new Error(`Status ${res.status}`)
+  return res.json() as Promise<SubscriptionStatus>
 }
 
 async function registerSubscription(sub: PushSubscription): Promise<void> {
-  const payload = sub.toJSON();
+  const payload = sub.toJSON()
   const res = await fetch('/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`Register failed: ${res.status}`);
+  })
+  if (!res.ok) throw new Error(`Register failed: ${res.status}`)
 }
 
 async function deregisterSubscription(sub: PushSubscription): Promise<void> {
@@ -94,14 +80,14 @@ async function deregisterSubscription(sub: PushSubscription): Promise<void> {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: sub.endpoint }),
-  });
-  if (!res.ok) throw new Error(`Unregister failed: ${res.status}`);
+  })
+  if (!res.ok) throw new Error(`Unregister failed: ${res.status}`)
 }
 
 async function fetchPreferences(): Promise<PushUserPreferences> {
-  const res = await fetch('/api/push/preferences', { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Preferences ${res.status}`);
-  return res.json() as Promise<PushUserPreferences>;
+  const res = await fetch('/api/push/preferences', { cache: 'no-store' })
+  if (!res.ok) throw new Error(`Preferences ${res.status}`)
+  return res.json() as Promise<PushUserPreferences>
 }
 
 async function patchPreferences(
@@ -111,209 +97,220 @@ async function patchPreferences(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`Preferences save failed: ${res.status}`);
-  return res.json() as Promise<PushUserPreferences>;
+  })
+  if (!res.ok) throw new Error(`Preferences save failed: ${res.status}`)
+  return res.json() as Promise<PushUserPreferences>
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+function describePrimaryState(capability: NotificationCapability): string {
+  switch (capability.primaryReason) {
+    case 'subscription_active':
+      return 'This device is subscribed for browser notifications.'
+    case 'not_installed_on_ios':
+      return 'Install CopeLimit to your Home Screen to enable notifications on iOS.'
+    case 'notification_permission_denied':
+      return 'Notification permission was denied. Re-enable it in browser or system settings to subscribe.'
+    case 'vapid_public_key_missing':
+      return 'Push notifications are not configured for this environment.'
+    case 'notification_unavailable':
+      return 'This browser does not expose the Notifications API needed for Web Push.'
+    case 'service_worker_unavailable':
+      return 'This browser does not expose service workers, so notifications are unavailable.'
+    case 'push_manager_unavailable':
+      return 'This browser does not expose the Push API needed for Web Push.'
+    case 'supported':
+    default:
+      return 'Get notified in this browser when your AI credit usage hits alert thresholds.'
+  }
+}
 
-export default function PushNotificationSection(): React.ReactElement | null {
-  const [state, setState] = useState<PushSectionState>({ phase: 'loading' });
-  const [busyOp, setBusyOp] = useState<null | 'subscribe' | 'test' | 'unsubscribe'>(null);
-  const [testFeedback, setTestFeedback] = useState<TestNotifFeedback>(null);
-  const [prefs, setPrefs] = useState<PushUserPreferences>(DEFAULT_PREFS);
-  const [prefsSaveState, setPrefsSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const busy = busyOp !== null;
+function capabilityStatusRows(capability: NotificationCapability): Array<{ label: string; value: string }> {
+  return [
+    { label: 'Platform', value: capability.isIos ? 'iOS/iPadOS' : 'Non-iOS browser' },
+    { label: 'Display mode', value: capability.isStandalone ? 'Standalone app' : 'Browser tab' },
+    { label: 'Notifications API', value: capability.hasNotificationApi ? 'Available' : 'Unavailable' },
+    { label: 'Service worker', value: capability.hasServiceWorker ? 'Available' : 'Unavailable' },
+    { label: 'PushManager', value: capability.hasPushManager ? 'Available' : 'Unavailable' },
+    {
+      label: 'Permission',
+      value: capability.permission === 'unsupported' ? 'Unavailable' : capability.permission,
+    },
+    { label: 'VAPID public key', value: capability.hasVapidPublicKey ? 'Present' : 'Missing' },
+    {
+      label: 'Service worker registration',
+      value: capability.hasServiceWorkerRegistration ? 'Active' : 'Not ready yet',
+    },
+    { label: 'Current device subscription', value: capability.hasActiveSubscription ? 'Active' : 'Inactive' },
+  ]
+}
 
-  // Load subscription status on mount.
+export default function PushNotificationSection(): React.ReactElement {
+  const [state, setState] = useState<PushSectionState>({ phase: 'loading' })
+  const [busyOp, setBusyOp] = useState<null | 'subscribe' | 'test' | 'unsubscribe'>(null)
+  const [testFeedback, setTestFeedback] = useState<TestNotifFeedback>(null)
+  const [prefs, setPrefs] = useState<PushUserPreferences>(DEFAULT_PREFS)
+  const [prefsSaveState, setPrefsSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const busy = busyOp !== null
+
   const loadStatus = useCallback(async () => {
     try {
-      const status = await fetchStatus();
-      const supportResult = detectPushSupport(status.vapidPublicKey);
+      const status = await fetchStatus()
+      const supportResult = detectPushSupport(status.vapidPublicKey)
+      const capability = await inspectNotificationCapability(
+        supportResult === 'unsupported' ? null : status.vapidPublicKey,
+      )
 
-      if (supportResult === 'unsupported') {
-        setState({ phase: 'unsupported' });
-        return;
-      }
-      if (supportResult === 'config_missing') {
-        setState({ phase: 'config_missing' });
-        return;
-      }
-
-      const permission = getCurrentPermission();
-      if (permission === 'denied') {
-        const existing = await getActiveSubscription();
-        if (existing) {
-          setState({ phase: 'subscribed', subscriptionCount: status.subscriptionCount });
-        } else {
-          setState({ phase: 'permission_denied' });
-        }
-        return;
-      }
-
-      if (status.hasSubscriptions) {
-        setState({ phase: 'subscribed', subscriptionCount: status.subscriptionCount });
-      } else {
-        setState({ phase: 'unsubscribed', vapidPublicKey: status.vapidPublicKey ?? '' });
-      }
+      setState({ phase: 'ready', status, capability })
     } catch (err) {
       if (typeof console !== 'undefined') {
-        console.warn('[PushNotificationSection] failed to load status:', err);
+        console.warn('[PushNotificationSection] failed to load status:', err)
       }
-      setState({ phase: 'unsupported' });
+      setState({ phase: 'error', message: 'Could not load notification settings. Try again.' })
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    void loadStatus()
+  }, [loadStatus])
 
-  // Load preferences once the user can interact with the section.
   useEffect(() => {
-    const canShowPrefs = state.phase === 'subscribed' || state.phase === 'unsubscribed';
-    if (!canShowPrefs) return;
+    if (state.phase !== 'ready') return
+    if (!state.capability.hasActiveSubscription && !state.capability.canSubscribe) return
 
-    let cancelled = false;
+    let cancelled = false
     void fetchPreferences()
-      .then((value) => { if (!cancelled) setPrefs(value); })
-      .catch(() => { if (!cancelled) setPrefs(DEFAULT_PREFS); });
-    return () => { cancelled = true; };
-  }, [state.phase]);
+      .then((value) => {
+        if (!cancelled) setPrefs(value)
+      })
+      .catch(() => {
+        if (!cancelled) setPrefs(DEFAULT_PREFS)
+      })
 
-  // Persist a partial preferences change.
-  const savePatch = useCallback(async (patch: Partial<PushUserPreferences>) => {
-    setPrefsSaveState('saving');
-    try {
-      const updated = await patchPreferences(patch);
-      setPrefs(updated);
-      setPrefsSaveState('saved');
-      setTimeout(() => setPrefsSaveState('idle'), 1400);
-    } catch {
-      setPrefsSaveState('error');
+    return () => {
+      cancelled = true
     }
-  }, []);
+  }, [state])
+
+  const savePatch = useCallback(async (patch: Partial<PushUserPreferences>) => {
+    setPrefsSaveState('saving')
+    try {
+      const updated = await patchPreferences(patch)
+      setPrefs(updated)
+      setPrefsSaveState('saved')
+      setTimeout(() => setPrefsSaveState('idle'), 1400)
+    } catch {
+      setPrefsSaveState('error')
+    }
+  }, [])
 
   const handleToggle = useCallback(
     (key: keyof PushUserPreferences, value: boolean | number) => {
-      setPrefs((prev) => ({ ...prev, [key]: value }));
-      void savePatch({ [key]: value } as Partial<PushUserPreferences>);
+      setPrefs((prev) => ({ ...prev, [key]: value }))
+      void savePatch({ [key]: value } as Partial<PushUserPreferences>)
     },
     [savePatch],
-  );
+  )
 
-  // Subscribe / unsubscribe / test handlers.
   const handleSubscribe = useCallback(async () => {
-    if (state.phase !== 'unsubscribed') return;
-    setBusyOp('subscribe');
+    if (state.phase !== 'ready' || !state.capability.canSubscribe) return
+
+    setBusyOp('subscribe')
+    setTestFeedback(null)
+
     try {
-      const permission = await requestNotificationPermission();
-      if (permission !== 'granted') { setState({ phase: 'permission_denied' }); return; }
-      const sub = await subscribeToPush(state.vapidPublicKey);
-      if (!sub) { setState({ phase: 'error', message: 'Could not subscribe. Try again.' }); return; }
-      await registerSubscription(sub);
-      await loadStatus();
+      const currentPermission = getCurrentPermission()
+      const permission = currentPermission === 'granted'
+        ? 'granted'
+        : await requestNotificationPermission()
+
+      if (permission !== 'granted') {
+        await loadStatus()
+        return
+      }
+
+      const sub = await subscribeToPush(state.status.vapidPublicKey ?? '')
+      if (!sub) {
+        setState({ phase: 'error', message: 'Could not subscribe. Try again.' })
+        return
+      }
+
+      await registerSubscription(sub)
+      await loadStatus()
     } catch (err) {
-      setState({ phase: 'error', message: err instanceof Error ? err.message : 'Subscribe failed.' });
+      setState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : 'Subscribe failed.',
+      })
     } finally {
-      setBusyOp(null);
+      setBusyOp(null)
     }
-  }, [state, loadStatus]);
+  }, [loadStatus, state])
 
   const handleSendTest = useCallback(async () => {
-    if (state.phase !== 'subscribed') return;
-    setBusyOp('test');
-    setTestFeedback(null);
+    if (state.phase !== 'ready' || !state.capability.hasActiveSubscription) return
+
+    setBusyOp('test')
+    setTestFeedback(null)
+
     try {
-      const res = await fetch('/api/push/test', { method: 'POST' });
+      const res = await fetch('/api/push/test', { method: 'POST' })
       if (res.ok) {
-        setTestFeedback({ result: 'success' });
+        setTestFeedback({ result: 'success' })
       } else {
-        const body = await res.json() as { error?: string };
-        setTestFeedback({ result: 'error', message: body.error ?? `Request failed (${res.status}).` });
+        const body = await res.json() as { error?: string }
+        setTestFeedback({ result: 'error', message: body.error ?? `Request failed (${res.status}).` })
       }
     } catch (err) {
-      setTestFeedback({ result: 'error', message: err instanceof Error ? err.message : 'Could not reach the server.' });
+      setTestFeedback({
+        result: 'error',
+        message: err instanceof Error ? err.message : 'Could not reach the server.',
+      })
     } finally {
-      setBusyOp(null);
+      setBusyOp(null)
     }
-  }, [state]);
+  }, [state])
 
   const handleUnsubscribe = useCallback(async () => {
-    if (state.phase !== 'subscribed') return;
-    setBusyOp('unsubscribe');
-    setTestFeedback(null);
+    if (state.phase !== 'ready' || !state.capability.hasActiveSubscription) return
+
+    setBusyOp('unsubscribe')
+    setTestFeedback(null)
+
     try {
-      const sub = await getActiveSubscription();
-      if (sub) { await deregisterSubscription(sub); await unsubscribeFromPush(); }
-      await loadStatus();
+      const sub = await getActiveSubscription()
+      if (sub) {
+        await deregisterSubscription(sub)
+        await unsubscribeFromPush()
+      }
+      await loadStatus()
     } catch (err) {
-      setState({ phase: 'error', message: err instanceof Error ? err.message : 'Unsubscribe failed.' });
+      setState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : 'Unsubscribe failed.',
+      })
     } finally {
-      setBusyOp(null);
+      setBusyOp(null)
     }
-  }, [state, loadStatus]);
+  }, [loadStatus, state])
 
-  if (state.phase === 'loading' || state.phase === 'unsupported') return null;
-
-  const showPrefs = state.phase === 'subscribed' || state.phase === 'unsubscribed';
+  const readyState = state.phase === 'ready' ? state : null
+  const capability = readyState?.capability ?? null
+  const status = readyState?.status ?? null
+  const capabilityRows = useMemo(
+    () => (capability ? capabilityStatusRows(capability) : []),
+    [capability],
+  )
+  const reasonTags = capability
+    ? capability.reasons
+    : []
+  const showPrefs = Boolean(capability && (capability.hasActiveSubscription || capability.canSubscribe))
 
   return (
     <section className="card pushNotificationCard" aria-label="Browser notification settings">
       <h2 className="pushNotificationHeading">Browser Notifications</h2>
 
-      {state.phase === 'config_missing' && (
-        <p className="pushNotificationNote">
-          Push notifications are not configured for this environment.
-        </p>
-      )}
-
-      {state.phase === 'permission_denied' && (
-        <p className="pushNotificationNote">
-          Notification permission was denied. Enable it in your browser settings to subscribe.
-        </p>
-      )}
-
-      {state.phase === 'subscribed' && (
-        <>
-          <p className="pushNotificationNote">
-            ✓ Browser notifications active
-            {state.subscriptionCount > 1 ? ` (${state.subscriptionCount} devices)` : ''}.
-          </p>
-          {testFeedback?.result === 'success' && (
-            <p className="pushNotificationSuccess">✓ Test notification sent.</p>
-          )}
-          {testFeedback?.result === 'error' && (
-            <p className="pushNotificationError">{testFeedback.message}</p>
-          )}
-          <div className="pushNotificationActions">
-            <button onClick={() => void handleSendTest()} disabled={busy} className="pushNotificationBtn">
-              {busyOp === 'test' ? 'Sending…' : 'Send test notification'}
-            </button>
-            <button
-              onClick={() => void handleUnsubscribe()}
-              disabled={busy}
-              className="pushNotificationBtn pushNotificationBtnSecondary"
-            >
-              {busyOp === 'unsubscribe' ? 'Removing…' : 'Unsubscribe'}
-            </button>
-          </div>
-        </>
-      )}
-
-      {state.phase === 'unsubscribed' && (
-        <>
-          <p className="pushNotificationNote">
-            Get notified in this browser when your AI credit usage hits alert thresholds.
-          </p>
-          <div className="pushNotificationActions">
-            <button onClick={() => void handleSubscribe()} disabled={busy} className="pushNotificationBtn">
-              {busyOp === 'subscribe' ? 'Enabling…' : 'Enable notifications'}
-            </button>
-          </div>
-        </>
+      {state.phase === 'loading' && (
+        <p className="pushNotificationNote">Checking notification capability…</p>
       )}
 
       {state.phase === 'error' && (
@@ -324,6 +321,83 @@ export default function PushNotificationSection(): React.ReactElement | null {
               Retry
             </button>
           </div>
+        </>
+      )}
+
+      {readyState && (
+        <>
+          <p className="pushNotificationNote">{describePrimaryState(capability)}</p>
+
+          {capability.hasActiveSubscription && (
+            <>
+              <p className="pushNotificationSuccess">
+                ✓ Browser notifications active
+                {status && status.subscriptionCount > 1 ? ` (${status.subscriptionCount} devices)` : ''}.
+              </p>
+              {testFeedback?.result === 'success' && (
+                <p className="pushNotificationSuccess">✓ Test notification sent.</p>
+              )}
+              {testFeedback?.result === 'error' && (
+                <p className="pushNotificationError">{testFeedback.message}</p>
+              )}
+              <div className="pushNotificationActions">
+                <button onClick={() => void handleSendTest()} disabled={busy} className="pushNotificationBtn">
+                  {busyOp === 'test' ? 'Sending…' : 'Send test notification'}
+                </button>
+                <button
+                  onClick={() => void handleUnsubscribe()}
+                  disabled={busy}
+                  className="pushNotificationBtn pushNotificationBtnSecondary"
+                >
+                  {busyOp === 'unsubscribe' ? 'Removing…' : 'Unsubscribe'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {!capability.hasActiveSubscription && capability.canSubscribe && (
+            <>
+              {status && status.hasSubscriptions && status.subscriptionCount > 0 && (
+                <p className="pushNotificationNote pushNotificationNoteSmall">
+                  This account already has {status.subscriptionCount} notification subscription
+                  {status.subscriptionCount === 1 ? '' : 's'} on other device{status.subscriptionCount === 1 ? '' : 's'}.
+                </p>
+              )}
+              <div className="pushNotificationActions">
+                <button onClick={() => void handleSubscribe()} disabled={busy} className="pushNotificationBtn">
+                  {busyOp === 'subscribe' ? 'Enabling…' : 'Enable notifications'}
+                </button>
+              </div>
+            </>
+          )}
+
+          <section className="pushNotificationDiagnostics" aria-label="Notification capability diagnostics">
+            <h3 className="pushNotificationSubheading">Notification capability</h3>
+            <div className="pushCapabilityGrid">
+              {capabilityRows.map((row) => (
+                <div key={row.label} className="pushCapabilityItem">
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </div>
+
+            {reasonTags.length > 0 && (
+              <div className="pushCapabilityReasons" aria-label="Notification capability reasons">
+                {reasonTags.map((reason) => (
+                  <span key={reason} className="pushCapabilityReason">
+                    {reason}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {reasonTags.length === 0 && (
+              <div className="pushCapabilityReasons" aria-label="Notification capability reasons">
+                <span className="pushCapabilityReason">ready_to_subscribe</span>
+              </div>
+            )}
+          </section>
         </>
       )}
 
@@ -439,5 +513,5 @@ export default function PushNotificationSection(): React.ReactElement | null {
         </section>
       )}
     </section>
-  );
+  )
 }

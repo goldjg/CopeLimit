@@ -753,8 +753,16 @@ createRoot(document.getElementById('root')!).render(<App />);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
-      console.warn('Service worker registration failed');
-    });
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then((registration) => {
+        if (import.meta.env.DEV) {
+          console.debug('[sw] registered', registration.scope)
+        }
+      })
+      .catch((error) => {
+        if (import.meta.env.DEV) {
+          console.warn('[sw] registration failed', error)
+        }
+      })
   });
 }
