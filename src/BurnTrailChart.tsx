@@ -162,6 +162,19 @@ export function BurnTrailChart({
   }
   const resetLabel = resetPoint?.capturedAt ? formatResetLabel(resetPoint.capturedAt) : null
   const projectionLabel = series.projection?.projectedExhaustionAt ? formatProjectionLabel(series.projection.projectedExhaustionAt) : null
+
+  // Guard zones that protect the corner range labels from reset-label crowding.
+  // The start label sits at x≈4 (up to ~44px wide) and the end label is
+  // right-anchored near x=316; keep a clear channel on each edge so the reset
+  // label text doesn't overlap them or run off-screen.
+  const RESET_LABEL_LEFT_CLEAR = 44
+  const RESET_LABEL_RIGHT_CLEAR = 62
+  const lastResetX = geo.resetMarkers.length > 0 ? geo.resetMarkers[geo.resetMarkers.length - 1].x : null
+  const showResetLabel =
+    resetLabel !== null &&
+    lastResetX !== null &&
+    lastResetX >= RESET_LABEL_LEFT_CLEAR &&
+    lastResetX <= VIEW_WIDTH - RESET_LABEL_RIGHT_CLEAR
   const rangeDescription = [
     rangeLabels.startLabel ? `from ${rangeLabels.startLabel}` : null,
     rangeLabels.endLabel ? `to ${rangeLabels.endLabel}` : null,
@@ -231,7 +244,7 @@ export function BurnTrailChart({
             <circle cx={marker.x} cy={marker.y} r={2} fill="#f9fafb" opacity={0.9} />
           </g>
         ))}
-        {resetLabel && geo.resetMarkers.length > 0 && (
+        {showResetLabel && geo.resetMarkers.length > 0 && (
           <text x={geo.resetMarkers[geo.resetMarkers.length - 1].x + 4} y={20} fill="#a1a1aa" fontSize={8}>{resetLabel}</text>
         )}
 

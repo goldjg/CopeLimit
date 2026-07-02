@@ -11,7 +11,6 @@
 
 body {
   margin: 0;
-  padding-top: env(safe-area-inset-top);
   padding-right: env(safe-area-inset-right);
   padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
@@ -20,7 +19,10 @@ body {
 .shell {
   width: min(920px, calc(100% - 32px));
   margin: 0 auto;
+  /* Baseline 32px; expands to clear the iOS standalone status bar without
+     adding any extra padding in regular browser contexts (env() returns 0). */
   padding: 32px 0;
+  padding-top: max(32px, calc(env(safe-area-inset-top, 0px) + 16px));
 }
 
 .hero {
