@@ -23,6 +23,7 @@ import type { AlertDecision } from './alert-display';
 import { BurnTrailChart } from './BurnTrailChart';
 import { buildChartSeries } from '../netlify/functions/lib/chart-data';
 import type { ProjectionStatus } from '../netlify/functions/lib/burn-rate-projection';
+import { formatWindowText, formatDateRange } from './date-labels';
 import {
   type HistorySummary,
   type MonthPeriodSummary,
@@ -609,9 +610,7 @@ function App() {
               )}
               {historySummary.oldestAt && historySummary.newestAt && summaryIsCurrentPeriod && (
                 <p className="historyWindow">
-                  {new Date(historySummary.oldestAt).toLocaleString()} –{' '}
-                  {new Date(historySummary.newestAt).toLocaleString()}
-                  {' '}({historySummary.snapshotCount} snapshots)
+                  {formatWindowText(historySummary.oldestAt, historySummary.newestAt, historySummary.snapshotCount)}
                 </p>
               )}
             </section>
@@ -679,8 +678,7 @@ function App() {
                               </div>
                               {mp.summary.oldestAt && mp.summary.newestAt && (
                                 <p className="historyWindow">
-                                  {new Date(mp.summary.oldestAt).toLocaleDateString()} –{' '}
-                                  {new Date(mp.summary.newestAt).toLocaleDateString()}
+                                  {formatDateRange(mp.summary.oldestAt, mp.summary.newestAt)}
                                 </p>
                               )}
                             </div>
