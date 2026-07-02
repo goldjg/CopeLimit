@@ -39,6 +39,12 @@ function debugLog(...args) {
   }
 }
 
+/**
+ * Normalises a notification target URL to a same-origin absolute URL.
+ *
+ * Any invalid or cross-origin value falls back to `/` so push payloads cannot
+ * drive the app to an unexpected external origin when the notification is clicked.
+ */
 function safeSameOriginUrl(value) {
   if (typeof value !== 'string') {
     return '/';

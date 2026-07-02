@@ -59,8 +59,6 @@ const DEFAULT_PREFS: PushUserPreferences = {
   updatedAt: '',
 }
 
-const READY_TO_SUBSCRIBE_REASON = 'ready_to_subscribe'
-
 async function fetchStatus(): Promise<SubscriptionStatus> {
   const res = await fetch('/api/push/subscribe')
   if (!res.ok) throw new Error(`Status ${res.status}`)
@@ -303,7 +301,7 @@ export default function PushNotificationSection(): React.ReactElement {
     [capability],
   )
   const reasonTags = capability
-    ? capability.reasons.length > 0 ? capability.reasons : [READY_TO_SUBSCRIBE_REASON]
+    ? capability.reasons
     : []
   const showPrefs = Boolean(capability && (capability.hasActiveSubscription || capability.canSubscribe))
 
@@ -391,6 +389,12 @@ export default function PushNotificationSection(): React.ReactElement {
                     {reason}
                   </span>
                 ))}
+              </div>
+            )}
+
+            {reasonTags.length === 0 && (
+              <div className="pushCapabilityReasons" aria-label="Notification capability reasons">
+                <span className="pushCapabilityReason">ready_to_subscribe</span>
               </div>
             )}
           </section>

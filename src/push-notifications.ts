@@ -45,6 +45,9 @@ function hasNavigator(): boolean {
   return typeof navigator !== 'undefined'
 }
 
+// Keep the subscribe flow responsive if service worker activation stalls.
+const SERVICE_WORKER_READY_TIMEOUT_MS = 4000
+
 export function isStandaloneDisplayMode(): boolean {
   if (!hasWindow()) return false
 
@@ -168,7 +171,9 @@ async function getExistingServiceWorkerRegistration(): Promise<ServiceWorkerRegi
   }
 }
 
-async function waitForReadyServiceWorker(timeoutMs = 4000): Promise<ServiceWorkerRegistration | null> {
+async function waitForReadyServiceWorker(
+  timeoutMs = SERVICE_WORKER_READY_TIMEOUT_MS,
+): Promise<ServiceWorkerRegistration | null> {
   if (!hasNavigator() || !('serviceWorker' in navigator)) {
     return null
   }
