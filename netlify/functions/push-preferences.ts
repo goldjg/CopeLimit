@@ -67,8 +67,13 @@ export const handler: Handler = async (event) => {
   }
 
   const auth = await requireSession(event)
-  if ('error' in auth) {
-    return { ...auth.error, headers: baseHeaders }
+  if ('error' in auth && auth.error) {
+    const { statusCode, body } = auth.error
+    return {
+      statusCode,
+      headers: baseHeaders,
+      body,
+    }
   }
 
   try {

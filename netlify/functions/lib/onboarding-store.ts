@@ -102,7 +102,9 @@ function getOnboardingStore() {
   try {
     return getBlobStore(STORE_NAME);
   } catch (error) {
-    throw new Error(STORE_UNAVAILABLE_ERROR, { cause: error });
+    const wrappedError = new Error(STORE_UNAVAILABLE_ERROR);
+    ;(wrappedError as Error & { cause?: unknown }).cause = error;
+    throw wrappedError;
   }
 }
 
@@ -110,7 +112,9 @@ function getBlobEncryptionKey() {
   try {
     return readBlobEncryptionKey();
   } catch (error) {
-    throw new Error(STORE_NOT_CONFIGURED_ERROR, { cause: error });
+    const wrappedError = new Error(STORE_NOT_CONFIGURED_ERROR);
+    ;(wrappedError as Error & { cause?: unknown }).cause = error;
+    throw wrappedError;
   }
 }
 

@@ -426,7 +426,10 @@ export const handler: Handler = async (event) => {
   } catch (error) {
     return {
       statusCode: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'private, no-store',
+      },
       body: JSON.stringify({
         error: error instanceof Error ? error.message : 'Unknown error'
       })

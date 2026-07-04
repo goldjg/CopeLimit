@@ -30,29 +30,19 @@
  * When `isConfigured` is `false`, the application should surface a clear
  * "notifications not configured" state rather than attempting to subscribe.
  */
-export type PushConfig = {
-  /**
-   * Whether all required VAPID environment variables are configured.
-   * When `false`, `vapidPublicKey`, `vapidPrivateKey`, and `vapidSubject`
-   * are all `null`.
-   */
-  isConfigured: boolean;
-  /**
-   * Base64url-encoded VAPID public key. Safe to serve to clients.
-   * `null` when `isConfigured` is `false`.
-   */
-  vapidPublicKey: string | null;
-  /**
-   * Base64url-encoded VAPID private key. **Never send to clients.**
-   * `null` when `isConfigured` is `false`.
-   */
-  vapidPrivateKey: string | null;
-  /**
-   * VAPID subject URI (e.g. `mailto:admin@example.com` or `https://example.com`).
-   * `null` when `isConfigured` is `false`.
-   */
-  vapidSubject: string | null;
-}
+export type PushConfig =
+  | {
+      isConfigured: true;
+      vapidPublicKey: string;
+      vapidPrivateKey: string;
+      vapidSubject: string;
+    }
+  | {
+      isConfigured: false;
+      vapidPublicKey: null;
+      vapidPrivateKey: null;
+      vapidSubject: null;
+    }
 
 /**
  * Reads the WebPush VAPID configuration from environment variables.

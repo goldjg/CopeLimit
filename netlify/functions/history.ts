@@ -110,11 +110,16 @@ function parseDate(value: string | undefined | null): string | null | ParseError
 // ---------------------------------------------------------------------------
 
 export const handler: Handler = async (event: HandlerEvent) => {
+  const baseHeaders = {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'private, no-store',
+  }
+
   // Method guard
   if (event.httpMethod !== 'GET') {
     return {
       statusCode: 405,
-      headers: { 'content-type': 'application/json; charset=utf-8', allow: 'GET' },
+      headers: { ...baseHeaders, allow: 'GET' },
       body: JSON.stringify({ error: 'Method not allowed' }),
     }
   }
@@ -124,7 +129,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!secret) {
     return {
       statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Unauthenticated' }),
     }
   }
@@ -134,7 +139,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!rawSession) {
     return {
       statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Unauthenticated' }),
     }
   }
@@ -144,7 +149,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!session) {
     return {
       statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Unauthenticated' }),
     }
   }
@@ -156,7 +161,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (isParseError(limit)) {
     return {
       statusCode: 400,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: limit.error }),
     }
   }
@@ -165,7 +170,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (isParseError(fromDate)) {
     return {
       statusCode: 400,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: fromDate.error }),
     }
   }
@@ -174,7 +179,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (isParseError(toDate)) {
     return {
       statusCode: 400,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: toDate.error }),
     }
   }
@@ -193,7 +198,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   } catch {
     return {
       statusCode: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Failed to retrieve history' }),
     }
   }
@@ -216,10 +221,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   return {
     statusCode: 200,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'private, no-store',
-    },
+    headers: baseHeaders,
     body: JSON.stringify(body),
   }
 }

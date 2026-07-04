@@ -47,9 +47,9 @@ export const handler: Handler = async () => {
     return {
       statusCode: 302,
       headers: {
-        location: `https://github.com/login/oauth/authorize?${params.toString()}`,
-        'set-cookie': stateCookie
+        location: `https://github.com/login/oauth/authorize?${params.toString()}`
       },
+      multiValueHeaders: { 'set-cookie': [stateCookie] },
       body: ''
     };
   } catch (err) {
