@@ -496,6 +496,7 @@ function buildCapture(
   includeNormalized: boolean
 ): ProviderCapture {
   const sanitizedRaw = sanitizeProviderPayload(provider, rawPayload)
+  const { billingEntity: _billingEntity, ...normalizedUsage } = usage
 
   return {
     captureVersion: '1',
@@ -503,18 +504,7 @@ function buildCapture(
     provider,
     userId,
     normalized: includeNormalized
-      ? {
-          mode: usage.mode,
-          used: usage.used,
-          quota: usage.quota,
-          remaining: usage.remaining,
-          percentUsed: usage.percentUsed,
-          resetAt: usage.resetAt,
-          source: usage.source,
-          warningLevel: usage.warningLevel,
-          updatedAt: usage.updatedAt,
-          notes: usage.notes
-        }
+      ? normalizedUsage
       : undefined,
     sanitizedRaw,
     meta: {

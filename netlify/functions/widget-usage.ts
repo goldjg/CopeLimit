@@ -197,10 +197,15 @@ async function getWidgetCopilotInternalUsage(githubToken: string, login: string)
 }
 
 export const handler: Handler = async (event) => {
+  const baseHeaders = {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'private, no-store'
+  }
+
   if (!process.env.WIDGET_TOKEN_HASH_SECRET && !process.env.SESSION_SECRET) {
     return {
       statusCode: 503,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Service not configured' })
     };
   }
@@ -209,7 +214,7 @@ export const handler: Handler = async (event) => {
   if (!raw) {
     return {
       statusCode: 401,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Unauthorized' })
     };
   }
@@ -219,7 +224,7 @@ export const handler: Handler = async (event) => {
     if (!record) {
       return {
         statusCode: 401,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
+        headers: baseHeaders,
         body: JSON.stringify({ error: 'Unauthorized' })
       };
     }
@@ -300,7 +305,7 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: 200,
       headers: {
-        'content-type': 'application/json; charset=utf-8',
+        ...baseHeaders,
         'cache-control': 'private, max-age=60'
       },
       body: JSON.stringify(responseBody)
@@ -309,14 +314,14 @@ export const handler: Handler = async (event) => {
     if (isWidgetStoreNotConfiguredError(error)) {
       return {
         statusCode: 503,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
+        headers: baseHeaders,
         body: JSON.stringify({ error: 'Service not configured' })
       };
     }
     if (isWidgetStoreUnavailableError(error)) {
       return {
         statusCode: 503,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
+        headers: baseHeaders,
         body: JSON.stringify({ error: 'Widget token storage is unavailable' })
       };
     }
@@ -324,7 +329,7 @@ export const handler: Handler = async (event) => {
     console.error('[widget-usage] unexpected error while resolving widget usage', errorType);
     return {
       statusCode: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: baseHeaders,
       body: JSON.stringify({ error: 'Internal server error' })
     };
   }

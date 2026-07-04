@@ -326,9 +326,9 @@ export default function PushNotificationSection(): React.ReactElement {
 
       {readyState && (
         <>
-          <p className="pushNotificationNote">{describePrimaryState(capability)}</p>
+          <p className="pushNotificationNote">{describePrimaryState(readyState.capability)}</p>
 
-          {capability.hasActiveSubscription && (
+          {readyState.capability.hasActiveSubscription && (
             <>
               <p className="pushNotificationSuccess">
                 ✓ Browser notifications active
@@ -355,7 +355,7 @@ export default function PushNotificationSection(): React.ReactElement {
             </>
           )}
 
-          {!capability.hasActiveSubscription && capability.canSubscribe && (
+          {!readyState.capability.hasActiveSubscription && readyState.capability.canSubscribe && (
             <>
               {status && status.hasSubscriptions && status.subscriptionCount > 0 && (
                 <p className="pushNotificationNote pushNotificationNoteSmall">

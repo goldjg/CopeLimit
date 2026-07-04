@@ -27,7 +27,7 @@ const BUDGET_FILL_TOP_OPACITY = 0.68
 const BUDGET_FILL_BOTTOM_OPACITY = 0.16
 
 function sanitizePositiveFinite(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && value > 0 ? value : fallback
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 /** Accent colour for the burn trail, keyed to the warning level. */

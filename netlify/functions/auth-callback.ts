@@ -73,7 +73,8 @@ export const handler: Handler = async (event) => {
     if (!code || !state) {
       return {
         statusCode: 302,
-        headers: { location: '/?error=auth_failed', 'set-cookie': clearStateCookie },
+        headers: { location: '/?error=auth_failed' },
+        multiValueHeaders: { 'set-cookie': [clearStateCookie] },
         body: ''
       };
     }
@@ -81,7 +82,8 @@ export const handler: Handler = async (event) => {
     if (!savedState || state !== savedState) {
       return {
         statusCode: 302,
-        headers: { location: '/?error=auth_state_mismatch', 'set-cookie': clearStateCookie },
+        headers: { location: '/?error=auth_state_mismatch' },
+        multiValueHeaders: { 'set-cookie': [clearStateCookie] },
         body: ''
       };
     }
@@ -153,7 +155,8 @@ export const handler: Handler = async (event) => {
     console.error('[auth-callback]', message);
     return {
       statusCode: 302,
-      headers: { location: '/?error=auth_failed', 'set-cookie': clearStateCookie },
+      headers: { location: '/?error=auth_failed' },
+      multiValueHeaders: { 'set-cookie': [clearStateCookie] },
       body: ''
     };
   }

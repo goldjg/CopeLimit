@@ -272,8 +272,8 @@ export function WidgetTokenSection({ isIos, isStandalone }: { isIos: boolean; is
   const fastSetupActionRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasDialogOpenRef = useRef(false);
-  const waitingTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const slowHintTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const waitingTimeoutRef = useRef<number | null>(null);
+  const slowHintTimeoutRef = useRef<number | null>(null);
 
   const storeOnboardingStep = useCallback((step: OnboardingStep) => {
     setOnboardingStep(step);

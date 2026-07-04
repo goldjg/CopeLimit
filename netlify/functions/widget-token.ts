@@ -92,8 +92,13 @@ export const handler: Handler = async (event) => {
 
   if (event.httpMethod === 'GET') {
     const auth = await requireSession(event);
-    if ('error' in auth) {
-      return { ...auth.error, headers: baseHeaders };
+    if ('error' in auth && auth.error) {
+      const { statusCode, body } = auth.error;
+      return {
+        statusCode,
+        headers: baseHeaders,
+        body,
+      };
     }
 
     let status;
@@ -122,8 +127,13 @@ export const handler: Handler = async (event) => {
 
   if (event.httpMethod === 'DELETE') {
     const auth = await requireSession(event);
-    if ('error' in auth) {
-      return { ...auth.error, headers: baseHeaders };
+    if ('error' in auth && auth.error) {
+      const { statusCode, body } = auth.error;
+      return {
+        statusCode,
+        headers: baseHeaders,
+        body,
+      };
     }
 
     let revoked;
@@ -159,8 +169,13 @@ export const handler: Handler = async (event) => {
   }
 
   const auth = await requireSession(event);
-  if ('error' in auth) {
-    return { ...auth.error, headers: baseHeaders };
+  if ('error' in auth && auth.error) {
+    const { statusCode, body } = auth.error;
+    return {
+      statusCode,
+      headers: baseHeaders,
+      body,
+    };
   }
 
   let issued;
