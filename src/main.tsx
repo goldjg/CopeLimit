@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
@@ -47,14 +47,6 @@ function App() {
     refresh();
   }, []);
 
-  const statusText = useMemo(() => {
-    if (!usage) return 'Loading';
-    if (usage.warningLevel === 'over') return 'Quota exceeded';
-    if (usage.warningLevel === 'hot') return 'Nearly cooked';
-    if (usage.warningLevel === 'warm') return 'Getting spicy';
-    return 'Comfortable';
-  }, [usage]);
-
   return (
     <main className="shell">
       <section className="hero">
@@ -75,7 +67,10 @@ function App() {
           <section className={`card meter ${usage.warningLevel}`}>
             <div className="meterHeader">
               <span>{labelForMode(usage.mode)}</span>
-              <strong>{statusText}</strong>
+              <span className="statusBadge">
+                {usage.warningLevel.charAt(0).toUpperCase()}
+                {usage.warningLevel.slice(1)}
+              </span>
             </div>
 
             <div className="bigNumber">{usage.remaining}</div>

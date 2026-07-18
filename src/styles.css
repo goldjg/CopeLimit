@@ -79,8 +79,30 @@ button {
   color: #a1a1aa;
 }
 
-.meterHeader strong {
-  color: #f9fafb;
+.statusBadge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  background: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.meter.warm .statusBadge {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.meter.hot .statusBadge,
+.meter.over .statusBadge {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
 }
 
 .bigNumber {
