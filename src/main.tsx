@@ -393,10 +393,16 @@ function App() {
           <section className={`card meter ${usage.warningLevel}`}>
             <div className="meterHeader">
               <span>{labelForMode(usage.mode)}</span>
-              <span className="statusBadge">
-                {usage.warningLevel.charAt(0).toUpperCase()}
-                {usage.warningLevel.slice(1)}
-              </span>
+              {usage.comfortStatus ? (
+                <span className={`badge comfortBadge ${classForComfortLevel(usage.comfortStatus.level)}`}>
+                  {labelForComfortLevel(usage.comfortStatus.level)}
+                </span>
+              ) : (
+                <span className="statusBadge">
+                  {usage.warningLevel.charAt(0).toUpperCase()}
+                  {usage.warningLevel.slice(1)}
+                </span>
+              )}
             </div>
 
             <div className="bigNumber">{getHeroValue(usage)}</div>
@@ -408,9 +414,6 @@ function App() {
 
             {usage.comfortStatus && (
               <div className="comfortStatus">
-                <span className={`badge comfortBadge ${classForComfortLevel(usage.comfortStatus.level)}`}>
-                  {labelForComfortLevel(usage.comfortStatus.level)}
-                </span>
                 <span className="comfortSummary">{usage.comfortStatus.summary}</span>
                 {usage.comfortStatus.detail && (
                   <p className="subtle comfortDetail">{usage.comfortStatus.detail}</p>
