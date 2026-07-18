@@ -9,3 +9,93 @@
   from = "/api/usage"
   to = "/.netlify/functions/usage"
   status = 200
+
+[[redirects]]
+  from = "/api/auth/start"
+  to = "/.netlify/functions/auth-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/callback"
+  to = "/.netlify/functions/auth-callback"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/logout"
+  to = "/.netlify/functions/auth-logout"
+  status = 200
+
+[[redirects]]
+  from = "/api/me"
+  to = "/.netlify/functions/me"
+  status = 200
+
+[[redirects]]
+  from = "/api/history"
+  to = "/.netlify/functions/history"
+  status = 200
+
+[[redirects]]
+  from = "/api/widget-usage"
+  to = "/.netlify/functions/widget-usage"
+  status = 200
+
+[[redirects]]
+  from = "/api/widget-token"
+  to = "/.netlify/functions/widget-token"
+  status = 200
+
+[[redirects]]
+  from = "/api/widget-settings"
+  to = "/.netlify/functions/widget-settings"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/session"
+  to = "/.netlify/functions/onboarding-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/exchange"
+  to = "/.netlify/functions/onboarding-exchange"
+  status = 200
+
+[[redirects]]
+  from = "/api/onboarding/status"
+  to = "/.netlify/functions/onboarding-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/push/subscribe"
+  to = "/.netlify/functions/push-subscribe"
+  status = 200
+
+[[redirects]]
+  from = "/api/push/test"
+  to = "/.netlify/functions/push-send-test"
+  status = 200
+
+[[redirects]]
+  from = "/api/push/preferences"
+  to = "/.netlify/functions/push-preferences"
+  status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/scriptable/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store"

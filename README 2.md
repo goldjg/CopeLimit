@@ -12,6 +12,8 @@ So CopeLimit is deliberately designed around a provider abstraction:
 
 - `mock` provider for development and UI work
 - `github` provider placeholder for authenticated billing/usage API integration where available
+- `github-copilot-internal` provider for hosted Netlify usage via `https://api.github.com/copilot_internal/user`
+- `copilot-local` provider that reads usage from a local `copilot-api` proxy (`http://127.0.0.1:4141`)
 - a stable public JSON shape for Scriptable, Shortcuts, widgets, and the PWA
 
 ## MVP shape
@@ -35,19 +37,51 @@ npm run dev
 
 By default the app uses mock data.
 
-Create `.env` from `.env.example` and set:
+Set:
 
 ```bash
 COPELIMIT_PROVIDER=mock
 ```
 
-When a reliable GitHub API source is available for your account type, switch to:
+For hosted Copilot usage on Netlify, set:
+
+```bash
+COPELIMIT_PROVIDER=github-copilot-internal
+SESSION_SECRET=...                 # strong random string
+SESSION_ENCRYPTION_KEY=...         # 64-char lowercase hex (openssl rand -hex 32)
+BLOB_ENCRYPTION_KEY=...            # 64-char lowercase hex (openssl rand -hex 32)
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
+
+Notes:
+- `SESSION_ENCRYPTION_KEY` is required in production to encrypt the signed session payload containing OAuth access tokens.
+- The key must be 64 lowercase hex characters (32 bytes). Generate with `openssl rand -hex 32`.
+- `BLOB_ENCRYPTION_KEY` is required to encrypt widget token records and user index entries in Netlify Blobs.
+- Existing plaintext widget records are migrated automatically when first read after rollout.
+- After enabling `copilot` OAuth scope, existing users must sign out and sign in again to refresh token scopes.
+
+When a reliable public GitHub API source is available for your account type, switch to:
 
 ```bash
 COPELIMIT_PROVIDER=github
 GITHUB_TOKEN=...
 GITHUB_LOGIN=goldjg
 ```
+
+For local Copilot usage via the reverse-engineered `copilot-api` proxy:
+
+```bash
+npx copilot-api
+# In another shell:
+COPELIMIT_PROVIDER=copilot-local
+COPILOT_API_URL=http://127.0.0.1:4141
+```
+
+Notes:
+- `copilot-local` is optional and local-only.
+- CopeLimit reads `GET /usage` only and never reads or exposes `GET /token`.
+- Do not run `copilot-local` in a publicly exposed deployment without strict network/access controls.
 
 ## Deploy
 

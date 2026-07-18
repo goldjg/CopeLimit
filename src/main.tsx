@@ -1,5 +1,51 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * @file Main React application entry point for the CopeLimit PWA.
+ *
+ * Renders the root `App` component which:
+ * - Fetches Copilot usage from `/api/usage` and the authenticated user from `/api/me`.
+ * - Displays a colour-coded quota meter with reset date, billing entity, and data-source badge.
+ * - Handles GitHub OAuth sign-in / sign-out.
+ * - Shows PWA install prompts for Android (`beforeinstallprompt`) and iOS (Add to Home Screen hint).
+ * - Registers the service worker (`/sw.js`) for offline-capable app-shell caching.
+ * - Renders the {@link WidgetTokenSection} for authenticated users to manage their iOS widget token.
+ */
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { WidgetTokenSection } from './WidgetTokenSection';
+import PushNotificationSection from './PushNotificationSection';
+import { isLikelyIosNavigator } from './widget-onboarding';
+import { labelForBillingPhase } from './billing-display';
+import type { BillingPhase } from './billing-display';
+import { labelForComfortLevel, classForComfortLevel } from './comfort-display';
+import type { ComfortStatus } from './comfort-display';
+import { labelForAlertSeverity, classForAlertSeverity, labelForAlertType } from './alert-display';
+import type { AlertDecision } from './alert-display';
+import { BurnTrailChart } from './BurnTrailChart';
+import { buildChartSeries } from '../netlify/functions/lib/chart-data';
+import type { ProjectionStatus } from '../netlify/functions/lib/burn-rate-projection';
+import { formatWindowText, formatDateRange } from './date-labels';
+import {
+  type HistorySummary,
+  type MonthPeriodSummary,
+  type QuarterPeriodSummary,
+  type YearPeriodSummary,
+  computeMonthlyPeriodSummaries,
+  computeQuarterlyPeriodSummaries,
+  computeYearlyPeriodSummaries,
+} from '../netlify/functions/lib/history-metrics';
+import {
+  creditsCostRateToUsd,
+  creditsToUsd,
+  computeEtaHours,
+  formatBurnRate,
+  formatEta,
+  formatUsd,
+  getBudgetRemaining,
+  getBudgetRemainingCostUsd,
+  getHeroCaption,
+  getHeroValue,
+  getOverageUsed,
+} from './usage-metrics';
 import './styles.css';
 
 type Usage = {
@@ -14,7 +60,48 @@ type Usage = {
   warningLevel: 'normal' | 'warm' | 'hot' | 'over';
   updatedAt: string;
   notes: string[];
+  billingPhase: BillingPhase;
+  overageCount?: number;
+  overageEntitlement?: number;
+  derivedOverageCredits?: number;
+  includedQuotaCostUsd: number;
+  totalUsedCostUsd: number;
+  overageCostUsd: number;
+  overageBudgetCostUsd: number;
+  budgetRemainingCostUsd: number;
+  estimatedRemainingBudgetCostUsd: number;
+  projectedCostAtResetUsd?: number;
+  comfortStatus?: ComfortStatus;
+  alertDecision?: AlertDecision;
+  burnRateProjection?: BurnRateProjection;
 };
+
+type BurnRateProjection = {
+  projectedExhaustionAt?: string;
+  projectionStatus?: ProjectionStatus;
+};
+
+type HistorySnapshot = {
+  capturedAt: string;
+  used: number;
+  quota?: number;
+  remaining?: number;
+};
+
+type User = {
+  authenticated: boolean;
+  login?: string;
+  avatar_url?: string;
+};
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+};
+
+function isLikelyIos(): boolean {
+  return isLikelyIosNavigator(window.navigator);
+}
 
 function daysUntil(dateText: string): number {
   const target = new Date(dateText).getTime();
@@ -26,43 +113,282 @@ function labelForMode(mode: Usage['mode']): string {
   return mode === 'ai_credits' ? 'AI credits' : 'Premium requests';
 }
 
+function sourceBadge(source: string): { label: string; className: string } {
+  if (source === 'copilot-local') return { label: 'Live (local)', className: 'badge badge-live' };
+  if (source === 'github-copilot-internal') return { label: 'Live (hosted)', className: 'badge badge-live' };
+  if (source === 'unsupported' || source === 'github-placeholder') return { label: 'Unavailable', className: 'badge badge-unavailable' };
+  return { label: 'Mock data', className: 'badge badge-mock' };
+}
+
+function authErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  if (code === 'auth_state_mismatch') return 'Login failed: security state mismatch. Please try again.';
+  if (code === 'auth_unavailable') return 'GitHub login is not available. GITHUB_CLIENT_ID may not be configured.';
+  if (code === 'auth_failed') return 'GitHub login failed. Please try again.';
+  return 'An authentication error occurred. Please try again.';
+}
+
 function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
+  const [historySnapshots, setHistorySnapshots] = useState<HistorySnapshot[]>([]);
+  const [allSnapshots, setAllSnapshots] = useState<HistorySnapshot[]>([]);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [historyViewMode, setHistoryViewMode] = useState<'months' | 'quarters' | 'years'>('months');
+  const [allSnapshotsLoading, setAllSnapshotsLoading] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [showIosInstallHint, setShowIosInstallHint] = useState(false);
+  const [isIosDevice, setIsIosDevice] = useState(false);
+
+  const authError = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return authErrorMessage(params.get('error'));
+  }, []);
+
+  async function fetchHistorySummary() {
+    try {
+      const response = await fetch('/api/history?summary=true&limit=50', { cache: 'no-store' });
+      if (response.ok) {
+        const data = await response.json() as { summary?: HistorySummary; snapshots?: HistorySnapshot[] };
+        setHistorySummary(data.summary ?? null);
+        setHistorySnapshots(data.snapshots ?? []);
+      }
+    } catch {
+      // History is optional — silently ignore failures
+    }
+  }
+
+  async function fetchAllSnapshots() {
+    setAllSnapshotsLoading(true);
+    try {
+      const response = await fetch('/api/history?limit=2000', { cache: 'no-store' });
+      if (response.ok) {
+        const data = await response.json() as { snapshots?: HistorySnapshot[] };
+        setAllSnapshots(data.snapshots ?? []);
+      }
+    } catch {
+      // History is optional — silently ignore failures
+    } finally {
+      setAllSnapshotsLoading(false);
+    }
+  }
 
   async function refresh() {
     setError(null);
+    const [usageResult] = await Promise.allSettled([
+      fetch('/api/usage', { cache: 'no-store' }),
+      fetchHistorySummary(),
+    ]);
+
+    if (usageResult.status === 'rejected') {
+      setError(usageResult.reason instanceof Error ? usageResult.reason.message : 'Unknown error');
+      return;
+    }
+
     try {
-      const response = await fetch('/api/usage', { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Usage API returned HTTP ${response.status}`);
+      if (!usageResult.value.ok) {
+        throw new Error(`Usage API returned HTTP ${usageResult.value.status}`);
       }
-      setUsage(await response.json());
+      setUsage(await usageResult.value.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
   }
 
+  async function fetchUser() {
+    try {
+      const response = await fetch('/api/me', { cache: 'no-store' });
+      if (response.ok) {
+        setUser(await response.json());
+      }
+    } catch {
+      setUser({ authenticated: false });
+    }
+  }
+
   useEffect(() => {
-    refresh();
+    void refresh();
+    void fetchUser();
   }, []);
 
+  useEffect(() => {
+    const iosNavigator = window.navigator as Navigator & { standalone?: boolean };
+    const inStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
+      || iosNavigator.standalone === true;
+    const isIos = isLikelyIos();
+    const dismissedIosHint = sessionStorage.getItem('copelimit-ios-install-hint-dismissed') === '1';
+    setIsInstalled(inStandaloneMode);
+    setIsIosDevice(isIos);
+    setShowIosInstallHint(isIos && !inStandaloneMode && !dismissedIosHint);
+
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleAppInstalled = () => {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+    };
+
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  async function installApp() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstallPrompt(null);
+      }
+    } catch {
+      console.warn('Install prompt failed');
+    }
+  }
+
+  function dismissIosInstallHint() {
+    sessionStorage.setItem('copelimit-ios-install-hint-dismissed', '1');
+    setShowIosInstallHint(false);
+  }
+
+  const isUnsupported = usage?.source === 'unsupported' || usage?.source === 'github-placeholder';
+  const burnRate = historySummary?.creditsPerHour ?? null;
+  const burnRateLabel = formatBurnRate(burnRate);
+  const dailyBurnLabel =
+    historySummary?.creditsPerDay === null || historySummary?.creditsPerDay === undefined
+      ? null
+      : `${historySummary.creditsPerDay.toFixed(1)}/day`;
+  const dailyBurnCostLabel =
+    historySummary?.burnCostPerDayUsd === null || historySummary?.burnCostPerDayUsd === undefined
+      ? null
+      : `${formatUsd(historySummary.burnCostPerDayUsd)}/day`;
+  const etaLabel = usage ? formatEta(computeEtaHours(usage, burnRate)) : null;
+  const budgetRemaining = usage ? getBudgetRemaining(usage) : null;
+  const budgetRemainingCostUsd = usage ? getBudgetRemainingCostUsd(usage) : null;
+  const overageUsed = usage ? getOverageUsed(usage) : 0;
+  const chartSeries = useMemo(
+    () =>
+      buildChartSeries(
+        historySnapshots,
+        usage?.burnRateProjection ?? null,
+      ),
+    [
+      historySnapshots,
+      usage?.burnRateProjection?.projectedExhaustionAt,
+      usage?.burnRateProjection?.projectionStatus,
+    ],
+  );
+
+  // True when the history summary's newest snapshot is in the current calendar month.
+  // If false, the summary is stale (all snapshots are from a prior month) and burn
+  // metrics must be hidden to avoid showing previous-period rates as current.
+  const summaryIsCurrentPeriod = useMemo(() => {
+    if (!historySummary?.newestAt) return false;
+    const summaryMonth = historySummary.newestAt.slice(0, 7);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return summaryMonth === currentMonth;
+  }, [historySummary?.newestAt]);
+
+  // Period aggregations derived from the full snapshot history (loaded on demand).
+  const monthlyPeriods = useMemo<MonthPeriodSummary[]>(
+    () => computeMonthlyPeriodSummaries(allSnapshots),
+    [allSnapshots],
+  );
+  const quarterlyPeriods = useMemo<QuarterPeriodSummary[]>(
+    () => computeQuarterlyPeriodSummaries(monthlyPeriods),
+    [monthlyPeriods],
+  );
+  const yearlyPeriods = useMemo<YearPeriodSummary[]>(
+    () => computeYearlyPeriodSummaries(monthlyPeriods),
+    [monthlyPeriods],
+  );
+
+  // Derive the current calendar month "YYYY-MM" to identify and skip it in
+  // the previous-periods list (it is already shown in the main history card).
+  const currentYearMonth = new Date().toISOString().slice(0, 7);
+
+  function formatMonth(ym: string): string {
+    const [year, month] = ym.split('-');
+    return new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1)
+      .toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+  }
   return (
     <main className="shell">
       <section className="hero">
         <div className="brand">
-          <img src="/icons/icon.svg" alt="" />
+          <img src="/icons/icon-192.png" alt="CopeLimit logo" />
           <div>
             <h1>CopeLimit</h1>
             <p>Your Copilot usage panic meter.</p>
           </div>
         </div>
-        <button onClick={refresh}>Refresh</button>
+        <div className="heroActions">
+          {user?.authenticated ? (
+            <div className="userChip">
+              {user.avatar_url && (
+                <img src={user.avatar_url} alt={user.login} width={24} height={24} />
+              )}
+              <span>{user.login}</span>
+              <a href="/api/auth/logout">Sign out</a>
+            </div>
+          ) : (
+            <a
+              className="loginButton"
+              href="/api/auth/start"
+            >
+              Sign in with GitHub
+            </a>
+          )}
+          {!isInstalled && installPrompt && (
+            <button type="button" className="installButton" onClick={() => { void installApp(); }}>
+              Install app
+            </button>
+          )}
+          <button onClick={() => { void refresh(); }}>Refresh</button>
+        </div>
       </section>
 
+      {isOffline && <section className="card notice">You are offline. Attempting to use cached app content.</section>}
+      {showIosInstallHint && (
+        <section className="card notice iosHint">
+          <span>
+            On iPhone or iPad: tap Safari&apos;s <strong>Share</strong> button, then
+            {' '}
+            <strong>Add to Home Screen</strong>.
+          </span>
+          <button type="button" className="iosHintDismiss" onClick={dismissIosInstallHint}>
+            Dismiss
+          </button>
+        </section>
+      )}
+      {authError && <section className="card error">{authError}</section>}
       {error && <section className="card error">Could not load usage: {error}</section>}
 
-      {usage && (
+      {usage && isUnsupported && (
+        <section className="card notice">
+          <strong>Real quota unavailable in hosted mode.</strong>
+          <p>
+            GitHub&apos;s API does not expose personal Copilot quota. To see real data, run CopeLimit locally with the copilot-api proxy.
+          </p>
+        </section>
+      )}
+
+      {usage && !isUnsupported && (
         <>
           <section className={`card meter ${usage.warningLevel}`}>
             <div className="meterHeader">
@@ -73,24 +399,70 @@ function App() {
               </span>
             </div>
 
-            <div className="bigNumber">{usage.remaining}</div>
-            <div className="subtle">remaining of {usage.quota}</div>
+            <div className="bigNumber">{getHeroValue(usage)}</div>
+            <div className="subtle">{getHeroCaption(usage)}</div>
 
             <div className="bar" aria-label={`${usage.percentUsed}% used`}>
               <div style={{ width: `${Math.min(100, usage.percentUsed)}%` }} />
             </div>
 
+            {usage.comfortStatus && (
+              <div className="comfortStatus">
+                <span className={`badge comfortBadge ${classForComfortLevel(usage.comfortStatus.level)}`}>
+                  {labelForComfortLevel(usage.comfortStatus.level)}
+                </span>
+                <span className="comfortSummary">{usage.comfortStatus.summary}</span>
+                {usage.comfortStatus.detail && (
+                  <p className="subtle comfortDetail">{usage.comfortStatus.detail}</p>
+                )}
+                {usage.comfortStatus.recommendedAction && (
+                  <p className="subtle comfortAction">{usage.comfortStatus.recommendedAction}</p>
+                )}
+              </div>
+            )}
+
+            {usage.alertDecision?.shouldAlert && (
+              <div className={`alertPreview alertPreview-active ${classForAlertSeverity(usage.alertDecision.severity)}`}>
+                <div className="alertPreviewHeader">
+                  <span className={`badge alertSeverityBadge ${classForAlertSeverity(usage.alertDecision.severity)}`}>
+                    {labelForAlertSeverity(usage.alertDecision.severity)}
+                  </span>
+                  {usage.alertDecision.alertType && (
+                    <span className="alertPreviewType">{labelForAlertType(usage.alertDecision.alertType)}</span>
+                  )}
+                </div>
+                {usage.alertDecision.title && (
+                  <p className="alertPreviewTitle">{usage.alertDecision.title}</p>
+                )}
+                {usage.alertDecision.message && (
+                  <p className="subtle alertPreviewMessage">{usage.alertDecision.message}</p>
+                )}
+                <details className="alertPreviewReasonDetails">
+                  <summary>Why this alert?</summary>
+                  <p className="subtle">{usage.alertDecision.reason}</p>
+                </details>
+              </div>
+            )}
+
+            {usage.alertDecision && !usage.alertDecision.shouldAlert && (
+              <details className="alertPreview alertPreview-quiet">
+                <summary>No alert would be sent right now</summary>
+                <p className="subtle">{usage.alertDecision.reason}</p>
+              </details>
+            )}
+
             <div className="stats">
               <div>
                 <span>Used</span>
                 <strong>{usage.used}</strong>
+                <p className="subtle">≈ {formatUsd(usage.totalUsedCostUsd)} est.</p>
               </div>
               <div>
                 <span>Quota</span>
                 <strong>{usage.quota}</strong>
               </div>
               <div>
-                <span>Used</span>
+                <span>Usage share</span>
                 <strong>{usage.percentUsed}%</strong>
               </div>
             </div>
@@ -103,12 +475,63 @@ function App() {
               <p>{daysUntil(usage.resetAt)} days remaining in this quota window.</p>
             </div>
 
-            <div className="card">
+            <div className="card billingCard">
               <span className="label">Billing entity</span>
               <strong>{usage.billingEntity}</strong>
-              <p>Source: {usage.source}. Updated {new Date(usage.updatedAt).toLocaleString()}.</p>
+              <p>Updated {new Date(usage.updatedAt).toLocaleString()}.</p>
+              <div className="billingMeta">
+                <span className={`badge billingPhaseBadge phase-${usage.billingPhase}`}>
+                  {labelForBillingPhase(usage.billingPhase)}
+                </span>
+                <span className={sourceBadge(usage.source).className}>
+                  {sourceBadge(usage.source).label}
+                </span>
+              </div>
             </div>
           </section>
+
+          {(usage.billingPhase === 'budget_active' || usage.overageEntitlement !== undefined) && (
+            <section className="card budgetInfo">
+              <span className="label">Budget usage</span>
+              <div className="budgetGrid">
+                <div>
+                  <span>Included quota used</span>
+                  <strong>{Math.min(usage.used, usage.quota)}</strong>
+                  <p className="subtle">≈ {formatUsd(usage.includedQuotaCostUsd)} est.</p>
+                </div>
+                {(usage.overageCount !== undefined || usage.derivedOverageCredits !== undefined) && (
+                  <div>
+                    <span>Overage credits used</span>
+                    <strong>{overageUsed}</strong>
+                    <p className="subtle">≈ {formatUsd(usage.overageCostUsd)} est.</p>
+                  </div>
+                )}
+                {usage.overageEntitlement !== undefined && (
+                  <div>
+                    <span>Overage budget</span>
+                    <strong>{usage.overageEntitlement}</strong>
+                    <p className="subtle">≈ {formatUsd(usage.overageBudgetCostUsd)} est.</p>
+                  </div>
+                )}
+                {budgetRemaining !== null && (
+                  <div>
+                    <span>Budget remaining</span>
+                    <strong>{budgetRemaining}</strong>
+                    <p className="subtle">≈ {formatUsd(budgetRemainingCostUsd)} est.</p>
+                  </div>
+                )}
+                {usage.derivedOverageCredits !== undefined &&
+                  usage.overageCount !== undefined &&
+                  usage.derivedOverageCredits !== usage.overageCount && (
+                  <div>
+                    <span>Derived overage (est.)</span>
+                    <strong>{usage.derivedOverageCredits}</strong>
+                    <p className="subtle">≈ {formatUsd(creditsToUsd(usage.derivedOverageCredits))} est.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {usage.notes.length > 0 && (
             <section className="card notes">
@@ -118,10 +541,220 @@ function App() {
               ))}
             </section>
           )}
+
+          {historySummary && (
+            <section className="card historySummary">
+              <span className="label">This billing period</span>
+              {!summaryIsCurrentPeriod ? (
+                <p className="subtle">No data for the current billing period yet.</p>
+              ) : historySummary.snapshotCount < 2 ? (
+                <p className="subtle">Tracking started — more data needed to compute burn rate.</p>
+              ) : (
+                <div className="historyGrid">
+                  <div>
+                    <span>Consumed (this period)</span>
+                    <strong>{historySummary.deltaUsed}</strong>
+                    <p className="subtle">≈ {formatUsd(historySummary.deltaUsed * 0.01)} est.</p>
+                  </div>
+                  {burnRateLabel && (
+                    <div>
+                      <span>Burn rate</span>
+                      <strong>{burnRateLabel}</strong>
+                      <p className="subtle">
+                        ≈ {formatUsd(historySummary.burnRateCostPerHourUsd ?? creditsCostRateToUsd(historySummary.creditsPerHour))}/hr est.
+                      </p>
+                    </div>
+                  )}
+                  {dailyBurnLabel && (
+                    <div>
+                      <span>Burn / day</span>
+                      <strong>{dailyBurnLabel}</strong>
+                      <p className="subtle">≈ {dailyBurnCostLabel} est.</p>
+                    </div>
+                  )}
+                  {etaLabel && (
+                    <div>
+                      <span>ETA (this period)</span>
+                      <strong>{etaLabel}</strong>
+                    </div>
+                  )}
+                  {historySummary.averageBurnRate !== null && (
+                    <div>
+                      <span>Avg burn rate</span>
+                      <strong>{historySummary.averageBurnRate.toFixed(1)}/hr</strong>
+                      <p className="subtle">≈ {formatUsd(historySummary.averageBurnRateCostPerHourUsd)}/hr est.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {chartSeries.hasData && chartSeries.points.length >= 2 && (
+                <>
+                  <p className="historyTrendLabel">
+                    Fuel tank · {chartSeries.points.length} snapshots
+                  </p>
+                  <BurnTrailChart
+                    series={chartSeries}
+                    warningLevel={usage?.warningLevel}
+                    usageContext={usage ? {
+                      billingPhase: usage.billingPhase,
+                      overageEntitlement: usage.overageEntitlement,
+                    } : undefined}
+                  />
+                </>
+              )}
+              {historySummary.oldestAt && historySummary.newestAt && summaryIsCurrentPeriod && (
+                <p className="historyWindow">
+                  {formatWindowText(historySummary.oldestAt, historySummary.newestAt, historySummary.snapshotCount)}
+                </p>
+              )}
+            </section>
+          )}
+
+          <section className="card periodHistory">
+            <details
+              onToggle={(e) => {
+                const open = (e.target as HTMLDetailsElement).open;
+                setHistoryExpanded(open);
+                if (open && allSnapshots.length === 0 && !allSnapshotsLoading) {
+                  void fetchAllSnapshots();
+                }
+              }}
+            >
+              <summary className="label periodHistorySummary">Previous periods</summary>
+              {allSnapshotsLoading && <p className="subtle">Loading history…</p>}
+              {!allSnapshotsLoading && historyExpanded && allSnapshots.length === 0 && (
+                <p className="subtle">No historical data available yet.</p>
+              )}
+              {!allSnapshotsLoading && allSnapshots.length > 0 && (
+                <>
+                  <div className="periodViewTabs">
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'months' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('months')}
+                    >Months</button>
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'quarters' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('quarters')}
+                    >Quarters</button>
+                    <button
+                      type="button"
+                      className={`periodTab${historyViewMode === 'years' ? ' active' : ''}`}
+                      onClick={() => setHistoryViewMode('years')}
+                    >Years</button>
+                  </div>
+
+                  {historyViewMode === 'months' && (
+                    monthlyPeriods.filter(mp => mp.month !== currentYearMonth).length === 0
+                      ? <p className="subtle">No previous months on record.</p>
+                      : monthlyPeriods
+                          .filter(mp => mp.month !== currentYearMonth)
+                          .map(mp => (
+                            <div key={mp.month} className="periodCard">
+                              <span className="periodCardLabel">{formatMonth(mp.month)}</span>
+                              <div className="periodGrid">
+                                <div>
+                                  <span>Consumed</span>
+                                  <strong>{mp.summary.deltaUsed}</strong>
+                                  <p className="subtle">≈ {formatUsd(mp.summary.deltaUsed * 0.01)} est.</p>
+                                </div>
+                                {mp.summary.creditsPerDay !== null && (
+                                  <div>
+                                    <span>Avg / day</span>
+                                    <strong>{mp.summary.creditsPerDay.toFixed(1)}</strong>
+                                  </div>
+                                )}
+                                <div>
+                                  <span>Snapshots</span>
+                                  <strong>{mp.summary.snapshotCount}</strong>
+                                </div>
+                              </div>
+                              {mp.summary.oldestAt && mp.summary.newestAt && (
+                                <p className="historyWindow">
+                                  {formatDateRange(mp.summary.oldestAt, mp.summary.newestAt)}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                  )}
+
+                  {historyViewMode === 'quarters' && (
+                    quarterlyPeriods.length === 0
+                      ? <p className="subtle">No quarterly data on record.</p>
+                      : quarterlyPeriods.map(qp => (
+                          <div key={qp.quarter} className="periodCard">
+                            <span className="periodCardLabel">{qp.quarter}</span>
+                            <div className="periodGrid">
+                              <div>
+                                <span>Total consumed</span>
+                                <strong>{qp.totalConsumed}</strong>
+                                <p className="subtle">≈ {formatUsd(qp.totalConsumed * 0.01)} est.</p>
+                              </div>
+                              <div>
+                                <span>Months tracked</span>
+                                <strong>{qp.months.length}</strong>
+                              </div>
+                              <div>
+                                <span>Snapshots</span>
+                                <strong>{qp.snapshotCount}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                  )}
+
+                  {historyViewMode === 'years' && (
+                    yearlyPeriods.length === 0
+                      ? <p className="subtle">No yearly data on record.</p>
+                      : yearlyPeriods.map(yp => (
+                          <div key={yp.year} className="periodCard">
+                            <span className="periodCardLabel">{yp.year}</span>
+                            <div className="periodGrid">
+                              <div>
+                                <span>Total consumed</span>
+                                <strong>{yp.totalConsumed}</strong>
+                                <p className="subtle">≈ {formatUsd(yp.totalConsumed * 0.01)} est.</p>
+                              </div>
+                              <div>
+                                <span>Months tracked</span>
+                                <strong>{yp.months.length}</strong>
+                              </div>
+                              <div>
+                                <span>Snapshots</span>
+                                <strong>{yp.snapshotCount}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                  )}
+                </>
+              )}
+            </details>
+          </section>
         </>
       )}
+
+      {user?.authenticated && <WidgetTokenSection isIos={isIosDevice} isStandalone={isInstalled} />}
+      {user?.authenticated && <PushNotificationSection />}
     </main>
   );
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then((registration) => {
+        if (import.meta.env.DEV) {
+          console.debug('[sw] registered', registration.scope)
+        }
+      })
+      .catch((error) => {
+        if (import.meta.env.DEV) {
+          console.warn('[sw] registration failed', error)
+        }
+      })
+  });
+}

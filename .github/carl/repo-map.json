@@ -1,0 +1,93 @@
+{
+  "_note": "Repository map derived by `carl map`. Re-run to update after structural changes.",
+  "generated_by": "carl map",
+  "last_updated": "2026-06-25",
+  "languages": [
+    "JavaScript",
+    "TypeScript"
+  ],
+  "entry_points": [
+    {
+      "path": "package.json",
+      "purpose": "Node.js project"
+    }
+  ],
+  "directories": {
+    ".agents": "",
+    ".agents/rules": "",
+    ".cursor": "",
+    ".cursor/rules": "",
+    ".github": "GitHub configuration and Copilot instruction root",
+    ".github/aadlc": "",
+    ".github/aadlc/plans": "",
+    ".github/carl": "cARLv2 governance artefacts and templates",
+    ".github/carl/plans": "Prompt-as-code planning artefacts",
+    ".github/instructions": "Copilot instruction packs",
+    ".github/instructions/cloud": "Cloud guidance packs",
+    ".github/instructions/core": "Core governance packs",
+    ".github/instructions/languages": "Language-specific guidance packs",
+    ".github/instructions/platform": "Platform guidance packs",
+    "netlify": "",
+    "netlify/functions": "",
+    "netlify/functions/lib": "",
+    "public": "",
+    "public/icons": "",
+    "public/scriptable": "",
+    "scripts": "Build and automation scripts",
+    "src": "",
+    "src/__tests__": ""
+  },
+  "workflows": null,
+  "governance": [
+    {
+      "path": ".github/carl/current-pr-contract.template.md",
+      "purpose": "PR contract template"
+    },
+    {
+      "path": ".github/carl/invariants.yml",
+      "purpose": "Runtime invariants enforced by all implementation PRs"
+    },
+    {
+      "path": ".github/carl/memory.md",
+      "purpose": "Durable architectural truth cache"
+    },
+    {
+      "path": ".github/carl/repo-map.example.json",
+      "purpose": "Repo map template example"
+    },
+    {
+      "path": ".github/carl/runtime.json"
+    },
+    {
+      "path": ".github/carl/tool-policy.yml",
+      "purpose": "Tool permission tier definitions"
+    },
+    {
+      "path": ".github/carl/trust-boundaries.md",
+      "purpose": "Trust boundary documentation"
+    }
+  ],
+  "documentation": [
+    {
+      "path": "AGENTS.md"
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "purpose": "Architecture documentation"
+    },
+    {
+      "path": "CLAUDE.md"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "purpose": "Contribution guidelines"
+    },
+    {
+      "path": "README 2.md"
+    },
+    {
+      "path": "README.md",
+      "purpose": "Repository overview and pack catalogue"
+    }
+  ]
+}

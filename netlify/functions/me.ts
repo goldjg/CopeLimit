@@ -1,0 +1,70 @@
+/**
+ * @file Netlify Function: `me`
+ *
+ * Returns the currently authenticated user's public profile, or an
+ * unauthenticated marker when no valid session cookie is present.
+ *
+ * ## Endpoint
+ * `GET /api/me`
+ *
+ * ## Response (authenticated)
+ * ```json
+ * { "authenticated": true, "login": "octocat", "avatar_url": "https://..." }
+ * ```
+ *
+ * ## Response (unauthenticated)
+ * ```json
+ * { "authenticated": false }
+ * ```
+ *
+ * The `accessToken` is intentionally never included in the response.
+ *
+ * ## Required environment variables
+ * - `SESSION_SECRET`         – HMAC-SHA256 signing secret
+ * - `SESSION_ENCRYPTION_KEY` – (optional) AES-256 decryption key
+ */
+import type { Handler } from '@netlify/functions';
+import { verifySession, parseCookies } from './lib/session';
+
+export const handler: Handler = async (event) => {
+  const secret = process.env.SESSION_SECRET;
+  const encKey = process.env.SESSION_ENCRYPTION_KEY;
+  if (!secret) {
+    console.warn('[me] SESSION_SECRET is not set; all sessions are unauthenticated');
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ authenticated: false })
+    };
+  }
+
+  const cookies = parseCookies(event.headers['cookie']);
+  const raw = cookies['session'];
+
+  if (!raw) {
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ authenticated: false })
+    };
+  }
+
+  const payload = verifySession(raw, secret, encKey || undefined);
+  if (!payload) {
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ authenticated: false })
+    };
+  }
+
+  return {
+    statusCode: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({
+      authenticated: true,
+      login: payload.login,
+      avatar_url: payload.avatar_url
+    })
+  };
+};

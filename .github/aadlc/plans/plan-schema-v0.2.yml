@@ -1,0 +1,113 @@
+# Annotated schema reference for aadlc.plan.v0.2.
+# This file is documentation-first: it is a commented template that shows
+# required fields, expected types, and allowed enum values for plan files.
+
+schemaVersion: aadlc.plan.v0.2 # required; exact string for v0.2 plan files
+planId: example-plan-id # required string; unique kebab-case identifier
+project: CopeLimit # required string; repository or project name
+status: draft # required enum: draft | active | closed | superseded
+
+run:
+  type: documentation # required enum: documentation | implementation | debug | review | governance
+  horizon: 4 # optional integer; Horizon / workstream number when applicable
+  title: Example plan title # required string; short human-readable label
+  intent: > # required string; concise objective for the executor
+    Describe the exact outcome this plan authorizes.
+  modelRecommendation: # optional object; advisory only
+    planner: sonnet # optional string; recommended planning model
+    executor: gpt-5.4 # optional string; recommended execution model
+    avoid: # optional array[string]; known-bad or unavailable models
+      - gpt-5.3-codex
+
+scope:
+  allowedFiles: # required array[string]; glob patterns the executor may edit/create
+    - .github/aadlc/plans/**
+  forbiddenFiles: # required array[string]; explicit deny-list, takes precedence on overlap
+    - src/**
+    - netlify/functions/**
+  allowedChangeTypes: # required array[string]; allowed self-classified mutation categories
+    - docs
+    - governance
+    - schema-documentation
+  forbiddenChangeTypes: # required array[string]; categories the executor must not perform
+    - application-code
+    - auth
+    - oauth
+    - token-storage
+    - provider-fetch
+    - billing-mode-detection
+    - ui
+    - widget
+    - blob-storage-format
+    - dependency-addition
+    - ci-workflow
+
+toolPermissions:
+  # Values use a small closed vocabulary:
+  # - allowed
+  # - allowed_within_scope
+  # - allowed_if_deps_available
+  # - optional
+  # - requires_explicit_user_approval
+  # - forbidden
+  readFiles: allowed # required string
+  searchRepo: allowed # required string
+  editFiles: allowed_within_scope # required string
+  runTests: allowed_if_deps_available # required string
+  runBuild: allowed_if_deps_available # required string
+  runLint: optional # required string
+  createBranch: forbidden # required string
+  commitChanges: requires_explicit_user_approval # required string
+  createPullRequest: requires_explicit_user_approval # required string
+  callCodeReview: optional # required string
+  deploy: forbidden # required string
+  deleteFiles: forbidden # required string
+  bulkReplaceAcrossFiles: forbidden # required string
+
+mutationPermissions:
+  mayCreateFiles: true # required boolean; only within scope.allowedFiles
+  mayEditFiles: true # required boolean; only within scope.allowedFiles
+  mayDeleteFiles: false # required boolean
+  mayRenameFiles: false # required boolean
+  mayMoveFiles: false # required boolean
+  mayEditOutsideScope: false # required boolean
+
+approvalGates:
+  requireUserApprovalBefore: # required array[string]; named actions that must pause execution
+    - widening_scope
+    - touching_forbidden_files
+    - adding_dependencies
+    - changing_auth_or_token_storage
+    - creating_pull_request
+    - committing_changes
+
+validation:
+  required: # required array[string]; checks that must be reported before completion
+    - changed_files_within_scope
+    - no_forbidden_change_types
+    - final_plan_compliance_summary
+  optional: # optional array[string]; commands or checks to try when available
+    - npm test
+    - npm run build
+  knownNonBlocking: # optional array[string]; known failures that should be reported, not fixed here
+    - npm run lint may fail with TS5107
+
+aadlc:
+  expectedPhaseTypes: # required array[string]; expected phase labels for manifest/reporting
+    - hydration
+    - planning
+    - docs
+    - validation
+  emitRunManifest: true # required boolean; whether final response should include AADLCRunManifest
+  manifestMode: final_response_only # required enum: final_response_only | repo_committed
+  phaseEventsRequired: false # required boolean; default false for low-churn runs
+
+nonGoals: # required array[string]; explicit exclusions that bound the executor
+  - workflow-engine
+  - parser-implementation
+  - validator-script
+  - application-code-changes
+  - dependency-additions
+  - instruction-pack-rewrites
+
+openQuestions: [] # optional array[string]; unresolved items requiring user input

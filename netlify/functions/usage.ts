@@ -1,113 +1,419 @@
-import type { Handler } from '@netlify/functions';
+/**
+ * @file Netlify Function: `usage`
+ *
+ * The primary Copilot usage endpoint. Dispatches to the configured provider
+ * and returns a normalised {@link Usage} JSON response.
+ *
+ * ## Endpoint
+ * `GET /api/usage`
+ *
+ * ## Providers (controlled by `COPELIMIT_PROVIDER` env var)
+ *
+ * | Value                      | Data source                                        | Auth required |
+ * |----------------------------|----------------------------------------------------|---------------|
+ * | `mock` (default)           | Configurable static values via `MOCK_*` env vars   | No            |
+ * | `github-copilot-internal`  | `api.github.com/copilot_internal/user`             | Session cookie|
+ * | `copilot-local`            | Local `copilot-api` proxy (`http://127.0.0.1:4141`)| No            |
+ * | `github` / `unsupported`   | Returns zeroed unsupported usage                   | No            |
+ *
+ * ## Response shape
+ * ```json
+ * {
+ *   "mode": "premium_requests",
+ *   "used": 321,
+ *   "quota": 500,
+ *   "remaining": 179,
+ *   "percentUsed": 64,
+ *   "resetAt": "2026-06-01T00:00:00.000Z",
+ *   "billingEntity": "octocat",
+ *   "source": "github-copilot-internal",
+ *   "warningLevel": "normal",
+ *   "updatedAt": "2026-05-07T21:00:00.000Z",
+ *   "notes": []
+ * }
+ * ```
+ *
+ * ## Capture
+ * When `CAPTURE_PROVIDER_RESPONSES=true`, a sanitised snapshot of the raw
+ * provider response is written to Netlify Blobs asynchronously (fire-and-forget)
+ * via {@link maybeCapture}. This never blocks the usage response.
+ *
+ * ## Usage History
+ * When `USAGE_HISTORY_ENABLED=true`, a {@link UsageHistorySnapshot} derived from
+ * the normalised usage result is appended to the `usage-history` Blobs store
+ * asynchronously (fire-and-forget) via {@link appendSnapshot}. The owner key is
+ * `result.userId` (numeric GitHub user ID). This never blocks the usage response.
+ *
+ * ## Cache
+ * Responses are marked `Cache-Control: private, max-age=60`.
+ *
+ * ## Required environment variables (provider-dependent)
+ * - `COPELIMIT_PROVIDER`           – Provider selection
+ * - `SESSION_SECRET`               – Required for `github-copilot-internal`
+ * - `SESSION_ENCRYPTION_KEY`       – Recommended for `github-copilot-internal`
+ * - `MOCK_USED` / `MOCK_QUOTA` / `MOCK_RESET_AT` – Mock provider overrides
+ * - `COPILOT_API_URL`              – Override for `copilot-local` (default: `http://127.0.0.1:4141`)
+ * - `USAGE_HISTORY_ENABLED`        – Enable usage snapshot persistence (default: `false`)
+ * - `USAGE_HISTORY_RETENTION_DAYS` – Days to retain history entries (default: `90`)
+ * - `USAGE_HISTORY_MAX_PER_DAY`    – Max snapshots per user per UTC day (default: `48`)
+ */
+import type { Handler, HandlerEvent } from '@netlify/functions';
+import { parseCookies, verifySession } from './lib/session';
+import {
+  type Mode,
+  type JsonObject,
+  type Usage,
+  isObject,
+  nextMonthReset,
+  normaliseUsage,
+  readNumber,
+  readString,
+  getUnsupportedUsage,
+  normalizeCopilotInternalPayload
+} from './lib/copilot';
+import { maybeCapture } from './lib/capture-store';
+import { readCaptureConfig } from './lib/capture-config';
+import { appendSnapshot, getHistory } from './lib/usage-history-store';
+import { readUsageHistoryConfig } from './lib/usage-history-config';
+import type { UsageHistorySnapshot } from './lib/usage-history-types';
+import { projectBurnRate } from './lib/burn-rate-projection';
+import type { BurnRateProjection } from './lib/burn-rate-projection';
+import { computeComfortStatus } from './lib/comfort-status';
+import type { ComfortStatus } from './lib/comfort-status';
+import { evaluateAlertDecision } from './lib/alert-decision';
+import type { AlertDecision } from './lib/alert-decision';
+import { maybeSendLivePushNotification } from './lib/push-live-notifications';
 
-type Mode = 'premium_requests' | 'ai_credits';
-type WarningLevel = 'normal' | 'warm' | 'hot' | 'over';
-
-type Usage = {
-  mode: Mode;
-  used: number;
-  quota: number;
-  remaining: number;
-  percentUsed: number;
-  resetAt: string;
-  billingEntity: string;
-  source: string;
-  warningLevel: WarningLevel;
-  updatedAt: string;
-  notes: string[];
+type UsageResult = {
+  usage: Usage;
+  rawPayload: JsonObject | null;
+  userId?: number;
 };
 
-function warningLevel(percentUsed: number): WarningLevel {
-  if (percentUsed >= 100) return 'over';
-  if (percentUsed >= 90) return 'hot';
-  if (percentUsed >= 75) return 'warm';
-  return 'normal';
+function readMode(input: JsonObject): Mode {
+  const modeText = readString(input, 'mode', 'metric', 'kind');
+  if (!modeText) return 'premium_requests';
+
+  return modeText.toLowerCase().includes('credit') ? 'ai_credits' : 'premium_requests';
 }
 
-function nextMonthReset(): string {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString();
+function resolveCopilotApiUrl(): string {
+  const configured = process.env.COPELIMIT_COPILOT_API_URL || process.env.COPILOT_API_URL || 'http://127.0.0.1:4141';
+  let parsed: URL;
+
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error('COPILOT_API_URL must be a valid URL');
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
+    throw new Error('COPILOT_API_URL must point to localhost/loopback only');
+  }
+
+  return parsed.toString();
 }
 
-function normaliseUsage(input: {
-  mode: Mode;
-  used: number;
-  quota: number;
-  resetAt: string;
-  billingEntity: string;
-  source: string;
-  notes?: string[];
-}): Usage {
-  const remaining = Math.max(0, input.quota - input.used);
-  const percentUsed = input.quota > 0 ? Math.round((input.used / input.quota) * 100) : 0;
-
-  return {
-    ...input,
-    remaining,
-    percentUsed,
-    warningLevel: warningLevel(percentUsed),
-    updatedAt: new Date().toISOString(),
-    notes: input.notes ?? []
-  };
-}
-
-async function getMockUsage(): Promise<Usage> {
+async function getMockUsage(): Promise<UsageResult> {
   const used = Number(process.env.MOCK_USED ?? 321);
   const quota = Number(process.env.MOCK_QUOTA ?? 500);
 
-  return normaliseUsage({
-    mode: 'premium_requests',
-    used,
-    quota,
-    resetAt: process.env.MOCK_RESET_AT || nextMonthReset(),
-    billingEntity: process.env.GITHUB_LOGIN || 'goldjg',
-    source: 'mock',
-    notes: [
-      'Mock provider active. Replace with GitHub billing/usage provider when API access is confirmed.'
-    ]
-  });
+  return {
+    usage: normaliseUsage({
+      mode: 'premium_requests',
+      used,
+      quota,
+      resetAt: process.env.MOCK_RESET_AT || nextMonthReset(),
+      billingEntity: process.env.GITHUB_LOGIN || 'goldjg',
+      source: 'mock',
+      notes: [
+        'Mock provider active. Replace with GitHub billing/usage provider when API access is confirmed.'
+      ]
+    }),
+    rawPayload: null
+  };
 }
 
-async function getGitHubUsage(): Promise<Usage> {
-  const token = process.env.GITHUB_TOKEN;
-  const login = process.env.GITHUB_LOGIN || 'goldjg';
+async function getCopilotLocalUsage(): Promise<UsageResult> {
+  const fallbackBillingEntity = process.env.GITHUB_LOGIN || 'unknown';
+  const baseUrl = resolveCopilotApiUrl();
+  const usageUrl = new URL('/usage', baseUrl).toString();
+  const response = await fetch(usageUrl, { headers: { accept: 'application/json' } });
 
-  if (!token) {
-    throw new Error('GITHUB_TOKEN is required when COPELIMIT_PROVIDER=github');
+  if (!response.ok) {
+    throw new Error(`copilot-api usage endpoint returned HTTP ${response.status}`);
   }
 
-  /*
-    GitHub Copilot usage APIs are plan, role, and billing-model sensitive.
+  const payload: unknown = await response.json();
+  if (!isObject(payload)) {
+    throw new Error('copilot-api usage endpoint did not return a JSON object');
+  }
 
-    This placeholder keeps the MVP honest:
-    - the UI and widget contract are stable
-    - the backend can be swapped once the correct endpoint is confirmed
-    - tokens are never exposed to the browser or iOS widget
+  const notes = [
+    'copilot-local provider active via local copilot-api proxy. This is unofficial and local-only.',
+    'CopeLimit only reads /usage and never reads or returns /token.'
+  ];
 
-    Candidate implementation paths to validate:
-    - GitHub billing/usage endpoints for Copilot seats/usage
-    - enterprise/org Copilot metrics endpoints, if the user has suitable permissions
-    - authenticated scrape/export only as a last resort, preferably not at all
-  */
+  // Parse the copilot-api response shape:
+  // quota_snapshots.premium_interactions.entitlement → quota
+  // quota_snapshots.premium_interactions.remaining   → remaining
+  // quota_reset_date_utc                             → resetAt
+  // login / copilot_plan                             → billingEntity
+  const snapshots = payload['quota_snapshots'];
+  const premiumInteractions = isObject(snapshots) ? snapshots['premium_interactions'] : undefined;
+  const pi = isObject(premiumInteractions) ? premiumInteractions : undefined;
 
-  return normaliseUsage({
-    mode: 'premium_requests',
-    used: 0,
-    quota: 0,
-    resetAt: nextMonthReset(),
-    billingEntity: login,
-    source: 'github-placeholder',
-    notes: [
-      'GitHub provider is a placeholder until a reliable user-level Copilot quota endpoint is confirmed for this account type.',
-      'Do not expose GitHub tokens to the browser or Scriptable widget.'
-    ]
-  });
+  let quota = 0;
+  let remaining = 0;
+  let usedFromSnapshot = false;
+
+  if (pi) {
+    const entitlement = readNumber(pi, 'entitlement');
+    const rem = readNumber(pi, 'remaining');
+    if (entitlement !== undefined) {
+      quota = entitlement;
+      usedFromSnapshot = true;
+    }
+    if (rem !== undefined) {
+      remaining = rem;
+    }
+  }
+
+  // Fall back to legacy flat fields if snapshot not present
+  if (!usedFromSnapshot) {
+    quota = readNumber(payload, 'quota', 'limit', 'total') ?? 0;
+    remaining = readNumber(payload, 'remaining') ?? Math.max(0, quota - (readNumber(payload, 'used', 'usage', 'usedCount', 'consumed') ?? 0));
+    if (quota === 0) {
+      notes.push('copilot-api response did not include quota_snapshots; fell back to legacy fields and got 0 values.');
+    }
+  }
+
+  const used = Math.max(0, quota - remaining);
+  const resetAt = readString(payload, 'quota_reset_date_utc', 'resetAt', 'reset_at', 'periodEndsAt') ?? nextMonthReset();
+  const billingEntity = readString(payload, 'login', 'username', 'billingEntity', 'billing_entity', 'copilot_plan') ?? fallbackBillingEntity;
+  const mode = readMode(payload);
+
+  return {
+    usage: normaliseUsage({
+      mode,
+      used,
+      quota,
+      resetAt,
+      billingEntity,
+      source: 'copilot-local',
+      notes
+    }),
+    rawPayload: payload
+  };
 }
 
-export const handler: Handler = async () => {
+async function getCopilotInternalUsage(event: HandlerEvent): Promise<UsageResult> {
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    return {
+      usage: await getUnsupportedUsage(undefined, ['Session secret not configured; cannot authenticate.']),
+      rawPayload: null
+    };
+  }
+
+  const cookies = parseCookies(event.headers['cookie']);
+  const rawSession = cookies['session'];
+  if (!rawSession) {
+    return {
+      usage: await getUnsupportedUsage(undefined, ['No session cookie present. Please sign in.']),
+      rawPayload: null
+    };
+  }
+
+  const encKey = process.env.SESSION_ENCRYPTION_KEY;
+  const sessionPayload = verifySession(rawSession, sessionSecret, encKey || undefined);
+  if (!sessionPayload) {
+    return {
+      usage: await getUnsupportedUsage(undefined, ['Session invalid or expired. Please sign in again.']),
+      rawPayload: null
+    };
+  }
+
+  const { accessToken, login, id } = sessionPayload;
+  const response = await fetch('https://api.github.com/copilot_internal/user', {
+    signal: AbortSignal.timeout(10_000),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: 'application/json',
+      'x-github-api-version': '2022-11-28',
+      'editor-version': 'vscode/1.95.0',
+      'copilot-integration-id': 'vscode-chat',
+      'user-agent': 'CopeLimit/1.0'
+    }
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      return {
+        usage: await getUnsupportedUsage(login, [
+          'GitHub token is not valid or has expired. Please sign out and sign in again.'
+        ]),
+        rawPayload: null,
+        userId: id
+      };
+    }
+    if (response.status === 403) {
+      return {
+        usage: await getUnsupportedUsage(login, [
+          'This GitHub account does not have access to Copilot internal APIs. A Copilot subscription and the copilot OAuth scope are required.'
+        ]),
+        rawPayload: null,
+        userId: id
+      };
+    }
+    if (response.status === 404) {
+      return {
+        usage: await getUnsupportedUsage(login, ['No Copilot subscription found for this account.']),
+        rawPayload: null,
+        userId: id
+      };
+    }
+    throw new Error(`Copilot internal API returned HTTP ${response.status}`);
+  }
+
+  const body: unknown = await response.json();
+  if (!isObject(body)) {
+    return {
+      usage: await getUnsupportedUsage(login, [
+        'Copilot API responded but did not include quota data. The response shape may have changed.'
+      ]),
+      rawPayload: null,
+      userId: id
+    };
+  }
+
+  const { usage: normalizedUsage } = normalizeCopilotInternalPayload(
+    body,
+    login,
+    'github-copilot-internal',
+    ['Live data via GitHub Copilot internal API.']
+  );
+
+  if (normalizedUsage === null) {
+    console.warn('[usage] copilot_internal user payload missing quota fields', Object.keys(body));
+    return {
+      usage: await getUnsupportedUsage(login, [
+        'Copilot API responded but did not include quota data. The response shape may have changed.'
+      ]),
+      rawPayload: body,
+      userId: id
+    };
+  }
+
+  return {
+    usage: normalizedUsage,
+    rawPayload: body,
+    userId: id
+  };
+}
+
+export const handler: Handler = async (event) => {
   try {
     const provider = process.env.COPELIMIT_PROVIDER || 'mock';
-    const usage = provider === 'github' ? await getGitHubUsage() : await getMockUsage();
+    const captureConfig = readCaptureConfig();
+    const historyConfig = readUsageHistoryConfig();
+    const result =
+      provider === 'copilot-local'
+        ? await getCopilotLocalUsage()
+        : provider === 'github-copilot-internal'
+          ? await getCopilotInternalUsage(event)
+          : provider === 'unsupported' || provider === 'github'
+          ? { usage: await getUnsupportedUsage(), rawPayload: null }
+          : await getMockUsage();
+    const usage = result.usage;
+
+    // Capture is intentionally fire-and-forget so telemetry persistence never blocks user-facing usage responses.
+    void maybeCapture({
+      config: captureConfig,
+      provider,
+      userId: result.userId,
+      usage,
+      rawPayload: result.rawPayload
+    });
+
+    // History persistence is fire-and-forget: failures are logged inside appendSnapshot
+    // and must never block the usage response.
+    let currentSnapshot: UsageHistorySnapshot | undefined
+    if (result.userId !== undefined) {
+      currentSnapshot = {
+        capturedAt: usage.updatedAt,
+        used: usage.used,
+        quota: usage.quota,
+        remaining: usage.remaining,
+        billingPhase: usage.billingPhase,
+        overageCount: usage.overageCount,
+        derivedOverageCredits: usage.derivedOverageCredits,
+      };
+      void appendSnapshot(result.userId, currentSnapshot, historyConfig);
+    }
+
+    // Burn-rate projection: computed from history when available.
+    // Only attempted when history is enabled and a userId is known (i.e. the
+    // authenticated github-copilot-internal provider).  A missing or empty
+    // history returns projectionStatus: 'unavailable' — never an error.
+    //
+    // Because appendSnapshot is fire-and-forget, the current snapshot may not
+    // yet be persisted when getHistory runs. To ensure the projection always
+    // includes the latest data point, the current snapshot is prepended to the
+    // fetched history. Deduplication by capturedAt prevents double-counting if
+    // the snapshot was already written (e.g. by a concurrent request or a rapid
+    // refresh where updatedAt did not change).
+    let burnRateProjection: BurnRateProjection | undefined = undefined
+    if (historyConfig.enabled && result.userId !== undefined && currentSnapshot !== undefined) {
+      try {
+        const recentSnapshots = await getHistory(result.userId, { limit: 50 })
+        const snapshotCapturedAt = currentSnapshot.capturedAt
+        const allSnapshots = [
+          currentSnapshot,
+          ...recentSnapshots.filter(s => s.capturedAt !== snapshotCapturedAt),
+        ]
+        burnRateProjection = projectBurnRate(usage, allSnapshots)
+      } catch {
+        // Non-blocking: projection failures must not affect the usage response.
+      }
+    }
+
+    // Comfort status: always included. Derived from the current usage and the
+    // optional burn-rate projection. Never throws — falls back gracefully to
+    // warningLevel/percentUsed when the projection is absent or unavailable.
+    const comfortStatus: ComfortStatus = computeComfortStatus(usage, burnRateProjection);
+
+    // Alert decision: additive, optional field. Evaluates whether the user
+    // should be alerted based on the comfort status and optional projection.
+    // Consumes comfortStatus as the primary signal to avoid duplicating
+    // billing-phase logic. Never throws.
+    let alertDecision: AlertDecision | undefined;
+    try {
+      alertDecision = evaluateAlertDecision({ usage, projection: burnRateProjection, comfortStatus });
+    } catch {
+      // Non-blocking: alert-decision failures must not affect the usage response.
+    }
+
+    // Live per-user push notifications (best-effort, non-blocking):
+    // - only for authenticated users with userId
+    // - sends to that user's registered subscriptions only
+    // - respects per-user push preferences and dedupe state
+    if (result.userId !== undefined) {
+      void maybeSendLivePushNotification({
+        userId: result.userId,
+        comfortStatus,
+        burnRateProjection,
+        alertDecision,
+      });
+    }
+
+    const responseBody = {
+      ...usage,
+      ...(burnRateProjection !== undefined ? { burnRateProjection } : {}),
+      comfortStatus,
+      ...(alertDecision !== undefined ? { alertDecision } : {}),
+    };
 
     return {
       statusCode: 200,
@@ -115,12 +421,15 @@ export const handler: Handler = async () => {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'private, max-age=60'
       },
-      body: JSON.stringify(usage)
+      body: JSON.stringify(responseBody)
     };
   } catch (error) {
     return {
       statusCode: 500,
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'private, no-store',
+      },
       body: JSON.stringify({
         error: error instanceof Error ? error.message : 'Unknown error'
       })

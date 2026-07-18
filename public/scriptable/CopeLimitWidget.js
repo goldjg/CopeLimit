@@ -1,0 +1,786 @@
+// CopeLimit Scriptable widget for iOS.
+// Supports small, medium, and large widget families.
+// Token is configured automatically via the CopeLimit PWA onboarding flow.
+// Do not use your GitHub token here.
+
+const BASE_URL = "https://copelimit.netlify.app/api/widget-usage";
+const APP_URL = "https://copelimit.netlify.app";
+const WIDGET_TOKEN = Keychain.get("copelimit_widget_token") || "";
+
+// --- API -------------------------------------------------------------------
+
+async function getUsage(includeExtras) {
+  const url = includeExtras ? `${BASE_URL}?extras=1` : BASE_URL;
+  const request = new Request(url);
+  request.headers = {
+    accept: "application/json",
+    authorization: `Bearer ${WIDGET_TOKEN}`
+  };
+  const response = await request.loadJSON();
+  if (response.error) throw new Error(response.error);
+  return response;
+}
+
+// --- Pure helpers (no Scriptable globals) ----------------------------------
+
+/**
+ * Maps usage state to an accent colour hex string.
+ *
+ * Priority order (first matching rule wins):
+ * 1. Unsupported source → amber (special case, no further data).
+ * 2. Canonical comfort level from `comfortStatus.level` (most authoritative).
+ * 3. Burn-rate projection status from `burnRateProjection.projectionStatus`
+ *    (defensive fallback for cases where comfortStatus is absent/unknown).
+ * 4. Raw billing phase / warning level (legacy fallback).
+ *
+ * This ensures the widget and PWA use the same canonical risk signal.
+ */
+function colourHexFor(usage) {
+  if (usage.source === "unsupported") return "#f59e0b";
+
+  // Priority 1: canonical comfort level
+  const level = usage.comfortStatus && usage.comfortStatus.level;
+  if (level && level !== "unknown") {
+    if (level === "blocked") return "#ef4444";
+    if (level === "overage") return "#f97316";
+    if (level === "hot") return "#ef4444";
+    if (level === "warm") return "#f59e0b";
+    if (level === "watch") return "#60a5fa";
+    if (level === "safe") return "#22c55e";
+  }
+
+  // Priority 2: burn-rate projection status (when comfortStatus is absent or unknown)
+  const projStatus = usage.burnRateProjection && usage.burnRateProjection.projectionStatus;
+  if (projStatus === "exhaustion_before_reset") return "#f59e0b";
+  if (projStatus === "exhausted") return "#ef4444";
+
+  // Priority 3: raw billing phase / warning level fallback
+  if (usage.billingPhase === "budget_active") return "#f97316";
+  if (usage.warningLevel === "over" || usage.warningLevel === "hot") return "#ef4444";
+  if (usage.warningLevel === "warm") return "#f59e0b";
+  if (usage.source === "github-copilot-internal") return "#22c55e";
+  return "#60a5fa";
+}
+
+function sourceLabel(source) {
+  if (source === "github-copilot-internal") return "live";
+  if (source === "copilot-local") return "local";
+  if (source === "mock") return "mock";
+  if (source === "unsupported") return "?";
+  return source || "unknown";
+}
+
+function billingPhaseLabel(phase) {
+  const labels = {
+    credits_available: "Credits available",
+    credits_exhausted: "Credits exhausted",
+    budget_available: "Budget available",
+    budget_active: "Budget in use",
+    unlimited: "Unlimited",
+    hard_stop: "Hard stop"
+  };
+  return labels[phase] || phase || "—";
+}
+
+/**
+ * Returns a human-readable label for a canonical comfort level.
+ * Returns null when the level is unrecognised or absent.
+ */
+function comfortLevelLabel(level) {
+  const labels = {
+    safe: "Comfortable",
+    watch: "Watch",
+    warm: "Warm",
+    hot: "Hot",
+    overage: "Overage",
+    blocked: "Blocked",
+    unknown: "Unknown"
+  };
+  return labels[level] || null;
+}
+
+/**
+ * Derives the primary status label shown in each widget layout.
+ *
+ * Prefers the canonical comfort level label when available and meaningful
+ * (i.e. not "unknown"). Falls back to the raw billing phase label so that
+ * widgets always display something useful even when the backend has not yet
+ * computed a comfort status.
+ */
+function deriveStatusLabel(usage) {
+  const level = usage.comfortStatus && usage.comfortStatus.level;
+  const label = comfortLevelLabel(level);
+  if (label && level !== "unknown") return label;
+  return billingPhaseLabel(usage.billingPhase);
+}
+
+function formatShortDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function formatDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatRangeLabels(startValue, endValue) {
+  const start = startValue ? new Date(startValue) : null;
+  const end = endValue ? new Date(endValue) : null;
+  const startIsValid = !!start && !Number.isNaN(start.getTime());
+  const endIsValid = !!end && !Number.isNaN(end.getTime());
+  const sameDay = startIsValid && endIsValid && start.toDateString() === end.toDateString();
+  const startLabel = startIsValid ? formatShortDate(start) : null;
+  const endLabel = endIsValid ? (sameDay ? formatDateTime(end) : formatShortDate(end)) : null;
+  return { startLabel, endLabel };
+}
+
+function formatResetLabel(value) {
+  const label = formatShortDate(value);
+  return label ? `Reset ${label}` : null;
+}
+
+function formatProjectionLabel(value) {
+  const label = formatShortDate(value);
+  return label ? `Runs out ${label}` : null;
+}
+
+function formatLastUpdated(value) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatNumber(n) {
+  if (n === undefined || n === null || n === "?") return "?";
+  return Number(n).toLocaleString("en");
+}
+
+function formatBurnRate(creditsPerHour) {
+  if (creditsPerHour === null || creditsPerHour === undefined) return null;
+  if (creditsPerHour === 0) return "0/hr";
+  return `${creditsPerHour.toFixed(1)}/hr`;
+}
+
+function formatUsd(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "$0.00";
+  return `$${n.toFixed(2)}`;
+}
+
+/**
+ * Estimates hours until budget or included credits are exhausted.
+ * Returns null when the burn rate is unknown or zero.
+ */
+function computeEtaHours(usage, burnRate) {
+  if (!burnRate || burnRate <= 0) return null;
+  if (usage.billingPhase === "budget_active") {
+    const overageUsed = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
+    const overageCap = usage.overageEntitlement;
+    if (overageCap === undefined || overageCap === null || overageCap <= 0) return null;
+    const overageRemaining = Math.max(0, overageCap - overageUsed);
+    return overageRemaining / burnRate;
+  }
+  if (usage.remaining > 0) return usage.remaining / burnRate;
+  return 0;
+}
+
+function formatEta(etaHours) {
+  if (etaHours === null || etaHours === undefined) return null;
+  if (etaHours <= 0) return "Exhausted";
+  if (etaHours < 1) return `~${Math.round(etaHours * 60)}m`;
+  if (etaHours < 24) return `~${etaHours.toFixed(1)}hr`;
+  return `~${(etaHours / 24).toFixed(1)}d`;
+}
+
+// --- Scriptable layout helpers --------------------------------------------
+
+function makeBaseWidget(padding) {
+  const w = new ListWidget();
+  w.backgroundColor = new Color("#111827");
+  w.setPadding(padding, padding, padding, padding);
+  w.url = APP_URL;
+  return w;
+}
+
+/**
+ * Adds a key/value row to a container.
+ * opts: { fontSize, muted, valueColor }
+ */
+function addMetricRow(container, label, value, opts) {
+  const o = opts || {};
+  const row = container.addStack();
+  row.layoutHorizontally();
+  const fs = o.fontSize || 11;
+
+  const l = row.addText(String(label));
+  l.font = Font.mediumSystemFont(fs);
+  l.textColor = o.muted ? Color.gray() : Color.white();
+
+  row.addSpacer();
+
+  const r = row.addText(String(value));
+  r.font = Font.semiboldSystemFont(fs);
+  r.textColor = o.valueColor || (o.muted ? Color.gray() : Color.white());
+  r.minimumScaleFactor = 0.65;
+  r.lineLimit = 1;
+}
+
+function addLastUpdatedLabel(container, value, fontSize) {
+  const label = container.addText(`Last Updated: ${formatLastUpdated(value)}`);
+  label.font = Font.mediumSystemFont(fontSize || 9);
+  label.textColor = Color.gray();
+  label.minimumScaleFactor = 0.65;
+  label.lineLimit = 1;
+}
+
+/**
+ * Adds a two-column metric row for the large widget grid.
+ * opts: { fontSize, leftColor, rightColor }
+ */
+function addTwoColRow(container, lLabel, lValue, rLabel, rValue, opts) {
+  const o = opts || {};
+  const row = container.addStack();
+  row.layoutHorizontally();
+  const fs = o.fontSize || 12;
+
+  const ll = row.addText(String(lLabel));
+  ll.font = Font.mediumSystemFont(fs);
+  ll.textColor = Color.gray();
+  row.addSpacer(5);
+
+  const lv = row.addText(String(lValue));
+  lv.font = Font.semiboldSystemFont(fs);
+  lv.textColor = o.leftColor || Color.white();
+  lv.minimumScaleFactor = 0.65;
+  lv.lineLimit = 1;
+
+  row.addSpacer();
+
+  const rl = row.addText(String(rLabel));
+  rl.font = Font.mediumSystemFont(fs);
+  rl.textColor = Color.gray();
+  row.addSpacer(5);
+
+  const rv = row.addText(String(rValue));
+  rv.font = Font.semiboldSystemFont(fs);
+  rv.textColor = o.rightColor || Color.white();
+  rv.minimumScaleFactor = 0.65;
+  rv.lineLimit = 1;
+}
+
+// Reset-detection threshold for the burn trail. A drop below this fraction of
+// the previous `used` value is treated as a quota reset (new billing period)
+// rather than noise. Mirrors RESET_DROP_RATIO in netlify/functions/lib/chart-data.ts.
+const RESET_DROP_RATIO = 0.5;
+const RESET_JUMP_RATIO = 1 / RESET_DROP_RATIO;
+const QUOTA_FILL_ALPHA = 0.22;
+const BUDGET_FILL_ALPHA = 0.34;
+
+/**
+ * Draws a fuel-gauge trail using DrawContext.
+ *
+ * Renders remaining capacity toward zero:
+ * - top of the tank = gauge ceiling (quota or budget cap)
+ * - bottom of the tank = 0
+ * - trail trends downward toward 0 as capacity is consumed
+ *
+ * Quota resets (a sharp drop in `used`) break the trail into separate fills
+ * instead of drawing a misleading vertical cliff. No axes, no labels.
+ *
+ * @param points  Oldest-first array of cumulative `used` values.
+ * @param options { mode, quotaCeiling, gaugeCeiling }
+ * @param width   Image width in points.
+ * @param height  Image height in points.
+ * @param colorHex Hex string (e.g. "#60a5fa") for the trail.
+ */
+function createBurnTrailImage(points, options, width, height, colorHex) {
+  const ctx = new DrawContext();
+  ctx.size = new Size(width, height);
+  ctx.respectScreenScale = true;
+  ctx.opaque = false;
+
+  const hex = typeof colorHex === "string" && colorHex ? colorHex : "#60a5fa";
+  const mode = options && options.mode === "budget" ? "budget" : "quota";
+  const trailColor = new Color(hex, mode === "budget" ? 1 : 0.95);
+  const fillAlpha = mode === "budget" ? BUDGET_FILL_ALPHA : QUOTA_FILL_ALPHA;
+
+  const n = points.length;
+  if (n === 0) return ctx.getImage();
+
+  // Sanitise used series.
+  const safeUsed = points.map(v => (typeof v === "number" && isFinite(v) && v > 0 ? v : 0));
+  const quotaCeiling = options && typeof options.quotaCeiling === "number" && isFinite(options.quotaCeiling) && options.quotaCeiling > 0
+    ? options.quotaCeiling
+    : 0;
+  const gaugeCeiling = options && typeof options.gaugeCeiling === "number" && isFinite(options.gaugeCeiling) && options.gaugeCeiling > 0
+    ? options.gaugeCeiling
+    : quotaCeiling;
+
+  const safe = safeUsed.map((usedValue) => {
+    if (mode === "budget") {
+      const overageUsed = Math.max(0, usedValue - quotaCeiling);
+      return Math.max(0, gaugeCeiling - overageUsed);
+    }
+    return Math.max(0, gaugeCeiling - usedValue);
+  });
+
+  const padY = 6;
+  const usable = Math.max(1, height - padY * 2);
+  const maxVal = Math.max(...safe, gaugeCeiling, 1);
+
+  const xFor = i => (n === 1 ? width / 2 : (i / (n - 1)) * width);
+  const yFor = v => {
+    const frac = Math.max(0, Math.min(1, v / maxVal));
+    return padY + (1 - frac) * usable;
+  };
+
+  // Split into segments at quota resets (a drop below RESET_DROP_RATIO of the prior value).
+  const segments = [];
+  let current = [];
+  for (let i = 0; i < n; i++) {
+    if (i > 0 && safe[i] > safe[i - 1] * RESET_JUMP_RATIO) {
+      if (current.length) segments.push(current);
+      current = [];
+    }
+    current.push({ x: xFor(i), y: yFor(safe[i]) });
+  }
+  if (current.length) segments.push(current);
+
+  // Quota ceiling reference line (dashed, faint).
+  if (gaugeCeiling > 0) {
+    const cy = yFor(gaugeCeiling);
+    ctx.setStrokeColor(new Color("#ffffff", 0.32));
+    ctx.setLineWidth(1);
+    const dash = new Path();
+    const dashLen = 5;
+    const gap = 4;
+    for (let x = 0; x < width; x += dashLen + gap) {
+      dash.move(new Point(x, cy));
+      dash.addLine(new Point(Math.min(width, x + dashLen), cy));
+    }
+    ctx.addPath(dash);
+    ctx.strokePath();
+  }
+
+  const baseY = padY + usable;
+
+  for (const seg of segments) {
+    if (seg.length === 0) continue;
+
+    // Filled area under the trail.
+    const area = new Path();
+    area.move(new Point(seg[0].x, baseY));
+    for (const p of seg) area.addLine(new Point(p.x, p.y));
+    area.addLine(new Point(seg[seg.length - 1].x, baseY));
+    area.closeSubpath();
+    ctx.setFillColor(new Color(hex, fillAlpha));
+    ctx.addPath(area);
+    ctx.fillPath();
+
+    // Trail line on top.
+    if (seg.length >= 2) {
+      const line = new Path();
+      line.move(new Point(seg[0].x, seg[0].y));
+      for (let i = 1; i < seg.length; i++) line.addLine(new Point(seg[i].x, seg[i].y));
+      ctx.setStrokeColor(trailColor);
+      ctx.setLineWidth(2);
+      ctx.addPath(line);
+      ctx.strokePath();
+    }
+  }
+
+  // Current position dot (last point of the last segment).
+  const last = segments[segments.length - 1];
+  if (last && last.length) {
+    const tip = last[last.length - 1];
+    const dot = 3.5;
+    ctx.setFillColor(trailColor);
+    ctx.fillEllipse(new Rect(tip.x - dot, tip.y - dot, dot * 2, dot * 2));
+  }
+
+  return ctx.getImage();
+}
+
+// --- Widget size layouts --------------------------------------------------
+
+/**
+ * Small widget — glanceable, at most 4 metrics.
+ *
+ * Information architecture:
+ *   CopeLimit              [live]
+ *   1,450                         <- hero: overage (budget_active) or remaining
+ *   remaining of 7,000
+ *
+ *   Budget in use                 <- most important state
+ *   Resets  Jun 30
+ */
+function createSmallWidget(usage) {
+  const widget = makeBaseWidget(12);
+  const isBudgetActive = !usage.error && usage.billingPhase === "budget_active";
+  const accent = new Color(colourHexFor(usage));
+  const overageValue = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
+
+  // Title + source badge
+  const titleRow = widget.addStack();
+  titleRow.layoutHorizontally();
+  const title = titleRow.addText("CopeLimit");
+  title.font = Font.boldSystemFont(12);
+  title.textColor = Color.white();
+  titleRow.addSpacer();
+  const badge = titleRow.addText(sourceLabel(usage.source));
+  badge.font = Font.semiboldSystemFont(9);
+  badge.textColor = accent;
+
+  widget.addSpacer(3);
+
+  // Hero: budget_active priority — show overage over remaining
+  const heroValue = isBudgetActive
+    ? `+${formatNumber(overageValue)}`
+    : formatNumber(usage.remaining ?? 0);
+  const hero = widget.addText(heroValue);
+  hero.font = Font.heavySystemFont(34);
+  hero.textColor = accent;
+  hero.minimumScaleFactor = 0.5;
+  hero.lineLimit = 1;
+
+  const captionStr = isBudgetActive
+    ? `overage of ${formatNumber(usage.quota)}`
+    : `remaining of ${formatNumber(usage.quota)}`;
+  const caption = widget.addText(captionStr);
+  caption.font = Font.mediumSystemFont(10);
+  caption.textColor = Color.gray();
+  caption.minimumScaleFactor = 0.65;
+  caption.lineLimit = 1;
+
+  widget.addSpacer();
+
+  // Most important state label
+  if (!usage.error) {
+    const phase = widget.addText(deriveStatusLabel(usage));
+    phase.font = Font.semiboldSystemFont(10);
+    phase.textColor = accent;
+    phase.lineLimit = 1;
+  } else {
+    const err = widget.addText("Error");
+    err.font = Font.semiboldSystemFont(10);
+    err.textColor = new Color("#ef4444");
+  }
+
+  addMetricRow(widget, "Resets", formatShortDate(usage.resetAt), { fontSize: 10, muted: true });
+  widget.addSpacer(3);
+  addLastUpdatedLabel(widget, usage.updatedAt, 9);
+
+  return widget;
+}
+
+/**
+ * Medium widget — current layout baseline with improved information density.
+ *
+ * Information architecture:
+ *   Left column:  Hero number + caption
+ *   Right column: Used (%), Budget (if active), Burn rate, Reset, Phase badge
+ */
+function createMediumWidget(usage) {
+  const widget = makeBaseWidget(14);
+  const isBudgetActive = !usage.error && usage.billingPhase === "budget_active";
+  const accent = new Color(colourHexFor(usage));
+  const overageValue = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
+  const burnLabel = formatBurnRate(usage.widgetExtras ? usage.widgetExtras.burnRate : null);
+
+  // Title row
+  const titleRow = widget.addStack();
+  titleRow.layoutHorizontally();
+  const title = titleRow.addText("CopeLimit");
+  title.font = Font.boldSystemFont(14);
+  title.textColor = Color.white();
+  titleRow.addSpacer();
+  const badge = titleRow.addText(sourceLabel(usage.source));
+  badge.font = Font.semiboldSystemFont(11);
+  badge.textColor = accent;
+
+  widget.addSpacer(6);
+
+  // Two-column body
+  const body = widget.addStack();
+  body.layoutHorizontally();
+
+  // Left: hero + caption
+  const leftCol = body.addStack();
+  leftCol.layoutVertically();
+
+  const heroValue = isBudgetActive
+    ? `+${formatNumber(overageValue)}`
+    : formatNumber(usage.remaining ?? 0);
+  const hero = leftCol.addText(heroValue);
+  hero.font = Font.heavySystemFont(38);
+  hero.textColor = accent;
+  hero.minimumScaleFactor = 0.45;
+  hero.lineLimit = 1;
+
+  const captionStr = isBudgetActive
+    ? `overage of ${formatNumber(usage.quota)}`
+    : `remaining of ${formatNumber(usage.quota)}`;
+  const caption = leftCol.addText(captionStr);
+  caption.font = Font.mediumSystemFont(10);
+  caption.textColor = Color.gray();
+  caption.minimumScaleFactor = 0.65;
+  caption.lineLimit = 1;
+
+  body.addSpacer();
+
+  // Right: metric rows
+  const rightCol = body.addStack();
+  rightCol.layoutVertically();
+
+  if (usage.error) {
+    const errTxt = rightCol.addText("Error");
+    errTxt.font = Font.semiboldSystemFont(11);
+    errTxt.textColor = new Color("#ef4444");
+  } else {
+    const usedPct = usage.percentUsed > 100
+      ? `${formatNumber(usage.used)} (${usage.percentUsed}%!)`
+      : `${formatNumber(usage.used)} (${usage.percentUsed}%)`;
+    addMetricRow(rightCol, "Used", usedPct, { fontSize: 11 });
+
+    if (isBudgetActive && usage.overageEntitlement !== undefined) {
+      addMetricRow(rightCol, "Budget", formatNumber(usage.overageEntitlement), { fontSize: 11 });
+    }
+
+    if (burnLabel) {
+      addMetricRow(rightCol, "Burn", burnLabel, { fontSize: 11 });
+    }
+
+    addMetricRow(rightCol, "Reset", formatShortDate(usage.resetAt), { fontSize: 11, muted: true });
+
+    const phaseTxt = rightCol.addText(deriveStatusLabel(usage));
+    phaseTxt.font = Font.semiboldSystemFont(10);
+    phaseTxt.textColor = accent;
+    phaseTxt.lineLimit = 1;
+  }
+
+  widget.addSpacer(5);
+  addLastUpdatedLabel(widget, usage.updatedAt, 9);
+
+  return widget;
+}
+
+/**
+ * Large widget — telemetry dashboard with a fuel-gauge burn-trail visual.
+ *
+ * Information architecture:
+ *   Header:   CopeLimit + source badge
+ *   Grid:     Used/Quota | Overage/Budget | Burn rate/ETA | Resets/Phase
+ *   Trail:    Fuel-gauge burn trail with quota ceiling (oldest-to-newest, up to 14 snapshots)
+ */
+function createLargeWidget(usage) {
+  const widget = makeBaseWidget(16);
+  const isBudgetActive = !usage.error && usage.billingPhase === "budget_active";
+  const accent = new Color(colourHexFor(usage));
+  const overageValue = usage.overageCount ?? usage.derivedOverageCredits ?? 0;
+  const extras = usage.widgetExtras || null;
+  const burnRate = extras ? extras.burnRate : null;
+  const burnRateCostPerHourUsd = extras ? extras.burnRateCostPerHourUsd : null;
+  const burnLabel = formatBurnRate(burnRate) || "—";
+  const burnCostLabel = burnRateCostPerHourUsd === null || burnRateCostPerHourUsd === undefined
+    ? "—"
+    : `${formatUsd(burnRateCostPerHourUsd)}/hr`;
+  const etaLabel = formatEta(computeEtaHours(usage, burnRate)) || "—";
+  const sparkline = extras ? extras.sparkline : null;
+  const quotaCeiling = extras && typeof extras.quotaCeiling === "number" ? extras.quotaCeiling : usage.quota;
+  const chartRangeLabels = extras ? formatRangeLabels(extras.chartStartAt, extras.chartEndAt) : { startLabel: null, endLabel: null };
+  const chartStartLabel = chartRangeLabels.startLabel ? `Start ${chartRangeLabels.startLabel}` : null;
+  const chartEndLabel = chartRangeLabels.endLabel ? `Updated ${chartRangeLabels.endLabel}` : null;
+  const resetLabel = usage.resetAt ? formatResetLabel(usage.resetAt) : null;
+  const projectionLabel = usage.burnRateProjection && usage.burnRateProjection.projectedExhaustionAt
+    ? formatProjectionLabel(usage.burnRateProjection.projectedExhaustionAt)
+    : null;
+  const isBudgetMode = (usage.billingPhase === "budget_active" || usage.billingPhase === "budget_available")
+    && typeof usage.overageEntitlement === "number"
+    && isFinite(usage.overageEntitlement)
+    && usage.overageEntitlement > 0;
+  const gaugeMode = isBudgetMode ? "budget" : "quota";
+  const gaugeCeiling = gaugeMode === "budget"
+    ? usage.overageEntitlement
+    : quotaCeiling;
+
+  // Header
+  const headerRow = widget.addStack();
+  headerRow.layoutHorizontally();
+  const title = headerRow.addText("CopeLimit");
+  title.font = Font.boldSystemFont(16);
+  title.textColor = Color.white();
+  headerRow.addSpacer();
+  const badge = headerRow.addText(sourceLabel(usage.source).toUpperCase());
+  badge.font = Font.boldSystemFont(10);
+  badge.textColor = accent;
+
+  widget.addSpacer(6);
+
+  if (usage.error) {
+    const errTxt = widget.addText(`Error: ${usage.error}`);
+    errTxt.font = Font.mediumSystemFont(12);
+    errTxt.textColor = new Color("#ef4444");
+    errTxt.lineLimit = 4;
+    return widget;
+  }
+
+  // Metrics grid
+  addTwoColRow(widget, "Used", formatNumber(usage.used), "Quota", formatNumber(usage.quota));
+  widget.addSpacer(4);
+
+  if (isBudgetActive || usage.overageEntitlement !== undefined) {
+    const budgetDisplay = usage.overageEntitlement !== undefined
+      ? formatNumber(usage.overageEntitlement)
+      : "—";
+    addTwoColRow(widget, "Overage", `+${formatNumber(overageValue)}`, "Budget", budgetDisplay,
+      { leftColor: accent });
+    widget.addSpacer(4);
+    addTwoColRow(
+      widget,
+      "Overage $",
+      formatUsd(usage.overageCostUsd),
+      "Budget rem $",
+      formatUsd(usage.estimatedRemainingBudgetCostUsd ?? usage.budgetRemainingCostUsd)
+    );
+    widget.addSpacer(4);
+  }
+
+  addTwoColRow(widget, "Burn rate", burnLabel, "ETA", etaLabel);
+  widget.addSpacer(4);
+  addTwoColRow(widget, "Burn $/hr", burnCostLabel, "Used $", formatUsd(usage.totalUsedCostUsd));
+  widget.addSpacer(4);
+
+  addTwoColRow(widget, "Resets", formatShortDate(usage.resetAt), "Status",
+    deriveStatusLabel(usage), { rightColor: accent });
+  widget.addSpacer(5);
+  addLastUpdatedLabel(widget, usage.updatedAt, 10);
+
+  // Burn trail
+  widget.addSpacer(8);
+
+  const sep = widget.addText("—————————————————————————————");
+  sep.font = Font.systemFont(6);
+  sep.textColor = new Color("#374151");
+
+  widget.addSpacer(6);
+
+  if (sparkline && sparkline.length >= 2) {
+    const trendLabel = widget.addText(`Fuel tank (${gaugeMode}) · ${sparkline.length} snapshots`);
+    trendLabel.font = Font.mediumSystemFont(10);
+    trendLabel.textColor = Color.gray();
+
+    const metaLineParts = [];
+    if (chartStartLabel) metaLineParts.push(chartStartLabel);
+    if (chartEndLabel) metaLineParts.push(chartEndLabel);
+    if (metaLineParts.length) {
+      const metaLine = widget.addText(metaLineParts.join(" · "));
+      metaLine.font = Font.mediumSystemFont(8);
+      metaLine.textColor = new Color("#9ca3af");
+      widget.addSpacer(3);
+    }
+
+    const secondLineParts = [];
+    if (resetLabel) secondLineParts.push(resetLabel);
+    if (projectionLabel) secondLineParts.push(projectionLabel);
+    if (secondLineParts.length) {
+      const secondLine = widget.addText(secondLineParts.join(" · "));
+      secondLine.font = Font.mediumSystemFont(8);
+      secondLine.textColor = new Color("#9ca3af");
+      widget.addSpacer(3);
+    }
+
+    widget.addSpacer(2);
+
+    const trailImg = createBurnTrailImage(
+      sparkline,
+      {
+        mode: gaugeMode,
+        quotaCeiling,
+        gaugeCeiling,
+      },
+      294,
+      48,
+      colourHexFor(usage)
+    );
+    const imgWidget = widget.addImage(trailImg);
+    imgWidget.imageSize = new Size(294, 48);
+    imgWidget.cornerRadius = 3;
+  } else {
+    const noData = widget.addText("No usage trend data available");
+    noData.font = Font.mediumSystemFont(10);
+    noData.textColor = Color.gray();
+  }
+
+  return widget;
+}
+
+// --- Main -----------------------------------------------------------------
+
+const family = config.widgetFamily;  // "small" | "medium" | "large" | null (in-app preview)
+const DEFAULT_FAMILY = "medium";     // null means running directly in Scriptable for preview
+const isLarge = family === "large";
+const isMedium = family === DEFAULT_FAMILY || family === null;
+
+let usage;
+try {
+  usage = await getUsage(isLarge);
+} catch (error) {
+  usage = {
+    remaining: 0,
+    quota: 0,
+    used: 0,
+    percentUsed: 0,
+    resetAt: null,
+    source: "error",
+    warningLevel: "hot",
+    billingPhase: null,
+    error: error instanceof Error ? error.message : "Unknown error"
+  };
+}
+
+let widget;
+if (isLarge) {
+  widget = createLargeWidget(usage);
+} else if (isMedium) {
+  widget = createMediumWidget(usage);
+} else {
+  widget = createSmallWidget(usage);
+}
+
+// Desired refresh cadence — honour the user's preference when Scriptable
+// supports it. iOS may still delay, coalesce, or throttle actual refreshes;
+// this is a hint, not a guarantee.
+try {
+  const cadenceMinutes = usage && typeof usage.desiredRefreshMinutes === 'number'
+    && Number.isFinite(usage.desiredRefreshMinutes)
+    && usage.desiredRefreshMinutes > 0
+    ? usage.desiredRefreshMinutes
+    : null;
+
+  if (cadenceMinutes !== null) {
+    const refreshDate = new Date(Date.now() + cadenceMinutes * 60 * 1000);
+    widget.refreshAfterDate = refreshDate;
+  }
+  // null → no refreshAfterDate set; Scriptable / iOS decides the schedule.
+} catch (_e) {
+  // Non-fatal: refreshAfterDate is unsupported or unavailable in this context.
+}
+
+Script.setWidget(widget);
+Script.complete();

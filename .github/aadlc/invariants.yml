@@ -1,0 +1,120 @@
+# version: 1.0.0
+invariants:
+  - id: no-hardcoded-secrets
+    name: No hardcoded secrets
+    rule: Secrets, tokens, and credentials must not be committed to repository files.
+    severity: critical
+
+  - id: no-broad-rewrites
+    name: No broad rewrites
+    rule: Changes must remain scoped to requested outcomes and avoid unrelated rewrites.
+    severity: high
+
+  - id: security-baseline-preserved
+    name: Security baseline preserved
+    rule: Changes must preserve authentication, authorization, validation, and secret handling guarantees.
+    severity: critical
+
+  - id: plan-before-execute
+    name: Plan before execute
+    rule: Significant work requires an explicit plan before implementation.
+    severity: high
+
+  - id: no-unapproved-dependencies
+    name: No unapproved dependencies
+    rule: New dependencies require explicit justification and approval.
+    severity: high
+
+  - id: pr-contract-respected
+    name: PR contract respected
+    rule: Execution must stay inside the current PR contract unless scope is explicitly amended.
+    severity: high
+
+  - id: minimum-sufficient-reasoning-depth
+    name: Minimum sufficient reasoning depth
+    rule: Reasoning depth must be escalated only when risk, uncertainty, or novelty justifies the cost.
+    severity: high
+
+  - id: invariant-amendment-governance
+    name: Invariant amendment governance
+    rule: Agents must preserve invariants unless the user explicitly amends the invariant or opens a separate governance change.
+    severity: high
+
+  - id: no-surprise-spend
+    name: No surprise-spend assumptions
+    rule: CopeLimit must not assume that additional or pay-as-you-go Copilot usage is enabled. Included credits must be clearly distinguished from additional usage where the data supports it; no additional usage should be surfaced without data evidence.
+    severity: high
+
+  - id: billing-mode-compatibility
+    name: Billing mode compatibility
+    rule: The normalisation layer must retain compatibility with legacy premium_requests fields (entitlement, remaining, reset date) while supporting ai_credits mode detection via token_based_billing markers. Neither mode must be silently dropped or assumed exclusively.
+    severity: high
+
+  - id: overage-permitted-gate
+    name: Overage/budget display requires overage_permitted evidence
+    rule: |
+      CopeLimit must not present budget_available or budget_active billing phases —
+      or any UI text implying additional/budget-backed usage is possible — unless
+      overage_permitted === true is observed in the copilot_internal/user API
+      response for the current poll. Absence of the field must be treated as
+      overage_permitted = false. This extends the no-surprise-spend invariant
+      with an explicit, field-level gate.
+    severity: high
+
+  - id: negative-remaining-is-real-overage
+    name: Negative remaining preserves real overage signal
+    rule: |
+      The raw `remaining` value from `quota_snapshots.premium_interactions.remaining`
+      may be negative when credits consumed exceed the included quota but
+      `overage_count` has not yet been settled by the billing engine (settlement lag).
+      This negative value is a real signal — it must not be silently discarded.
+      The pre-clamp raw value (rawRemaining) must be passed to detectBillingPhase
+      so that the settlement-lag window is correctly detected as budget_active,
+      not misclassified as budget_available.
+    severity: high
+
+  - id: budget-active-negative-remaining
+    name: budget_active detects rawRemaining < 0 in addition to overage_count > 0
+    rule: |
+      The budget_active BillingPhase must be detected when either:
+        (a) overage_count > 0 and overage_permitted === true, OR
+        (b) rawRemaining < 0 and overage_permitted === true.
+      Condition (b) covers the settlement-lag window where credit consumption
+      has exceeded the quota but the billing engine has not yet incremented
+      overage_count. Detecting only condition (a) causes budget_active to be
+      missed during the lag window, incorrectly showing budget_available.
+      Both conditions require overage_permitted === true as the guard.
+    severity: high
+
+  - id: github-token-never-exposed
+    name: GitHub access token never exposed
+    rule: Raw GitHub OAuth access tokens must never be returned to the browser or the iOS widget. They must be stored only in encrypted session cookies and encrypted Netlify Blob records.
+    severity: critical
+
+  - id: chart-data-derived-only
+    name: Burn-trail chart data is derived-only and surface-consistent
+    rule: |
+      The shared burn-trail chart normaliser (netlify/functions/lib/chart-data.ts)
+      must derive its series only from existing usage-history fields. It must not
+      change history storage, burn-rate/projection logic, comfort-status logic, or
+      alert logic. Output points must always be finite and non-negative (never NaN
+      or Infinity). Quota resets must be flagged (RESET_DROP_RATIO) so renderers
+      break the trail instead of drawing a misleading vertical cliff. The PWA
+      (src/chart-geometry.ts, src/BurnTrailChart.tsx) and the Scriptable widget
+      (public/scriptable/CopeLimitWidget.js) must share the same reset-detection
+      semantics so the fuel-tank metaphor stays consistent across surfaces.
+    severity: medium
+
+  - id: blobs-encryption-by-tier
+    name: Netlify Blobs encryption by record tier
+    rule: |
+      Netlify Blob records are governed by the following tiered rules:
+
+      Tier 1 — Sensitive credential records (widget-tokens store: token/<hash>, user/<userId>; onboarding-sessions store: bt/<hash>, onboarding-user/<userId>, session/<sessionId>): MUST be AES-256-GCM encrypted at rest via BLOB_ENCRYPTION_KEY. These records contain GitHub OAuth access tokens. Application-level encryption is non-negotiable here and supplements Netlify's platform access controls.
+
+      Tier 2 — Sanitized append-only telemetry records (provider-captures store: <provider>/<userId>/<date>/<timestamp>.json): These records are sanitized by sanitizeProviderPayload before storage; no secrets are present. Application-level AES-256-GCM encryption is NOT required. Platform Blob access controls (Netlify site/token) are sufficient. These records must remain append-only within a given key; overwriting is not permitted.
+
+      Tier 3 — Mutable control blobs (provider-captures store: <provider>/<userId>/<date>/_index.json): These records hold derived, reconstructible state (daily capture counters). They are NOT encrypted. Because they are mutable and may become incompatible with the current reader after any format or storage change, ALL code reading a Tier 3 blob MUST tolerate any read failure gracefully and recover to a safe default or a rebuilt value WITHOUT blocking Tier 2 writes.
+
+      Tier 4 — Legacy plaintext migration (applies to Tier 1 stores only): Any Tier 1 record that pre-dates AES-256-GCM encryption must be migrated automatically on first read (see widget-store.ts readStoredRecord). Any future format change to a Tier 1 store must provide an equivalent migration path. Tier 2 and Tier 3 records have no migration obligation.
+    severity: critical

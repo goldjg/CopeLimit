@@ -3,17 +3,24 @@
     "dev": "netlify dev",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
-    "react": "latest",
-    "react-dom": "latest",
+    "@netlify/blobs": "^10.7.4",
+    "@netlify/functions": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@netlify/functions": "latest"
+    "@types/web-push": "^3.6.4",
+    "@vitejs/plugin-react": "^5.1.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "^7.3.2",
+    "web-push": "^3.6.7"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "sharp": "^0.34.5",
+    "vitest": "^4.1.5"
+  }
 }

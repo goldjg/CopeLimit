@@ -1,0 +1,195 @@
+schemaVersion: aadlc.plan.v0.2
+planId: horizon-1-pr2-billing-phase
+project: CopeLimit
+status: active
+
+run:
+  type: implementation
+  horizon: 1
+  title: Horizon 1 PR 2 — BillingPhase amendment (rawRemaining fix)
+  intent: >-
+    BillingPhase, detectBillingPhase(), readOverageFields(), and the Usage
+    billingPhase/overageCount/overageEntitlement fields are already implemented
+    in copilot.ts (shipped in PR #34). This plan governs the required amendment
+    to that implementation.
+
+    AMENDMENT: detectBillingPhase must receive rawRemaining (the pre-clamp
+    API value) as a distinct parameter. Detection priority 3 (budget_active)
+    must fire when (overageCount > 0 || rawRemaining < 0) && overagePermitted
+    === true, not only when overageCount > 0. This corrects the settlement-lag
+    detection gap observed in capture 2 (remaining: -473, overage_count: 0,
+    billing: $0). Also add derivedOverageCredits optional field to Usage type
+    and wire it from the provider.
+
+    Add tests for all contract assertions including the rawRemaining < 0 case.
+    Do not change the wire shape of existing fields or break any existing caller.
+  modelRecommendation:
+    planner: sonnet
+    executor: gpt-5.4
+    avoid:
+      - gpt-5.3-codex
+
+# Design contract: the BillingPhase model is fully specified in ARCHITECTURE.md
+# § "Billing state model". Read the full section including "Negative remaining:
+# detection gap and proposed fix" before implementation.
+#
+# AMENDED Detection priority (first match wins, uses rawRemaining):
+#   1. unlimited        — unlimited === true
+#   2. credits_available — rawRemaining > 0
+#   3. budget_active    — (overage_count > 0 || rawRemaining < 0) && overage_permitted === true
+#   4. budget_available — rawRemaining === 0 && overage_permitted === true && overage_count === 0
+#   5. hard_stop        — has_quota === false && unlimited !== true
+#   6. credits_exhausted — rawRemaining <= 0 && overage_permitted !== true (default)
+#
+# Key change from original: priority 3 now includes rawRemaining < 0 as an
+# additional trigger. The detectBillingPhase signature must include rawRemaining.
+
+scope:
+  allowedFiles:
+    - .github/aadlc/plans/horizon-1-pr2-billing-phase.plan.yml
+    - netlify/functions/lib/copilot.ts
+    - netlify/functions/lib/__tests__/copilot.test.ts
+    - netlify/functions/usage.ts
+    - netlify/functions/widget-usage.ts
+    - netlify/functions/lib/capture-sanitize.ts
+  forbiddenFiles:
+    - .github/aadlc/memory.md
+    - .github/aadlc/current-pr-contract.md
+    - .github/aadlc/tool-policy.yml
+    - .github/aadlc/invariants.yml
+    - .github/instructions/**
+    - ARCHITECTURE.md
+    - src/**
+    - public/**
+    - netlify/functions/lib/session.ts
+    - netlify/functions/lib/widget-store.ts
+    - netlify/functions/lib/onboarding-store.ts
+    - netlify/functions/lib/capture-store.ts
+    - netlify/functions/lib/blob-store.ts
+    - netlify/functions/lib/blob-crypto.ts
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+    - netlify.toml
+    - .github/workflows/**
+  allowedChangeTypes:
+    - type-definitions
+    - field-additions-non-breaking
+    - provider-normalisation
+    - tests
+    - governance
+    - capture-allowlist-extension
+  forbiddenChangeTypes:
+    - auth
+    - oauth
+    - token-storage
+    - ui
+    - widget
+    - blob-storage-format
+    - dependency-addition
+    - ci-workflow
+    - removal-of-existing-fields
+    - breaking-wire-shape-changes
+
+toolPermissions:
+  readFiles: allowed
+  searchRepo: allowed
+  editFiles: allowed_within_scope
+  runTests: allowed_if_deps_available
+  runBuild: allowed_if_deps_available
+  runLint: optional
+  createBranch: forbidden
+  commitChanges: requires_explicit_user_approval
+  createPullRequest: requires_explicit_user_approval
+  callCodeReview: optional
+  deploy: forbidden
+  deleteFiles: forbidden
+  bulkReplaceAcrossFiles: forbidden
+
+mutationPermissions:
+  mayCreateFiles: false
+  mayEditFiles: true
+  mayDeleteFiles: false
+  mayRenameFiles: false
+  mayMoveFiles: false
+  mayEditOutsideScope: false
+
+approvalGates:
+  requireUserApprovalBefore:
+    - widening_scope
+    - touching_forbidden_files
+    - adding_dependencies
+    - changing_auth_or_token_storage
+    - creating_pull_request
+    - committing_changes
+
+# Contract assertions (must be validated by tests):
+# 1. detectBillingPhase returns 'unlimited' when unlimited === true,
+#    regardless of remaining or overage fields.
+# 2. detectBillingPhase returns 'credits_available' when rawRemaining > 0
+#    and unlimited !== true.
+# 3. detectBillingPhase returns 'budget_active' when overageCount > 0
+#    and overagePermitted === true and rawRemaining === 0.
+# 4. detectBillingPhase returns 'budget_active' when rawRemaining < 0
+#    and overagePermitted === true and overageCount === 0.
+#    (settlement-lag case — CRITICAL: this is the new assertion from capture 2)
+# 5. detectBillingPhase returns 'budget_available' when rawRemaining === 0
+#    and overagePermitted === true and overageCount === 0.
+# 6. detectBillingPhase returns 'hard_stop' when hasQuota === false
+#    and unlimited !== true.
+# 7. Usage type extension is backward-compatible: billingPhase, overageCount,
+#    overageEntitlement, derivedOverageCredits are all optional. Callers that
+#    don't pass them receive billingPhase derived from rawRemaining/remaining fields.
+# 8. When rawRemaining < 0, derivedOverageCredits === Math.max(0, -rawRemaining).
+#    For rawRemaining = -473: derivedOverageCredits = 473.
+# 9. The provider code in usage.ts must NOT clamp remaining before computing used
+#    when rawRemaining < 0. safeRemaining clamping must not destroy the rawRemaining
+#    signal needed by detectBillingPhase.
+
+validation:
+  required:
+    - npm test
+    - npm run build
+    - changed_files_within_scope
+    - no_forbidden_change_types
+    - no_breaking_wire_shape_changes
+    - final_plan_compliance_summary
+    - all_contract_assertions_covered_by_tests
+  knownNonBlocking:
+    - npm run lint may fail with TS5107 from deprecated moduleResolution Node in tsconfig.json
+
+aadlc:
+  expectedPhaseTypes:
+    - hydration
+    - planning
+    - implementation
+    - test_debug
+    - validation
+  emitRunManifest: false
+  manifestMode: final_response_only
+  phaseEventsRequired: false
+
+nonGoals:
+  - ui-changes
+  - widget-script-changes
+  - multi-context-horizon-2
+  - finops-horizon-3
+  - overage_entitlement-dollar-conversion
+  - budget-enforcement
+  - runtime-validation-library
+  - dependency-changes
+  - commits
+  - pull-requests
+
+openQuestions:
+  - Is overage_entitlement expressed as a raw credit integer, a
+    dollar-equivalent, or a different unit? Confirm from live capture
+    where overage_count > 0 before wiring the display value. If unit is
+    unclear, store as-is and annotate with a TODO.
+  - What is the magnitude of the settlement lag between rawRemaining going
+    negative and overage_count incrementing? Hours? Days? Billing cycle?
+    This affects whether derivedOverageCredits needs a staleness caveat.
+  - Does the mock provider need updated defaults (MOCK_QUOTA=7000)?
+    Treat as a separate follow-up; do not block this PR on it.
+  - Does copilot-local proxy expose equivalent overage fields?
+    If not, default billingPhase to credits_available for that provider.
