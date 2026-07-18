@@ -266,14 +266,6 @@ function App() {
     setShowIosInstallHint(false);
   }
 
-  const statusText = useMemo(() => {
-    if (!usage) return 'Loading';
-    if (usage.warningLevel === 'over') return 'Quota exceeded';
-    if (usage.warningLevel === 'hot') return 'Nearly cooked';
-    if (usage.warningLevel === 'warm') return 'Getting spicy';
-    return 'Comfortable';
-  }, [usage]);
-
   const isUnsupported = usage?.source === 'unsupported' || usage?.source === 'github-placeholder';
   const burnRate = historySummary?.creditsPerHour ?? null;
   const burnRateLabel = formatBurnRate(burnRate);
@@ -335,7 +327,6 @@ function App() {
     return new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1)
       .toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
   }
-
   return (
     <main className="shell">
       <section className="hero">
@@ -402,7 +393,10 @@ function App() {
           <section className={`card meter ${usage.warningLevel}`}>
             <div className="meterHeader">
               <span>{labelForMode(usage.mode)}</span>
-              <strong>{statusText}</strong>
+              <span className="statusBadge">
+                {usage.warningLevel.charAt(0).toUpperCase()}
+                {usage.warningLevel.slice(1)}
+              </span>
             </div>
 
             <div className="bigNumber">{getHeroValue(usage)}</div>
